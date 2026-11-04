@@ -1,0 +1,164 @@
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Pager } from "@/components/Pager";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { BellRing, Eye, FolderKanban, Siren, Sparkles, Star, Ticket as TicketIcon, UserRound, UserX, X, type LucideIcon } from "lucide-react";
+import { SmsInboxDialog, SmsTile } from "@/pages/sms/SmsPage";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { CompactList } from "@/pages/tickets/Layouts";
+import { shortDate, type TicketList } from "@/pages/tickets/shared";
+import type { Project } from "@/pages/projects/shared";
+import type { DayItem } from "./shared";
+
+/**
+ * A technician's tickets, as the compact view of the Tickets page with the "My tickets" filter (all of them, not only today's);
+ * for someone else's day, their tickets (the Tickets page filtered on them).
+ */
+export function MyTickets({ userId, mine, onOpen }: { userId: string; mine: boolean; onOpen: (id: number) => void }) {
+  const { t } = useTranslation();
+  // the same buttons as the Tickets page, small: my tickets, texts, new, unassigned, needs attention, and my saved filters
+  const [filter, setFilter] = useState("view=mine");
+  const [sms, setSms] = useState(false);
+  const query = mine ? filter : `view=all&assignee=${userId}`;
+  const { data, isLoading } = useQuery({
+    queryKey: ["tickets", "pipeline", mine ? query : userId],
+    queryFn: () => api.get<TicketList>(`/tickets?${query}`),
+    refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
+  });
+  const m = data?.metrics;
+  const chips: { key: string; icon: LucideIcon; tone: string; label: string; count: number | undefined; query: string }[] = [
+    { key: "mine", icon: UserRound, tone: "text-primary", label: t("tickets.metrics.mine"), count: m?.mine, query: "view=mine" },
+    { key: "fresh", icon: Sparkles, tone: "text-emerald-400", label: t("tickets.metrics.fresh"), count: m?.fresh, query: "view=unassigned&statusKind=new" },
+    { key: "unassigned", icon: UserX, tone: "text-sky-400", label: t("tickets.metrics.unassigned"), count: m?.unassigned, query: "view=unassigned" },
+    { key: "statusAttention", icon: BellRing, tone: "text-amber-300", label: t("tickets.metrics.statusAttention"), count: m?.statusAttention, query: "view=all&statusKind=needsAttention" },
+    { key: "attention", icon: Siren, tone: "text-red-400", label: t("tickets.metrics.attention"), count: m?.attention, query: "view=all&attention=1" },
+    ...(data?.buttons ?? []).map((b) => ({ key: `b:${b.id}`, icon: Eye, tone: "text-muted-foreground", label: b.name, count: b.count as number | undefined, query: b.query })),
+  ];
+  const all = (data?.items ?? []).filter((x) => x.statusKind !== "complete");
+  // not stretched over the page: 10 at first, the others on the next pages
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(10);
+  const items = all.slice((Math.min(page, Math.max(1, Math.ceil(all.length / size))) - 1) * size, Math.min(page, Math.max(1, Math.ceil(all.length / size))) * size);
+  return (
+    <section className="glass rounded-2xl border">
+      {mine && (
+        <div className="flex items-center gap-1 overflow-x-auto px-3 pt-3 scrollbar-thin">
+          {chips.map((c) => {
+            const on = filter === c.query;
+            return (
+              <button key={c.key} type="button" onClick={() => (setFilter(c.query), setPage(1))} className={cn("flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-xs transition-colors hover:border-[color:var(--gold)]/40", on ? "border-[color:var(--gold)]/60 bg-[color:var(--gold)]/10 text-foreground" : "border-[color:var(--glass-border)] text-muted-foreground")}>
+                <c.icon className={cn("size-3.5", c.tone)} />
+                <span className="font-medium">{c.label}</span>
+                <span className="font-mono tabular-nums">{c.count ?? "…"}</span>
+              </button>
+            );
+          })}
+          <SmsTile onOpen={() => setSms(true)} compact />
+        </div>
+      )}
+      {sms && <SmsInboxDialog initialId={null} onClose={() => setSms(false)} />}
+      <h3 className="flex items-center gap-1.5 px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <TicketIcon className="size-3.5" /> {t("pipeline.day.myTickets")} <span className="font-mono normal-case opacity-70">{all.length}</span>
+      </h3>
+      {isLoading ? <Skeleton className="m-4 h-20" /> : all.length === 0 ? <p className="px-4 pb-4 text-sm text-muted-foreground">{t("pipeline.day.noTickets")}</p> : <CompactList items={items} activeIds={new Set()} onOpen={onOpen} facets={data?.facets} />}
+      {all.length > size && <Pager total={all.length} page={page} size={size} onPage={setPage} onSize={(n) => (setSize(n), setPage(1))} />}
+    </section>
+  );
+}
+
+/** The priorities pinned in Planning: of the day (beside the blocks) or of the week (beside the tickets). */
+export function Priorities({ items, horizon, onOpen, canRemove, forUser }: { items: DayItem[]; horizon: "day" | "week"; onOpen: (i: DayItem) => void; canRemove?: boolean; forUser?: string }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  // a ticket put on the day by hand leaves it with one click (nothing on the ticket changes)
+  const remove = useMutation({
+    mutationFn: (i: DayItem) => api.del(`/pipeline/day/${i.kind}s/${i.refId}${forUser ? `?userId=${forUser}` : ""}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["pipeline"] }),
+  });
+  const list = items.filter((i) => i.pin === horizon);
+  return (
+    <section className="glass rounded-2xl border p-4">
+      <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <Star className={cn("size-3.5 fill-current", horizon === "day" ? "text-primary" : "")} /> {t(`pipeline.day.priorities.${horizon}`)} <span className="font-mono normal-case opacity-70">{list.length}</span>
+      </h3>
+      {list.length === 0 ? (
+        <p className="py-1 text-sm text-muted-foreground">{t(`pipeline.day.priorities.none${horizon === "day" ? "Day" : "Week"}`)}</p>
+      ) : (
+        <ul className="divide-y divide-[color:var(--glass-border)]">
+          {list.map((i) => (
+            <li key={i.key} className="flex items-center gap-1">
+              <button type="button" onClick={() => onOpen(i)} className="flex min-w-0 flex-1 items-baseline gap-2 py-1.5 text-left">
+                {i.ticketNumber && <span className="shrink-0 font-mono text-[11px] text-primary">{i.ticketNumber}</span>}
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{i.title}</span>
+                {i.client && <span className="hidden shrink-0 truncate text-xs text-muted-foreground sm:block">{i.client}</span>}
+                {i.pinNote && <span className="max-w-40 shrink-0 truncate text-xs text-muted-foreground">· {i.pinNote}</span>}
+                {i.added && i.dueTime && <span className="shrink-0 font-mono text-[10px] text-orange-300">{t("pipeline.before", { time: i.dueTime })}</span>}
+              </button>
+              {i.added && canRemove && (
+                <button type="button" onClick={() => remove.mutate(i)} disabled={remove.isPending} title={t("tickets.addDay.remove")} aria-label={t("tickets.addDay.remove")} className="shrink-0 rounded p-1 text-muted-foreground hover:text-destructive">
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+const GRID = "grid grid-cols-[minmax(0,1fr)_9rem_5rem_5.5rem] items-center gap-x-3";
+
+/** My open projects, compact: name, client, milestones done, due day. A click opens the project. */
+export function DayProjects() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { data, isLoading } = useQuery({ queryKey: ["projects", "list", "mine", "open"], queryFn: () => api.get<Project[]>("/projects?view=mine&status=open") });
+  const today = new Date().toLocaleDateString("en-CA");
+  return (
+    <section className="glass rounded-2xl border">
+      <h3 className="flex items-center gap-1.5 px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <FolderKanban className="size-3.5" /> {t("pipeline.day.projects")} <span className="font-mono normal-case opacity-70">{data?.length ?? 0}</span>
+      </h3>
+      {isLoading ? (
+        <Skeleton className="m-4 h-16" />
+      ) : !data?.length ? (
+        <p className="px-4 pb-4 text-sm text-muted-foreground">{t("pipeline.day.noProjects")}</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="min-w-[32rem]">
+            <div className={cn(GRID, "border-b border-[color:var(--glass-border)] bg-white/[0.02] px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground")}>
+              <span>{t("pipeline.day.project")}</span>
+              <span>{t("pipeline.day.projectClient")}</span>
+              <span>{t("pipeline.day.projectProgress")}</span>
+              <span>{t("pipeline.day.projectDue")}</span>
+            </div>
+            <ul className="divide-y divide-[color:var(--glass-border)]">
+              {data.map((p) => (
+                <li key={p.id}>
+                  <button type="button" onClick={() => navigate(`/projects?project=${p.id}`)} className={cn(GRID, "w-full px-4 py-1 text-left text-sm transition-colors hover:bg-[linear-gradient(90deg,rgba(255,206,26,0.07),transparent_60%)]")}>
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{p.number}</span>
+                      <span className="truncate font-medium" title={p.name}>
+                        {p.name}
+                      </span>
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">{p.client?.name ?? "—"}</span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {p.progress.done}/{p.progress.total}
+                    </span>
+                    <span className={cn("whitespace-nowrap font-mono text-xs tabular-nums", p.dueDate && p.dueDate < today ? "text-destructive" : "text-muted-foreground")}>{p.dueDate ? shortDate(p.dueDate) : "—"}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}

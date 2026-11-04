@@ -1,0 +1,208 @@
+import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { z } from "zod";
+import { auth, requirePermission, requireStaff, type AppEnv } from "../lib/auth.ts";
+import { audit } from "../lib/audit.ts";
+import { body, zUuid } from "../lib/validate.ts";
+import { approvedSpan, quickInvoice, BILLABLE_KINDS, refreshLabourRates, billableCounts, billablesState, createInvoice, DraftError, draftInvoice, editBillable, invoiceableClients, listBillables, postInvoices, postPreview, setBillableStatus, syncBillables, unpostInvoice } from "../lib/billables.ts";
+import type { BillableKind } from "../lib/ticketSource.ts";
+import { autoSync, createQbItem, invoiceChoices } from "../lib/quickbooks.ts";
+import { quickbooksSettings } from "../lib/billing.ts";
+import { autoSendInvoice, sendInvoiceMail } from "../lib/invoiceMail.ts";
+import { asc } from "drizzle-orm";
+import { db, schema } from "../db/index.ts";
+import { quickbooksHttp } from "./billing.ts";
+
+/**
+ * Accounting › Approbation: the work to bill (accounting.view), approved,
+ * excluded, changed and posted as invoices (accounting.manage).
+ */
+const zKind = z.enum(BILLABLE_KINDS as [BillableKind, ...BillableKind[]]);
+const zStatus = z.enum(["pending", "approved", "posted", "excluded"]);
+const zDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const zDraft = z.object({
+  clientId: zUuid,
+  itemIds: z.array(zUuid).min(1).max(5000).optional(),
+  kinds: z.array(zKind).min(1).optional(),
+  issuedOn: zDay.optional(),
+  termsDays: z.number().int().min(0).max(365).optional(),
+  dueOn: zDay.optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+  poNumber: z.string().trim().max(60).nullable().optional(),
+  qbItemId: z.string().trim().max(40).nullable().optional(),
+  qbTaxCodeId: z.string().trim().max(40).nullable().optional(),
+  payOnline: z.boolean().nullable().optional(),
+  // the time frame: only its work goes on the invoice
+  from: zDay.nullable().optional(),
+  to: zDay.nullable().optional(),
+});
+/** ?from=&to= (YYYY-MM-DD): the time frame asked for, or everything */
+function periodOf(q: (k: string) => string | undefined) {
+  const v = z.object({ from: zDay.optional(), to: zDay.optional() }).safeParse({ from: q("from") || undefined, to: q("to") || undefined });
+  if (!v.success || (v.data.from && v.data.to && v.data.to < v.data.from)) throw new HTTPException(400, { message: "invalid_period" });
+  return v.data;
+}
+async function drafted<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof DraftError) throw new HTTPException(e.message === "not_found" ? 404 : 400, { message: e.message });
+    throw e;
+  }
+}
+
+export const billablesRoutes = new Hono<AppEnv>()
+  .use(requireStaff)
+  .use(requirePermission("accounting.view"))
+
+  .get("/", async (c) => {
+    const kind = c.req.query("kind") ? zKind.parse(c.req.query("kind")) : null;
+    const status = c.req.query("status") ? zStatus.parse(c.req.query("status")) : null;
+    const clientId = c.req.query("clientId") ? zUuid.parse(c.req.query("clientId")) : null;
+    return c.json(await listBillables(kind, status, clientId, periodOf((k) => c.req.query(k))));
+  })
+  .get("/summary", async (c) => c.json({ state: await billablesState(), counts: await billableCounts(periodOf((k) => c.req.query(k))) }))
+
+  /** Refresh the work to bill now (it also comes with each CRM sync). */
+  /** The QuickBooks items and tax codes an invoice can be sent with, and the defaults that fill them in */
+  .get("/quickbooks-codes", async (c) => {
+    const s = await quickbooksSettings();
+    if (!s.refreshToken || !s.realmId) return c.json({ connected: false, items: [], taxCodes: [], defaults: { itemId: null, taxCodeId: null } });
+    try {
+      const o = await invoiceChoices();
+      return c.json({ connected: true, ...o, defaults: { itemId: s.invoice.itemId, taxCodeId: s.invoice.taxCodeId } });
+    } catch {
+      return c.json({ connected: false, items: [], taxCodes: [], defaults: { itemId: s.invoice.itemId, taxCodeId: s.invoice.taxCodeId } });
+    }
+  })
+  /** A new item for invoice lines: a service in the portal and an item in QuickBooks (one that exists is used) */
+  .post("/quickbooks-items", requirePermission("accounting.manage"), async (c) => {
+    const a = auth(c);
+    const p = await body(c, z.object({ name: z.string().trim().min(1).max(100), sku: z.string().trim().max(60).nullable().optional(), priceCents: z.number().int().min(0).max(100_000_000).nullable().optional() }));
+    try {
+      const r = await createQbItem(p);
+      await audit(a.user.id, "billing.quickbooks.item_created", null, { name: r.name, created: r.created });
+      return c.json(r, r.created ? 201 : 200);
+    } catch (e) {
+      return quickbooksHttp(e);
+    }
+  })
+  /** Put the right hourly rate on the labour lines of the time frame (the contract's, else the default support contract's, else the usual one) */
+  .post("/rates", requirePermission("accounting.manage"), async (c) => {
+    const a = auth(c);
+    const p = await body(c, z.object({ from: zDay.nullable().optional(), to: zDay.nullable().optional() }));
+    const r = await refreshLabourRates({ from: p.from, to: p.to });
+    await audit(a.user.id, "billing.labour_rates_updated", null, r);
+    return c.json(r);
+  })
+  .post("/import", requirePermission("accounting.manage"), async (c) => {
+    const a = auth(c);
+    const s = await syncBillables();
+    await audit(a.user.id, "billing.items_imported", null, { counts: s.counts, errors: Object.keys(s.errors) });
+    return c.json(s);
+  })
+  /** Un-post: void a portal invoice and give its items back (approved again) */
+  .post("/unpost", requirePermission("accounting.manage"), async (c) => {
+    const a = auth(c);
+    const p = await body(c, z.object({ invoiceId: zUuid }));
+    try {
+      const r = await unpostInvoice(a.user.id, p.invoiceId);
+      await audit(a.user.id, "billing.invoice_unposted", p.invoiceId, { number: r.number, items: r.items });
+      return c.json(r);
+    } catch (e) {
+      if (e instanceof DraftError) throw new HTTPException(e.message === "not_found" ? 404 : 409, { message: e.message });
+      throw e;
+    }
+  })
+  .post("/status", requirePermission("accounting.manage"), async (c) => {
+    const a = auth(c);
+    const p = await body(c, z.object({ ids: z.array(zUuid).min(1).max(5000), status: z.enum(["pending", "approved", "excluded"]), reason: z.literal("billed").optional() }));
+    const changed = await setBillableStatus(a.user.id, p.ids, p.status, p.reason ?? null);
+    await audit(a.user.id, `billing.items_${p.status}`, null, { count: changed, ...(p.reason ? { reason: p.reason } : {}) });
+    return c.json({ changed });
+  })
+  .patch("/:id", requirePermission("accounting.manage"), async (c) => {
+    const a = auth(c);
+    const id = zUuid.parse(c.req.param("id"));
+    const p = await body(
+      c,
+      z.object({
+        quantity: z.number().min(0).max(100_000).optional(),
+        unitPriceCents: z.number().int().min(0).max(100_000_000).optional(),
+        description: z.string().trim().min(1).max(2000).optional(),
+        taxable: z.boolean().optional(),
+        // the QuickBooks item and tax code of this line (null: those of the invoice, then the defaults)
+        qbItemId: z.string().trim().max(40).nullable().optional(),
+        qbTaxCodeId: z.string().trim().max(40).nullable().optional(),
+      }),
+    );
+    const row = await editBillable(id, p);
+    if (!row) throw new HTTPException(409, { message: "billing_item_posted" });
+    await audit(a.user.id, "billing.item_edited", id, { fields: Object.keys(p) });
+    return c.json(row);
+  })
+
+  // ── Créer des factures: a client, the kinds or lines, dates, terms, notes ──
+  .get("/clients", async (c) => c.json(await invoiceableClients(periodOf((k) => c.req.query(k)))))
+  .get("/approved-span", async (c) => c.json(await approvedSpan()))
+  .post("/invoice/preview", async (c) => {
+    const p = await body(c, zDraft);
+    return c.json(await drafted(() => draftInvoice(p)));
+  })
+  .post("/invoice", requirePermission("accounting.manage"), async (c) => {
+    const a = auth(c);
+    const p = await body(c, zDraft);
+    const made = await drafted(() => createInvoice(a.user.id, p));
+    await audit(a.user.id, "billing.invoice_created", made.id, { number: made.number, totalCents: made.totalCents });
+    await autoSync("invoices", made.id);
+    await autoSendInvoice(made.id, a.user.id);
+    return c.json(made, 201);
+  })
+
+  /** An invoice typed by hand: its lines, then the usual invoice (and, asked, emailed at once) */
+  .get("/quick-clients", async (c) => {
+    const rows = await db().select({ id: schema.clients.id, name: schema.clients.name, email: schema.clients.email, invoice: schema.clients.invoice, active: schema.clients.active }).from(schema.clients).orderBy(asc(schema.clients.name));
+    return c.json(rows.filter((r) => r.active !== false).map((r) => ({ id: r.id, name: r.name, email: (r.invoice?.billingEmail || r.email || "").trim() || null, exempt: r.invoice?.taxes === false, payOnline: r.invoice?.payOnline ?? null })));
+  })
+  .post("/quick-invoice", requirePermission("accounting.manage"), async (c) => {
+    const a = auth(c);
+    const p = await body(
+      c,
+      zDraft.omit({ itemIds: true, kinds: true, from: true, to: true }).extend({
+        lines: z.array(z.object({ description: z.string().trim().min(1).max(500), quantity: z.number().positive().max(100_000), unitPrice: z.number().min(-1_000_000).max(1_000_000), taxable: z.boolean().default(true) })).min(1).max(50),
+        send: z.boolean().default(false),
+      }),
+    );
+    const { lines, send, ...draft } = p;
+    const made = await drafted(() => quickInvoice(a.user.id, { ...draft, lines: lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPriceCents: Math.round(l.unitPrice * 100), taxable: l.taxable })) }));
+    await audit(a.user.id, "billing.invoice_created", made.id, { number: made.number, totalCents: made.totalCents, manual: true });
+    await autoSync("invoices", made.id);
+    // sent now when asked (the usual email, its PDF and the pay link), else the automatic sending applies as usual
+    let emailed: string | null = null;
+    let mailError: string | null = null;
+    if (send) {
+      try {
+        emailed = (await sendInvoiceMail(made.id, "sent", a.user.id)).to;
+      } catch (e) {
+        mailError = e instanceof Error ? e.message : "mail_failed";
+      }
+    } else await autoSendInvoice(made.id, a.user.id);
+    return c.json({ ...made, emailed, mailError }, 201);
+  })
+
+  /** What posting the approved items would make (per client). */
+  .get("/post", async (c) => {
+    const groups = await postPreview(undefined, periodOf((k) => c.req.query(k)));
+    return c.json(groups.map(({ items, ...g }) => ({ ...g, kinds: [...new Set(items.map((i) => i.kind))] })));
+  })
+  .post("/post", requirePermission("accounting.manage"), async (c) => {
+    const a = auth(c);
+    const p = await body(c, z.object({ clientIds: z.array(zUuid).max(5000).optional(), from: zDay.nullable().optional(), to: zDay.nullable().optional() }));
+    const made = await postInvoices(a.user.id, p.clientIds, { from: p.from, to: p.to });
+    await audit(a.user.id, "billing.invoices_posted", null, { count: made.length, numbers: made.map((m) => m.number) });
+    for (const m of made) {
+      await autoSync("invoices", m.id);
+      await autoSendInvoice(m.id, a.user.id);
+    }
+    return c.json(made, 201);
+  });

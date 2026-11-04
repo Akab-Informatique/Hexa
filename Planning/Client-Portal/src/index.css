@@ -1,0 +1,619 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource/instrument-sans/400.css";
+@import "@fontsource/instrument-sans/500.css";
+@import "@fontsource/instrument-sans/600.css";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * AKAB brand (akab.ca): ink #0a0a0b / #121317, paper #f4f4f1,
+ * gold gradient #ffe24a → #ffce1a → #f59410, display Bricolage Grotesque,
+ * body Instrument Sans. Dark is the default theme.
+ */
+:root {
+  --radius: 0.875rem;
+  /* Glass panels (light theme) */
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-strong: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(10, 10, 11, 0.08);
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 18px 40px -26px rgba(10, 10, 11, 0.25);
+  --glass-sheen: rgba(255, 255, 255, 0.5);
+  --gold: #ffce1a;
+  --gold-2: #f59410;
+  --gold-light: #ffe24a;
+  --grad-gold: linear-gradient(160deg, #ffe24a 0%, #ffce1a 42%, #f59410 100%);
+  /* text on paper needs deeper amber for contrast */
+  --grad-gold-text: linear-gradient(160deg, #e0870a 0%, #c46a00 100%);
+
+  /* light theme (paper) */
+  --background: #f4f4f1;
+  --foreground: #16171b;
+  --card: #ffffff;
+  --card-foreground: #16171b;
+  --popover: #ffffff;
+  --popover-foreground: #16171b;
+  --primary: #f5a20f;
+  --primary-foreground: #1a1204;
+  --secondary: #ecece7;
+  --secondary-foreground: #16171b;
+  --muted: #ecece7;
+  --muted-foreground: #5a5c63;
+  --accent: #fff3c4;
+  --accent-foreground: #1a1204;
+  --destructive: #dc2626;
+  --border: rgba(12, 12, 14, 0.12);
+  --input: rgba(12, 12, 14, 0.16);
+  --ring: #f59410;
+  --success: #16a34a;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #16171b;
+  --grid-line: rgba(12, 12, 14, 0.05);
+  --hive: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2742%27 height=%2772.75%27 viewBox=%270 0 42 72.75%27%3E%3Cg fill=%27none%27 stroke=%27%230a0a0b%27 stroke-opacity=%270.09%27 stroke-width=%271%27%3E%3Cpath d=%27M21 0L42 12.125V36.375L21 48.5L0 36.375V12.125Z%27/%3E%3Cpath d=%27M21 48.5V72.75M0 36.375L-21 48.5M42 36.375L63 48.5%27/%3E%3C/g%3E%3C/svg%3E");
+  --glow: rgba(245, 148, 16, 0.18);
+}
+
+/* Glossy panels: a specular sheen on top, a small tint of colour in two corners, a fine lit edge */
+:root {
+  --tint: var(--gold);
+  --tint-2: #7aa8ff;
+  --gloss-top: rgba(255, 255, 255, 0.85);
+  --gloss-mid: rgba(255, 255, 255, 0.25);
+  --gloss-edge: rgba(255, 255, 255, 0.9);
+  --gloss-depth: 0 14px 32px -20px rgba(24, 24, 32, 0.35);
+  --tint-strength: 7%;
+  --tint-2-strength: 4%;
+}
+
+.dark {
+  --gloss-top: rgba(255, 255, 255, 0.085);
+  --gloss-mid: rgba(255, 255, 255, 0.022);
+  --gloss-edge: rgba(255, 255, 255, 0.15);
+  --gloss-depth: 0 16px 36px -20px rgba(0, 0, 0, 0.75);
+  --tint-strength: 10%;
+  --tint-2-strength: 5.5%;
+  --glass-bg: rgba(255, 255, 255, 0.045);
+  --glass-sheen: rgba(255, 255, 255, 0.05);
+  --glass-bg-strong: rgba(18, 19, 23, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-highlight: rgba(255, 255, 255, 0.07);
+  --glass-shadow: 0 24px 48px -28px rgba(0, 0, 0, 0.7);
+  --background: #0a0a0b;
+  --foreground: #ededf0;
+  --card: #121317;
+  --card-foreground: #ededf0;
+  --popover: #15161b;
+  --popover-foreground: #ededf0;
+  --primary: #ffce1a;
+  --primary-foreground: #1a1204;
+  --secondary: #1a1b20;
+  --secondary-foreground: #ededf0;
+  --muted: #1a1b20;
+  --muted-foreground: #9a9ca4;
+  --accent: #23242b;
+  --accent-foreground: #ffe24a;
+  --destructive: #f05252;
+  --border: rgba(255, 255, 255, 0.09);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #ffce1a;
+  --success: #34d399;
+  --sidebar: #0e0f12;
+  --sidebar-foreground: #ededf0;
+  --grid-line: rgba(255, 255, 255, 0.035);
+  --hive: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2742%27 height=%2772.75%27 viewBox=%270 0 42 72.75%27%3E%3Cg fill=%27none%27 stroke=%27%23ffce1a%27 stroke-opacity=%270.12%27 stroke-width=%271%27%3E%3Cpath d=%27M21 0L42 12.125V36.375L21 48.5L0 36.375V12.125Z%27/%3E%3Cpath d=%27M21 48.5V72.75M0 36.375L-21 48.5M42 36.375L63 48.5%27/%3E%3C/g%3E%3C/svg%3E");
+  --glow: rgba(255, 206, 26, 0.12);
+  --grad-gold-text: var(--grad-gold);
+}
+
+@theme inline {
+  --font-sans: "Instrument Sans", system-ui, sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-gold: var(--gold);
+  --color-gold-2: var(--gold-2);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: dark;
+  }
+  html:not(.dark) {
+    color-scheme: light;
+  }
+  /* native dropdowns (select lists, date pickers) follow the chosen theme: the list takes the popover colours, never white on white */
+  select,
+  input,
+  textarea {
+    color-scheme: inherit;
+  }
+  select option,
+  select optgroup {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "ss01";
+  }
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--gold) 45%, transparent);
+  }
+}
+
+@layer components {
+  :root {
+    --gloss-image:
+      linear-gradient(180deg, var(--gloss-top) 0%, var(--gloss-mid) 20%, transparent 52%),
+      radial-gradient(120% 95% at 0% 0%, color-mix(in oklab, var(--tint) var(--tint-strength), transparent), transparent 62%),
+      radial-gradient(105% 85% at 100% 100%, color-mix(in oklab, var(--tint-2) var(--tint-2-strength), transparent), transparent 66%);
+  }
+  /* Panels: the cards, and the rounded bordered boxes made with bg-card (an explicit shadow or ring on one still wins) */
+  [data-slot="card"],
+  [class*="rounded-xl"][class*="border"][class*="bg-card"],
+  [class*="rounded-2xl"][class*="border"][class*="bg-card"],
+  [class*="rounded-3xl"][class*="border"][class*="bg-card"] {
+    background-image: var(--gloss-image);
+    box-shadow: inset 0 1px 0 0 var(--gloss-edge), inset 0 0 0 1px color-mix(in oklab, var(--tint) 5%, transparent), var(--gloss-depth);
+  }
+  /* A panel can take another small tint of colour: data-tint on it or on a page */
+  [data-tint="violet"] { --tint: #a78bfa; --tint-2: #f472b6; }
+  [data-tint="blue"] { --tint: #38bdf8; --tint-2: #818cf8; }
+  [data-tint="green"] { --tint: #34d399; --tint-2: #38bdf8; }
+  [data-tint="rose"] { --tint: #fb7185; --tint-2: #fbbf24; }
+  [data-tint="orange"] { --tint: #fb923c; --tint-2: #f472b6; }
+}
+
+@layer utilities {
+  .bg-grad-gold {
+    background-image: var(--grad-gold);
+  }
+  .text-grad-gold {
+    background-image: var(--grad-gold-text);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Fine honeycomb (the AKAB beehive) behind the page tops */
+  .bg-grid {
+    background-image: var(--hive);
+    background-size: 42px 72.75px;
+  }
+  .glow-gold {
+    box-shadow: 0 16px 34px -14px rgba(245, 148, 16, 0.55);
+  }
+  /* Frosted glass panel: translucent, blurred, fine light edge.
+     Only the standard backdrop-filter: the build adds the -webkit- prefix for Safari. */
+  .glass {
+    background-color: var(--glass-bg);
+    /* gloss: a sheen from the top edge, a small tint of colour in two corners */
+    background-image: var(--gloss-image);
+    border-color: var(--glass-border);
+    backdrop-filter: blur(18px) saturate(150%);
+    box-shadow: inset 0 1px 0 0 var(--gloss-edge), inset 0 0 0 1px color-mix(in oklab, var(--tint) 6%, transparent), var(--glass-shadow);
+  }
+  .glass-strong {
+    background-color: var(--glass-bg-strong);
+    border-color: var(--glass-border);
+    backdrop-filter: blur(28px) saturate(150%);
+    box-shadow: inset 0 1px 0 0 var(--glass-highlight), var(--glass-shadow);
+  }
+  .ring-gold {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--gold) 55%, transparent), 0 0 24px -6px var(--glow);
+  }
+  /* Something needs attention (a text came in): the control blinks between its own color and a warm light */
+  .animate-attention {
+    animation: attention-blink 1.1s ease-in-out infinite;
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
+  }
+  /* Client portal: a warm, discreet light behind the glass panes */
+  .client-ambient {
+    background:
+      radial-gradient(60rem 40rem at 88% -12%, color-mix(in oklab, var(--gold) 13%, transparent), transparent 62%),
+      radial-gradient(48rem 34rem at -8% 108%, color-mix(in oklab, var(--gold-2) 9%, transparent), transparent 62%),
+      radial-gradient(34rem 26rem at 45% 42%, color-mix(in oklab, var(--gold-light) 4%, transparent), transparent 70%);
+  }
+  /* Glass pane: frosted, fine light edge (client portal) */
+  .pane {
+    position: relative;
+    background-color: var(--glass-bg);
+    background-image: var(--gloss-image);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(22px) saturate(160%);
+    box-shadow: inset 0 1px 0 0 var(--gloss-edge), inset 0 0 0 1px color-mix(in oklab, var(--tint) 6%, transparent), var(--glass-shadow);
+  }
+  /* A thin gold light along the top edge */
+  .gold-edge::before {
+    content: "";
+    position: absolute;
+    inset-inline: 14%;
+    top: -1px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--gold) 75%, transparent), transparent);
+    pointer-events: none;
+  }
+}
+
+@keyframes attention-blink {
+  0%,
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 rgba(251, 146, 60, 0);
+  }
+  50% {
+    background-color: rgba(251, 146, 60, 0.3);
+    box-shadow: 0 0 14px 1px rgba(251, 146, 60, 0.55);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * AKAB brand shape — the beehive. Hexagons (like the logo) instead of
+ * rounded shapes, everywhere. corner-shape: bevel cuts corners in straight
+ * lines, borders, rings and shadows included:
+ *  - pills and buttons become elongated hexagons;
+ *  - square items (icon tiles, avatars, dots, icon buttons, checkboxes)
+ *    become small hexagons — honeycomb cells;
+ *  - cards, panels, fields, menus and windows get cut corners.
+ * Browsers without corner-shape keep the rounded look.
+ * Outside any layer on purpose: it wins over the rounded-* utilities.
+ */
+.hex {
+  border-radius: 0.5rem;
+}
+@supports (corner-shape: bevel) {
+  .rounded,
+  .rounded-xs,
+  .rounded-sm,
+  .rounded-md,
+  .rounded-lg,
+  .rounded-xl,
+  .rounded-2xl,
+  .rounded-3xl,
+  [class*="rounded-["],
+  [class*="rounded-t-"],
+  [class*="rounded-b-"],
+  [class*="rounded-l-"],
+  [class*="rounded-r-"] {
+    corner-shape: bevel;
+  }
+  /* cut size: noticeable but light */
+  .rounded-sm {
+    border-radius: 3px;
+  }
+  .rounded-md {
+    border-radius: 5px;
+  }
+  .rounded-lg {
+    border-radius: 7px;
+  }
+  .rounded-xl {
+    border-radius: 9px;
+  }
+  .rounded-2xl {
+    border-radius: 12px;
+  }
+  .rounded-3xl {
+    border-radius: 16px;
+  }
+  .hex,
+  .rounded-full {
+    border-radius: 9999px;
+    corner-shape: bevel;
+  }
+  /* square → hexagon cell */
+  :is(.hex, .rounded-full, .rounded-sm, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl):is([class^="size-"], [class*=" size-"], .aspect-square),
+  [data-slot="checkbox"] {
+    border-radius: 25% / 50%;
+    corner-shape: bevel;
+  }
+}
+
+/*
+ * Ticket priority emphasis in the list.
+ * Critical "pops and moves": a breathing red edge, a light sweep across the
+ * row and the priority badge nudges now and then. High "pops": a steady
+ * orange edge and glow. Without motion when the system asks for less.
+ */
+.ticket-critical::after,
+.ticket-high::after {
+  content: "";
+  position: absolute;
+  inset: 1px 0;
+  pointer-events: none;
+  border-radius: 0.75rem;
+}
+.ticket-high::after {
+  box-shadow:
+    inset 0 0 0 1px rgba(249, 115, 22, 0.35),
+    inset 0 0 22px -10px rgba(249, 115, 22, 0.55);
+}
+.ticket-critical::after {
+  box-shadow:
+    inset 0 0 0 1px rgba(239, 68, 68, 0.55),
+    inset 0 0 26px -8px rgba(239, 68, 68, 0.6);
+  animation: ticket-breathe 2.4s ease-in-out infinite;
+}
+.ticket-critical::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent 30%, rgba(239, 68, 68, 0.14) 50%, transparent 70%);
+  background-size: 250% 100%;
+  animation: ticket-sweep 3.6s ease-in-out infinite;
+}
+.priority-nudge {
+  display: inline-flex;
+  animation: priority-nudge 4s ease-in-out infinite;
+}
+@keyframes ticket-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes ticket-sweep {
+  0% {
+    background-position: 120% 0;
+  }
+  60%,
+  100% {
+    background-position: -120% 0;
+  }
+}
+@keyframes priority-nudge {
+  0%,
+  86%,
+  100% {
+    transform: translateX(0) scale(1);
+  }
+  88% {
+    transform: translateX(-2px) scale(1.06);
+  }
+  90% {
+    transform: translateX(2px) scale(1.06);
+  }
+  92% {
+    transform: translateX(-2px) scale(1.06);
+  }
+  94% {
+    transform: translateX(1px) scale(1.03);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticket-critical::after,
+  .ticket-critical::before,
+  .priority-nudge {
+    animation: none;
+  }
+}
+
+/*
+ * A ticket whose timer runs (minimized in the dock): an electric field — a
+ * gold and blue arc spinning around the cell, a flickering glow and sparks.
+ */
+@keyframes timer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes timer-flicker {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  42% {
+    opacity: 0.55;
+  }
+  45% {
+    opacity: 1;
+  }
+  48% {
+    opacity: 0.65;
+  }
+  70% {
+    opacity: 0.95;
+  }
+}
+.timer-field {
+  position: absolute;
+  inset: -7px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 5px rgba(255, 206, 26, 0.85)) drop-shadow(0 0 12px rgba(125, 211, 252, 0.45));
+  animation: timer-flicker 1.7s ease-in-out infinite;
+}
+.timer-field-hex {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+.timer-field-hex::before,
+.timer-field-hex::after {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(from 0deg, transparent 0 14%, #ffe24a 18%, transparent 24% 46%, #7dd3fc 50%, transparent 54% 70%, #f59410 76%, transparent 82%);
+  animation: timer-spin 1.3s linear infinite;
+}
+.timer-field-hex::after {
+  background: conic-gradient(from 90deg, transparent 0 30%, rgba(255, 255, 255, 0.9) 31%, transparent 33% 80%, rgba(125, 211, 252, 0.9) 81%, transparent 83%);
+  animation-duration: 0.9s;
+  animation-direction: reverse;
+}
+/* the tab form: the same field along its border */
+.timer-field-tab::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: conic-gradient(from var(--timer-angle, 0deg), transparent 0 20%, #ffe24a 26%, transparent 34% 52%, #7dd3fc 58%, transparent 66%);
+  filter: drop-shadow(0 0 6px rgba(255, 206, 26, 0.8));
+  animation: timer-flicker 1.7s ease-in-out infinite, timer-angle 1.4s linear infinite;
+}
+@property --timer-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes timer-angle {
+  to {
+    --timer-angle: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .timer-field,
+  .timer-field-hex::before,
+  .timer-field-hex::after,
+  .timer-field-tab::before {
+    animation: none;
+  }
+}
+
+/* Printing labels (Inventory, ticket charges): the .labels-print sheet only, one label a page, nothing else in the
+   page (display: none, not visibility: the rest of the page must take no room, or it prints as blank labels) */
+.labels-print {
+  display: none;
+}
+@media print {
+  html.printing-labels body > *:not(.labels-print) {
+    display: none !important;
+  }
+  html.printing-labels,
+  html.printing-labels body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  html.printing-labels .labels-print {
+    display: block;
+  }
+  html.printing-labels .labels-print-page {
+    break-after: page;
+    break-inside: avoid;
+    margin: 0 !important;
+    box-shadow: none !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  html.printing-labels .labels-print-page:last-child {
+    break-after: auto;
+  }
+  html.printing-labels,
+  html.printing-labels body {
+    background: #fff !important;
+  }
+}
+
+/* A quote printed or saved as PDF: only the white sheet, on letter paper */
+@media print {
+  html.printing-quote body > *:not(.quote-overlay) {
+    display: none !important;
+  }
+  html.printing-quote .no-print {
+    display: none !important;
+  }
+  html.printing-quote .quote-overlay {
+    position: static !important;
+    overflow: visible !important;
+    background: none !important;
+    padding: 0 !important;
+  }
+  /* one-time costs and recurring services: each sheet on its own page */
+  html.printing-quote .quote-sheet-next {
+    break-before: page;
+    margin-top: 0 !important;
+  }
+  html.printing-quote .quote-sheet {
+    max-width: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  html.printing-quote,
+  html.printing-quote body {
+    background: #fff !important;
+  }
+  @page {
+    size: letter;
+    margin: 10mm;
+  }
+}
+
+/* A procedure (SOP) printed or saved as PDF: only the white sheet, steps kept whole across pages */
+@media print {
+  html.printing-sop body > *:not(.sop-overlay) {
+    display: none !important;
+  }
+  html.printing-sop .no-print {
+    display: none !important;
+  }
+  html.printing-sop .sop-overlay {
+    position: static !important;
+    overflow: visible !important;
+    background: none !important;
+    padding: 0 !important;
+  }
+  html.printing-sop .sop-sheet {
+    max-width: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  html.printing-sop,
+  html.printing-sop body {
+    background: #fff !important;
+  }
+}

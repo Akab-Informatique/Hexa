@@ -1,0 +1,458 @@
+import { lazy, Suspense, useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { motion } from "motion/react";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTheme } from "@/lib/theme";
+import {
+  ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
+  LogOut,
+  Menu,
+  Monitor,
+  Moon,
+  Settings2,
+  Sun,
+  UserRound,
+  ShieldCheck,
+} from "lucide-react";
+import { Logo, LogoMark } from "@/components/brand/Logo";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { CommandPalette } from "@/components/CommandPalette";
+import { ViewSwitcher } from "@/components/ViewSwitcher";
+import { NotificationBell } from "@/components/NotificationBell";
+import { SyncBadge } from "@/components/SyncBadge";
+import { QuickAdd } from "@/components/QuickAdd";
+import { ProfileDialog } from "@/components/ProfileDialog";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { NAV_GROUPS, NAV_SECTIONS, STAFF_MODULES, type NavModule } from "@/modules/registry";
+import { moduleVisible } from "@/modules/visible";
+import { signOut, useCan, useMe } from "@/lib/session";
+import { cn, initials } from "@/lib/utils";
+import { TicketWorkspaceProvider } from "@/pages/tickets/workspace";
+import { ProjectWorkspaceProvider } from "@/pages/projects/ProjectWorkspace";
+import { preloadPagesWhenIdle, preloadRoute } from "@/lib/preload";
+
+const AdminOverlay = lazy(() => import("@/admin/AdminOverlay").then((m) => ({ default: m.AdminOverlay })));
+
+const COLLAPSE_KEY = "akab.sidebar.collapsed";
+/** Sidebar sections the viewer opened (all closed by default) */
+const SECTIONS_KEY = "akab.sidebar.sections";
+
+function useOpenSections() {
+  const [open, setOpen] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "[]") as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const update = (next: Set<string>) => {
+    setOpen(next);
+    try {
+      localStorage.setItem(SECTIONS_KEY, JSON.stringify([...next]));
+    } catch {
+      /* ignore */
+    }
+  };
+  return [open, update] as const;
+}
+
+export function StaffLayout() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const location = useLocation();
+  const [params] = useSearchParams();
+  const me = useMe();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [collapsed]);
+  useEffect(() => setMobileOpen(false), [location.pathname]);
+  useEffect(() => preloadPagesWhenIdle(), []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const adminSection = params.get("admin");
+
+  return (
+    <TicketWorkspaceProvider enabled={me.permissions.includes("tickets.view")}>
+    <ProjectWorkspaceProvider enabled={me.permissions.includes("projects.view")}>
+    <div className="flex min-h-dvh bg-background">
+      <motion.aside
+        animate={{ width: collapsed ? 76 : 256 }}
+        transition={{ type: "spring", bounce: 0, duration: 0.35 }}
+        className="sticky top-0 hidden h-dvh shrink-0 border-r bg-sidebar lg:block"
+      >
+        <SidebarContent collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+      </motion.aside>
+
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent side="left" className="w-72 p-0">
+          <SheetTitle className="sr-only">Menu</SheetTitle>
+          <SidebarContent collapsed={false} />
+        </SheetContent>
+      </Sheet>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar onMenu={() => setMobileOpen(true)} />
+        <main className="relative flex-1">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-grid opacity-60 [mask-image:linear-gradient(to_bottom,black,transparent)]" />
+          {/* The new page appears right away (no exit animation to wait for) */}
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            className={cn("relative mx-auto w-full px-4 pb-24 pt-6 sm:px-6 lg:px-8", location.pathname === "/tickets" ? "max-w-[1960px]" : "max-w-[1400px]")}
+          >
+            <Suspense fallback={<div className="h-40 animate-pulse rounded-2xl bg-card/50" />}>
+              <Outlet />
+            </Suspense>
+          </motion.div>
+        </main>
+      </div>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      {me.isAdmin && adminSection !== null && (
+        <Suspense fallback={null}>
+          <AdminOverlay section={adminSection} />
+        </Suspense>
+      )}
+    </div>
+    </ProjectWorkspaceProvider>
+    </TicketWorkspaceProvider>
+  );
+}
+
+function NavItem({ m, collapsed, active }: { m: NavModule; collapsed: boolean; active: boolean }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  if (m.upcoming) {
+    return (
+      <div
+        className={cn("flex h-10 cursor-not-allowed items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground/50", collapsed && "justify-center px-0")}
+        title={`${t(m.labelKey)} — ${t("common.comingSoon")}`}
+      >
+        <m.icon className="size-[18px] shrink-0" />
+        {!collapsed && (
+          <>
+            <span className="truncate">{t(m.labelKey)}</span>
+            <Badge variant="outline" className="ml-auto h-5 border-dashed px-1.5 text-[10px] font-normal text-muted-foreground/70">
+              {t("common.comingSoon")}
+            </Badge>
+          </>
+        )}
+      </div>
+    );
+  }
+  const link = (
+    <NavLink
+      to={m.path}
+      onMouseEnter={() => preloadRoute(m.path, qc)}
+      onFocus={() => preloadRoute(m.path, qc)}
+      className={cn(
+        "group relative flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors",
+        collapsed && "justify-center px-0",
+        active ? "text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+      )}
+    >
+      {active && (
+        <motion.span
+          layoutId="nav-active"
+          className="absolute inset-0 rounded-lg border border-[color:var(--gold)]/25 bg-[color:var(--gold)]/10"
+          transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+        />
+      )}
+      {active && <motion.span layoutId="nav-bar" className="absolute -left-3 top-2 bottom-2 w-1 rounded-r-full bg-grad-gold" />}
+      <m.icon className={cn("relative size-[18px] shrink-0", active && "text-primary")} />
+      {!collapsed && <span className="relative truncate">{t(m.labelKey)}</span>}
+    </NavLink>
+  );
+  return collapsed ? (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      <TooltipContent side="right">{t(m.labelKey)}</TooltipContent>
+    </Tooltip>
+  ) : (
+    link
+  );
+}
+
+function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () => void }) {
+  const { t } = useTranslation();
+  const can = useCan();
+  const location = useLocation();
+  const me = useMe();
+  const visible = (m: NavModule) => m.upcoming || moduleVisible(m, me, can);
+  // the entry with the longest matching path is the one shown (Nouvelle soumission over Dernières soumissions)
+  const isActive = (path: string) => {
+    if (path === "/") return location.pathname === "/";
+    if (!location.pathname.startsWith(path)) return false;
+    return !STAFF_MODULES.some((x) => !x.upcoming && x.path.length > path.length && x.path.startsWith(path) && location.pathname.startsWith(x.path));
+  };
+  // Each section shows its modules; upcoming ones greyed out, after the live ones
+  const groups = [
+    ...NAV_SECTIONS.map((s) => ({
+      key: s.key,
+      labelKey: s.labelKey,
+      items: STAFF_MODULES.filter((m) => m.section === s.key && visible(m)),
+    })),
+  ].filter((g) => g.items.length > 0);
+  const [open, setOpen] = useOpenSections();
+  // the section of the page shown opens by itself (it can be closed again)
+  const current = groups.find((g) => g.items.some((m) => !m.upcoming && isActive(m.path)))?.key;
+  useEffect(() => {
+    if (current && !open.has(current)) setOpen(new Set([...open, current]));
+  }, [current]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggle = (key: string) => {
+    const next = new Set(open);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setOpen(next);
+  };
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className={cn("flex h-16 items-center border-b", collapsed ? "justify-center px-2" : "px-5")}>
+        {collapsed ? <LogoMark className="h-7" /> : <Logo />}
+      </div>
+      <nav className={cn("flex-1 overflow-y-auto p-3 scrollbar-thin", collapsed ? "space-y-6" : "space-y-1")}>
+        {groups.map((g) => {
+          // icons only: every section shown, separated by a line
+          const shown = collapsed || open.has(g.key);
+          const hasActive = g.key === current;
+          return (
+            <div key={g.key}>
+              {collapsed ? (
+                <div className="mx-auto mb-2 h-px w-6 bg-border first:hidden" />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => toggle(g.key)}
+                  aria-expanded={shown}
+                  className="group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+                >
+                  <span className="flex-1 truncate">{t(g.labelKey)}</span>
+                  {!shown && hasActive && <span className="size-1.5 rounded-full bg-grad-gold" />}
+                  {!shown && <span className="font-mono text-[10px] font-normal tracking-normal opacity-60">{g.items.filter((m) => !m.upcoming).length}</span>}
+                  <ChevronDown className={cn("size-3.5 shrink-0 transition-transform duration-200", !shown && "-rotate-90")} />
+                </button>
+              )}
+              <div className={cn("grid transition-[grid-template-rows] duration-200 ease-out", shown ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+                <ul className={cn("space-y-1 overflow-hidden", !collapsed && shown && "pb-2")} inert={!shown}>
+                  {g.items
+                    .filter((m) => !m.group)
+                    .map((m) => (
+                      <li key={m.key}>
+                        <NavItem m={m} collapsed={collapsed} active={!m.upcoming && isActive(m.path)} />
+                      </li>
+                    ))}
+                  {/* a sub-menu inside the section (Sécurité): collapsible too, remembered with the sections */}
+                  {(Object.keys(NAV_GROUPS) as (keyof typeof NAV_GROUPS)[]).map((gk) => {
+                    const sub = g.items.filter((m) => m.group === gk);
+                    if (!sub.length) return null;
+                    const subKey = `${g.key}/${gk}`;
+                    const subOpen = collapsed || open.has(subKey) || sub.some((m) => !m.upcoming && isActive(m.path));
+                    return (
+                      <li key={gk}>
+                        {!collapsed && (
+                          <button
+                            type="button"
+                            onClick={() => toggle(subKey)}
+                            aria-expanded={subOpen}
+                            className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+                          >
+                            <ShieldCheck className="size-3.5 shrink-0 text-primary/80" />
+                            <span className="flex-1 truncate">{t(NAV_GROUPS[gk].labelKey)}</span>
+                            <ChevronDown className={cn("size-3 shrink-0 transition-transform duration-200", !subOpen && "-rotate-90")} />
+                          </button>
+                        )}
+                        <ul className={cn("space-y-1 overflow-hidden", !collapsed && "ml-3 border-l pl-2", !collapsed && !subOpen && "hidden")} inert={!subOpen}>
+                          {sub.map((m) => (
+                            <li key={m.key}>
+                              <NavItem m={m} collapsed={collapsed} active={!m.upcoming && isActive(m.path)} />
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </div>
+          );
+        })}
+      </nav>
+      {onToggle && (
+        <div className="border-t p-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onToggle}
+            className={cn("w-full text-muted-foreground", collapsed ? "justify-center" : "justify-start")}
+            aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
+          >
+            {collapsed ? <ChevronsRight className="size-4" /> : <ChevronsLeft className="size-4" />}
+            {!collapsed && <span>{t("nav.collapse")}</span>}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TopBar({ onMenu }: { onMenu: () => void }) {
+  const can = useCan();
+  return (
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b bg-background/75 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+      <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenu} aria-label="Menu">
+        <Menu className="size-5" />
+      </Button>
+      {can("clientview.use") && <ViewSwitcher />}
+      <div className="ml-auto flex items-center gap-3">
+        <QuickAdd />
+        <SyncBadge />
+        <NotificationBell />
+        <LanguageToggle persist className="hidden sm:flex" />
+        <UserMenu />
+      </div>
+    </header>
+  );
+}
+
+function UserMenu() {
+  const { t, i18n } = useTranslation();
+  const me = useMe();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const { theme, setTheme } = useTheme();
+  const [profileOpen, setProfileOpen] = useState(false);
+  // back from the Microsoft sign-in (/?microsoft=connected|cancelled|error): the profile, where it is
+  useEffect(() => {
+    const r = params.get("microsoft");
+    if (!r) return;
+    if (r === "connected") toast.success(t("profile.ms.connected"));
+    else toast.error(t(`profile.ms.${r === "cancelled" ? "cancelled" : "failed"}`));
+    void qc.invalidateQueries({ queryKey: ["microsoft"] });
+    void qc.invalidateQueries({ queryKey: ["outlook"] });
+    setProfileOpen(true);
+    const next = new URLSearchParams(params);
+    next.delete("microsoft");
+    setParams(next, { replace: true });
+  }, [params, setParams, qc, t]);
+  const roleName = me.role ? (i18n.language === "en" ? me.role.nameEn : me.role.name) : null;
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-2.5 rounded-xl border border-transparent py-1 pl-1 pr-2.5 transition-colors hover:border-border hover:bg-card data-[state=open]:border-[color:var(--gold)]/40 data-[state=open]:bg-card"
+          >
+            <Avatar className="size-8 ring-1 ring-[color:var(--gold)]/40">
+              <AvatarFallback className="bg-grad-gold text-xs font-bold text-[#1a1204]">{initials(me.name)}</AvatarFallback>
+            </Avatar>
+            <span className="hidden text-left leading-tight md:block">
+              <span className="block max-w-40 truncate text-sm font-medium">{me.name}</span>
+              {roleName && <span className="block text-[11px] text-muted-foreground">{roleName}</span>}
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64">
+          <DropdownMenuLabel className="font-normal">
+            <p className="text-xs text-muted-foreground">{t("topbar.signedInAs")}</p>
+            <p className="truncate text-sm font-medium">{me.name}</p>
+            <p className="truncate text-xs text-muted-foreground">{me.email}</p>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
+            <UserRound className="size-4" /> {t("topbar.profile")}
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Moon className="size-4" /> {t("topbar.theme")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
+                <DropdownMenuRadioItem value="dark">
+                  <Moon className="size-4" /> {t("topbar.dark")}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="light">
+                  <Sun className="size-4" /> {t("topbar.light")}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="system">
+                  <Monitor className="size-4" /> {t("topbar.system")}
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          {me.isAdmin && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => setParams((p) => {
+                  p.set("admin", "home");
+                  return p;
+                })}
+                className="text-primary focus:text-primary"
+              >
+                <Settings2 className="size-4" /> {t("topbar.adminSettings")}
+              </DropdownMenuItem>
+            </>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={async () => {
+              await signOut(qc);
+              navigate("/", { replace: true });
+            }}
+          >
+            <LogOut className="size-4" /> {t("topbar.signOut")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
+    </>
+  );
+}

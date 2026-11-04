@@ -1,0 +1,788 @@
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { DndContext, KeyboardSensor, PointerSensor, closestCorners, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { ArrowLeft, ArrowRight, Columns3, LayoutList, MoreHorizontal, Pencil, Plus, RotateCcw, Rows3, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { api } from "@/lib/api";
+import { cn, initials } from "@/lib/utils";
+import { useCan, useMe } from "@/lib/session";
+import { dueState, PRIORITY_STYLE, shortDate, STATUS_STYLE, ticketErrorText, useChoiceText, type TicketList, type TicketSummary } from "./shared";
+
+// ── The three ways to look at the list ───────────────────────────────────────────
+/** standard: the table as it always was · kanban: boards the team sorts tickets on · compact: one short line per ticket */
+export const LAYOUTS = ["standard", "kanban", "compact"] as const;
+export type Layout = (typeof LAYOUTS)[number];
+const KEY = "akab.tickets.layout";
+const ICON = { standard: LayoutList, kanban: Columns3, compact: Rows3 } as const;
+
+/** The view chosen on this computer (remembered). */
+export function useTicketLayout(): [Layout, (l: Layout) => void] {
+  const me = useMe();
+  const qc = useQueryClient();
+  // the person's own default (kept on their account, so it follows them to any computer), else what this computer remembered
+  const [layout, setLayout] = useState<Layout>(() => {
+    if (me.preferences.ticketLayout) return me.preferences.ticketLayout;
+    try {
+      const v = localStorage.getItem(KEY);
+      return (LAYOUTS as readonly string[]).includes(v ?? "") ? (v as Layout) : "standard";
+    } catch {
+      return "standard";
+    }
+  });
+  return [
+    layout,
+    (l) => {
+      setLayout(l);
+      try {
+        localStorage.setItem(KEY, l);
+      } catch {
+        /* the choice just is not remembered here */
+      }
+      // the view picked becomes their default
+      void api.put("/me/preferences", { ticketLayout: l }).then(() => qc.invalidateQueries({ queryKey: ["auth"] }));
+    },
+  ];
+}
+
+/** Standard · Kanban · Compact, in the filters box. */
+export function LayoutSwitch({ value, onChange }: { value: Layout; onChange: (l: Layout) => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center rounded-xl border bg-background/40 p-0.5" role="group" aria-label={t("tickets.layout.title")}>
+      {LAYOUTS.map((l) => {
+        const Icon = ICON[l];
+        const on = value === l;
+        return (
+          <button
+            key={l}
+            type="button"
+            aria-pressed={on}
+            title={t(`tickets.layout.${l}Hint`)}
+            onClick={() => onChange(l)}
+            className={cn("flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors", on ? "bg-[color:var(--gold)]/15 text-primary" : "text-muted-foreground hover:text-foreground")}
+          >
+            <Icon className="size-3.5" />
+            <span className="hidden sm:inline">{t(`tickets.layout.${l}`)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Compact: one short line per ticket ───────────────────────────────────────────
+export type CompactTicket = Pick<TicketSummary, "id" | "number" | "title" | "company" | "priorityKind" | "priorityLabel" | "milestoneDate" | "milestoneTime" | "dueAt" | "statusKind" | "statusLabel">;
+
+// Its columns, like the standard view's: moved and resized from the titles, kept on this computer
+const COMPACT_COLUMNS = ["ticket", "company", "priority", "milestone", "due", "status"] as const;
+type CompactCol = (typeof COMPACT_COLUMNS)[number];
+const COMPACT_KEY = "akab.tickets.compact.columns.v1";
+const COMPACT_WIDTHS: Record<CompactCol, number> = { ticket: 240, company: 150, priority: 112, milestone: 176, due: 136, status: 152 };
+type CompactPrefs = { order: CompactCol[]; widths: Partial<Record<CompactCol, number>> };
+
+function readCompact(): CompactPrefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(COMPACT_KEY) ?? "null") as CompactPrefs | null;
+    if (v && Array.isArray(v.order) && v.order.length === COMPACT_COLUMNS.length && COMPACT_COLUMNS.every((c) => v.order.includes(c))) return { order: v.order, widths: v.widths ?? {} };
+  } catch {
+    /* defaults */
+  }
+  return { order: [...COMPACT_COLUMNS], widths: {} };
+}
+
+function useCompactColumns() {
+  const [prefs, setPrefs] = useState<CompactPrefs>(readCompact);
+  const keep = (p: CompactPrefs) => {
+    try {
+      localStorage.setItem(COMPACT_KEY, JSON.stringify(p));
+    } catch {
+      /* for this page only */
+    }
+  };
+  const width = (c: CompactCol) => prefs.widths[c] ?? COMPACT_WIDTHS[c];
+  // the ticket column takes the rest until a width is chosen for it
+  const ticketFixed = prefs.widths.ticket !== undefined;
+  const template = prefs.order.map((c) => (c === "ticket" && !ticketFixed ? `minmax(${width(c)}px,1fr)` : `${width(c)}px`)).join(" ");
+  const minWidth = prefs.order.reduce((n, c) => n + width(c), 0) + 12 * prefs.order.length + 32;
+  return {
+    order: prefs.order,
+    template,
+    minWidth,
+    changed: prefs.order.some((c, i) => c !== COMPACT_COLUMNS[i]) || Object.keys(prefs.widths).length > 0,
+    resize: (c: CompactCol, w: number) => setPrefs((p) => ({ ...p, widths: { ...p.widths, [c]: Math.min(c === "ticket" ? 1200 : 480, Math.max(56, Math.round(w))) } })),
+    resized: () => setPrefs((p) => (keep(p), p)),
+    resetWidth: (c: CompactCol) =>
+      setPrefs((p) => {
+        const widths = { ...p.widths };
+        delete widths[c];
+        const n = { ...p, widths };
+        keep(n);
+        return n;
+      }),
+    move: (c: CompactCol, to: number) =>
+      setPrefs((p) => {
+        const rest = p.order.filter((x) => x !== c);
+        const n = { ...p, order: [...rest.slice(0, to), c, ...rest.slice(to)] };
+        keep(n);
+        return n;
+      }),
+    resetAll: () => {
+      setPrefs({ order: [...COMPACT_COLUMNS], widths: {} });
+      try {
+        localStorage.removeItem(COMPACT_KEY);
+      } catch {
+        /* ignore */
+      }
+    },
+  };
+}
+
+/** The titles: drag one left / right to move the column, drag the line between two to resize (double-click: usual width). */
+function CompactHeader({ cols, labels, style }: { cols: ReturnType<typeof useCompactColumns>; labels: Record<CompactCol, string>; style: CSSProperties }) {
+  const { t } = useTranslation();
+  const row = useRef<HTMLDivElement>(null);
+  const [moving, setMoving] = useState<{ id: CompactCol; x: number } | null>(null);
+  const press = useRef<{ id: CompactCol; x: number; moved: boolean } | null>(null);
+  const resizing = useRef<{ id: CompactCol; x: number; w: number } | null>(null);
+  const target = (id: CompactCol, clientX: number) => {
+    const cells = [...(row.current?.querySelectorAll<HTMLElement>("[data-col]") ?? [])].filter((el) => el.dataset.col !== id);
+    let to = cells.length;
+    for (let i = 0; i < cells.length; i++) {
+      const r = cells[i].getBoundingClientRect();
+      if (clientX < r.left + r.width / 2) {
+        to = i;
+        break;
+      }
+    }
+    const box = row.current!.getBoundingClientRect();
+    const edge = to < cells.length ? cells[to].getBoundingClientRect().left - 6 : cells.at(-1)!.getBoundingClientRect().right + 6;
+    return { to, x: edge - box.left };
+  };
+  return (
+    <div ref={row} style={style} className="relative grid select-none items-center gap-x-3 border-b border-[color:var(--glass-border)] bg-white/[0.02] px-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+      {cols.order.map((id, i) => (
+        <div
+          key={id}
+          data-col={id}
+          className={cn("relative flex min-w-0 cursor-grab items-center gap-1 py-1.5 active:cursor-grabbing", moving?.id === id && "opacity-50")}
+          title={t("tickets.columns.move")}
+          onPointerDown={(e) => {
+            if (e.button !== 0 || (e.target as HTMLElement).closest("[data-resize]")) return;
+            press.current = { id, x: e.clientX, moved: false };
+            e.currentTarget.setPointerCapture(e.pointerId);
+          }}
+          onPointerMove={(e) => {
+            const p = press.current;
+            if (!p) return;
+            if (!p.moved && Math.abs(e.clientX - p.x) < 6) return;
+            p.moved = true;
+            setMoving({ id, x: target(id, e.clientX).x });
+          }}
+          onPointerUp={(e) => {
+            const p = press.current;
+            press.current = null;
+            if (p?.moved) cols.move(id, target(id, e.clientX).to);
+            setMoving(null);
+          }}
+          onPointerCancel={() => ((press.current = null), setMoving(null))}
+        >
+          <span className="min-w-0 break-words leading-tight">{labels[id]}</span>
+          {i < cols.order.length - 1 && (
+            <span
+              data-resize
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("tickets.columns.resize")}
+              title={t("tickets.columns.resize")}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                resizing.current = { id, x: e.clientX, w: (e.currentTarget.closest("[data-col]") as HTMLElement).getBoundingClientRect().width };
+                e.currentTarget.setPointerCapture(e.pointerId);
+              }}
+              onPointerMove={(e) => {
+                const r = resizing.current;
+                if (r) cols.resize(r.id, r.w + e.clientX - r.x);
+              }}
+              onPointerUp={() => {
+                if (!resizing.current) return;
+                resizing.current = null;
+                cols.resized();
+              }}
+              onDoubleClick={() => cols.resetWidth(id)}
+              className="group/rs absolute -right-[11px] inset-y-0 z-10 flex w-[10px] cursor-col-resize touch-none justify-center"
+            >
+              <span className="my-1 w-px bg-border/70 transition-all group-hover/rs:w-[3px] group-hover/rs:bg-[color:var(--gold)]" />
+            </span>
+          )}
+        </div>
+      ))}
+      {cols.changed && (
+        <button type="button" onClick={cols.resetAll} title={t("tickets.columns.reset")} aria-label={t("tickets.columns.reset")} className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+          <RotateCcw className="size-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Name, client, priority, checkpoint, due date and status — one line each. With `facets`, each of them is changed in place. */
+export function CompactList({ items, activeIds, onOpen, facets }: { items: CompactTicket[]; activeIds: Set<number>; onOpen: (id: number) => void; facets?: TicketList["facets"] }) {
+  const { t } = useTranslation();
+  const txt = useChoiceText();
+  const qc = useQueryClient();
+  const can = useCan();
+  const cols = useCompactColumns();
+  const edit = Boolean(facets) && can("tickets.edit");
+  const gridStyle: CSSProperties = { gridTemplateColumns: cols.template };
+  const today = new Date().toLocaleDateString("en-CA");
+  const refresh = () => void qc.invalidateQueries({ queryKey: ["tickets"] });
+  const patch = useMutation({ mutationFn: ({ id, ...p }: { id: number; priority?: string; status?: string; dueAt?: string }) => api.patch(`/tickets/${id}`, p), onSuccess: refresh, onError: (e) => toast.error(ticketErrorText(t, e)) });
+  const checkpoint = useMutation({
+    mutationFn: ({ id, date, time }: { id: number; date: string | null; time: string | null }) => api.put(`/tickets/${id}/start-date`, { milestoneDate: date, milestoneTime: date ? time : null }),
+    onSuccess: refresh,
+    onError: (e) => toast.error(ticketErrorText(t, e)),
+  });
+  const select = "h-7 w-full min-w-0 rounded-md border border-transparent bg-transparent px-1 text-xs outline-none hover:border-border focus:border-[color:var(--gold)]/60";
+  const labels: Record<CompactCol, string> = { ticket: t("tickets.fields.ticket"), company: t("tickets.fields.company"), priority: t("tickets.fields.priority"), milestone: t("tickets.fields.milestone"), due: t("tickets.fields.due"), status: t("tickets.fields.status") };
+  return (
+    <div className="overflow-x-auto">
+      <div style={{ minWidth: cols.minWidth }}>
+        <CompactHeader cols={cols} labels={labels} style={gridStyle} />
+        <ul className="divide-y divide-[color:var(--glass-border)]">
+          {items.map((tk) => {
+            const due = dueState(tk.dueAt, tk.statusKind);
+            const open = tk.statusKind !== "complete";
+            const title = (
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{tk.number}</span>
+                <span className="truncate font-medium" title={`${tk.title} · ${tk.company.name}`}>
+                  {tk.title}
+                </span>
+              </span>
+            );
+            const client = (
+              <span className="truncate text-xs text-muted-foreground" title={tk.company.name}>
+                {tk.company.name}
+              </span>
+            );
+            const rowClass = cn("grid w-full items-center gap-x-3 px-4 py-1 text-left text-sm transition-colors hover:bg-[linear-gradient(90deg,rgba(255,206,26,0.07),transparent_60%)]", activeIds.has(tk.id) && "bg-[linear-gradient(90deg,rgba(255,206,26,0.1),transparent_60%)]");
+            if (edit && facets) {
+              const dueDay = new Date(tk.dueAt);
+              const dueValue = `${dueDay.getFullYear()}-${String(dueDay.getMonth() + 1).padStart(2, "0")}-${String(dueDay.getDate()).padStart(2, "0")}`;
+              const cells: Record<CompactCol, ReactNode> = {
+                ticket: (
+                  <button type="button" onClick={() => onOpen(tk.id)} className="min-w-0 text-left">
+                    {title}
+                  </button>
+                ),
+                company: client,
+                priority: (
+                  <select className={cn(select, PRIORITY_STYLE[tk.priorityKind].text)} value={facets.priorities.find((p) => p.kind === tk.priorityKind && (p.label ?? "") === (tk.priorityLabel ?? ""))?.value ?? facets.priorities.find((p) => p.kind === tk.priorityKind)?.value ?? ""} onChange={(e) => patch.mutate({ id: tk.id, priority: e.target.value })} aria-label={t("tickets.fields.priority")}>
+                    {facets.priorities.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {txt.priority(p)}
+                      </option>
+                    ))}
+                  </select>
+                ),
+                milestone: (
+                  <input
+                    type="datetime-local"
+                    className={cn(select, "font-mono tabular-nums", tk.milestoneDate && open && tk.milestoneDate < today ? "text-destructive" : "text-muted-foreground")}
+                    value={tk.milestoneDate ? `${tk.milestoneDate}T${tk.milestoneTime ?? "00:00"}` : ""}
+                    onChange={(e) => {
+                      const [date, time] = e.target.value.split("T");
+                      checkpoint.mutate({ id: tk.id, date: date || null, time: time || null });
+                    }}
+                    aria-label={t("tickets.milestone.label")}
+                  />
+                ),
+                due: (
+                  <input
+                    type="date"
+                    className={cn(select, "font-mono tabular-nums", due === "overdue" ? "text-destructive" : due === "today" ? "text-orange-400" : "text-muted-foreground")}
+                    value={dueValue}
+                    onChange={(e) => e.target.value && patch.mutate({ id: tk.id, dueAt: new Date(`${e.target.value}T${String(dueDay.getHours()).padStart(2, "0")}:${String(dueDay.getMinutes()).padStart(2, "0")}:00`).toISOString() })}
+                    aria-label={t("tickets.fields.due")}
+                  />
+                ),
+                status: (
+                  <select className={cn(select, "rounded-full border-current px-2", STATUS_STYLE[tk.statusKind])} value={facets.statuses.find((s) => s.kind === tk.statusKind && (s.label ?? "") === (tk.statusLabel ?? ""))?.value ?? facets.statuses.find((s) => s.kind === tk.statusKind)?.value ?? ""} onChange={(e) => patch.mutate({ id: tk.id, status: e.target.value })} aria-label={t("tickets.fields.status")}>
+                    {facets.statuses.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {txt.status(s)}
+                      </option>
+                    ))}
+                  </select>
+                ),
+              };
+              return (
+                <li key={tk.id} style={gridStyle} className={rowClass}>
+                  {cols.order.map((c) => (
+                    <div key={c} className="min-w-0">
+                      {cells[c]}
+                    </div>
+                  ))}
+                </li>
+              );
+            }
+            const cells: Record<CompactCol, ReactNode> = {
+              ticket: title,
+              company: client,
+              priority: (
+                <span className={cn("flex items-center gap-1.5 text-xs font-medium", PRIORITY_STYLE[tk.priorityKind].text)}>
+                  <span className={cn("size-2 shrink-0 rounded-full", PRIORITY_STYLE[tk.priorityKind].dot)} />
+                  <span className="truncate">{txt.priority({ label: tk.priorityLabel, kind: tk.priorityKind })}</span>
+                </span>
+              ),
+              milestone: <span className={cn("whitespace-nowrap font-mono text-xs tabular-nums", tk.milestoneDate && open && tk.milestoneDate < today ? "text-destructive" : "text-muted-foreground")}>{tk.milestoneDate ? `${shortDate(tk.milestoneDate)}${tk.milestoneTime ? ` ${tk.milestoneTime}` : ""}` : "—"}</span>,
+              due: <span className={cn("whitespace-nowrap font-mono text-xs font-medium tabular-nums", due === "overdue" ? "text-destructive" : due === "today" ? "text-orange-400" : due === "soon" ? "text-primary" : "text-muted-foreground")}>{shortDate(tk.dueAt)}</span>,
+              status: (
+                <span className={cn("inline-flex max-w-full items-center gap-1.5 truncate rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight", STATUS_STYLE[tk.statusKind])}>
+                  <span className="size-1.5 shrink-0 rounded-full bg-current" />
+                  <span className="truncate">{txt.status({ label: tk.statusLabel, kind: tk.statusKind })}</span>
+                </span>
+              ),
+            };
+            return (
+              <li key={tk.id}>
+                <button type="button" onClick={() => onOpen(tk.id)} style={gridStyle} className={rowClass}>
+                  {cols.order.map((c) => (
+                    <div key={c} className="min-w-0">
+                      {cells[c]}
+                    </div>
+                  ))}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ── Kanban: boards the team shares ───────────────────────────────────────────────
+type Board = { id: string; name: string; position: number };
+type Card = { ticketId: number; boardId: string; position: number };
+type BoardData = { boards: Board[]; cards: Card[] };
+const BOARDS_KEY = ["ticket-boards"];
+const NONE = "none";
+
+/** What the server does when a ticket is dropped on a board, so the card moves at once. */
+function moveCard(cards: Card[], ticketId: number, boardId: string | null, before: number | null): Card[] {
+  const rest = cards.filter((c) => c.ticketId !== ticketId);
+  if (!boardId) return rest;
+  const target = rest.filter((c) => c.boardId === boardId).sort((a, b) => a.position - b.position).map((c) => c.ticketId);
+  const at = before != null ? target.indexOf(before) : -1;
+  target.splice(at >= 0 ? at : target.length, 0, ticketId);
+  return [...rest.filter((c) => c.boardId !== boardId), ...target.map((id, i) => ({ ticketId: id, boardId, position: i }))];
+}
+
+// ── Kanban, three ways: by status, by checkpoint date, or on my own boards ───────
+type KanbanBy = "status" | "checkpoint" | "custom";
+const KANBAN_BY = ["status", "checkpoint", "custom"] as const;
+const BY_KEY = "akab.tickets.kanbanBy";
+
+/** The Kanban: the columns are the statuses, the checkpoint dates, or boards the technician made (their own). */
+export function KanbanBoard({ items, canEdit, onOpen, facets }: { items: TicketSummary[]; canEdit: boolean; onOpen: (id: number) => void; facets?: TicketList["facets"] }) {
+  const { t } = useTranslation();
+  const [by, setByState] = useState<KanbanBy>(() => {
+    try {
+      const v = localStorage.getItem(BY_KEY);
+      return (KANBAN_BY as readonly string[]).includes(v ?? "") ? (v as KanbanBy) : "status";
+    } catch {
+      return "status";
+    }
+  });
+  const setBy = (v: KanbanBy) => {
+    setByState(v);
+    try {
+      localStorage.setItem(BY_KEY, v);
+    } catch {
+      /* not remembered */
+    }
+  };
+  return (
+    <div>
+      <div className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground">
+        <span>{t("tickets.kanban.by")}</span>
+        <div className="flex items-center rounded-lg border bg-background/40 p-0.5" role="group">
+          {KANBAN_BY.map((k) => (
+            <button key={k} type="button" aria-pressed={by === k} onClick={() => setBy(k)} className={cn("rounded-md px-2.5 py-1 font-medium transition-colors", by === k ? "bg-[color:var(--gold)]/15 text-primary" : "hover:text-foreground")}>
+              {t(`tickets.kanban.by_${k}`)}
+            </button>
+          ))}
+        </div>
+        {by === "custom" && <span className="hidden sm:inline">{t("tickets.kanban.mineOnly")}</span>}
+      </div>
+      {by === "custom" ? <CustomBoards items={items} canEdit={canEdit} onOpen={onOpen} /> : <FieldBoard by={by} items={items} canEdit={canEdit} onOpen={onOpen} facets={facets} />}
+    </div>
+  );
+}
+
+const ymdOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const plus = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d;
+};
+type FieldColumn = { id: string; label: string; items: TicketSummary[]; apply: (id: number) => Promise<unknown> | null };
+
+/** Columns that are the tickets' own fields: dropping a card changes the ticket (its status, or its checkpoint date). */
+function FieldBoard({ by, items, canEdit, onOpen, facets }: { by: "status" | "checkpoint"; items: TicketSummary[]; canEdit: boolean; onOpen: (id: number) => void; facets?: TicketList["facets"] }) {
+  const { t } = useTranslation();
+  const txt = useChoiceText();
+  const qc = useQueryClient();
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const today = ymdOf(new Date());
+  const tomorrow = ymdOf(plus(1));
+  const sunday = ymdOf(plus((7 - new Date().getDay()) % 7));
+  const friday = ymdOf(plus(Math.max(2, (5 - new Date().getDay() + 7) % 7)));
+  const checkpoint = (date: string | null) => (id: number) => api.put(`/tickets/${id}/start-date`, { milestoneDate: date });
+  const columns: FieldColumn[] = useMemo(() => {
+    const byDue = (a: TicketSummary, b: TicketSummary) => (a.milestoneDate ?? "9999").localeCompare(b.milestoneDate ?? "9999") || a.dueAt.localeCompare(b.dueAt);
+    if (by === "status")
+      return (facets?.statuses ?? [])
+        .filter((s) => !s.hidden)
+        .map((s) => ({ id: s.value, label: txt.status(s), items: items.filter((x) => x.status === s.value).sort(byDue), apply: (id: number) => api.patch(`/tickets/${id}`, { status: s.value }) }));
+    const bucket = (x: TicketSummary) => (!x.milestoneDate ? "none" : x.milestoneDate < today ? "late" : x.milestoneDate === today ? "today" : x.milestoneDate === tomorrow ? "tomorrow" : x.milestoneDate <= sunday ? "week" : "later");
+    const defs: [string, string | null, ((id: number) => Promise<unknown>) | null][] = [
+      ["late", null, null],
+      ["today", today, checkpoint(today)],
+      ["tomorrow", tomorrow, checkpoint(tomorrow)],
+      ["week", friday, checkpoint(friday)],
+      ["later", ymdOf(plus(14)), checkpoint(ymdOf(plus(14)))],
+      ["none", null, checkpoint(null)],
+    ];
+    return defs.map(([id, , apply]) => ({ id, label: t(`tickets.kanban.cp_${id}`), items: items.filter((x) => bucket(x) === id).sort(byDue), apply: apply as FieldColumn["apply"] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [by, items, facets, today]);
+  const move = useMutation({
+    mutationFn: ({ id, col }: { id: number; col: FieldColumn }) => col.apply(id) ?? Promise.resolve(),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["tickets"] }),
+    onError: (e) => toast.error(ticketErrorText(t, e)),
+  });
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || !canEdit) return;
+    const id = Number(String(active.id).slice(1));
+    const overId = String(over.id);
+    const target = overId.startsWith("col:") ? columns.find((c) => c.id === overId.slice(4)) : columns.find((c) => c.items.some((x) => x.id === Number(overId.slice(1))));
+    if (!target || target.items.some((x) => x.id === id) || !target.apply) return;
+    move.mutate({ id, col: target });
+  };
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
+      <div className="flex items-start gap-3 overflow-x-auto p-3 scrollbar-thin">
+        {columns.map((col) => (
+          <FieldColumnView key={col.id} col={col} canEdit={canEdit && Boolean(col.apply)} onOpen={onOpen} />
+        ))}
+      </div>
+    </DndContext>
+  );
+}
+
+function FieldColumnView({ col, canEdit, onOpen }: { col: FieldColumn; canEdit: boolean; onOpen: (id: number) => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `col:${col.id}` });
+  return (
+    <section className={cn("flex max-h-[70vh] w-72 shrink-0 flex-col rounded-xl border bg-card/40", isOver && canEdit && "border-[color:var(--gold)]/50 bg-[color:var(--gold)]/[0.04]")}>
+      <header className="flex items-center gap-2 border-b px-3 py-2">
+        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{col.label}</h3>
+        <span className="rounded-full bg-foreground/[0.07] px-1.5 font-mono text-[11px] text-muted-foreground">{col.items.length}</span>
+      </header>
+      <div ref={setNodeRef} className="min-h-24 flex-1 space-y-2 overflow-y-auto p-2 scrollbar-thin">
+        <SortableContext items={col.items.map((x) => `t${x.id}`)} strategy={verticalListSortingStrategy}>
+          {col.items.map((tk) => (
+            <KanbanCard key={tk.id} tk={tk} canEdit={canEdit || true} onOpen={() => onOpen(tk.id)} />
+          ))}
+        </SortableContext>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The tickets of the list on MY boards (columns I made). A board only sorts tickets here, in this view: nothing is written on
+ * the ticket and the other views show no board; the boards and their order are mine alone. What is not on a board stays in "Not sorted".
+ */
+function CustomBoards({ items, canEdit, onOpen }: { items: TicketSummary[]; canEdit: boolean; onOpen: (id: number) => void }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const confirm = useConfirm();
+  const [adding, setAdding] = useState(false);
+  const { data } = useQuery({ queryKey: BOARDS_KEY, queryFn: () => api.get<BoardData>("/ticket-boards"), refetchInterval: 30_000 });
+  const boards = useMemo(() => [...(data?.boards ?? [])].sort((a, b) => a.position - b.position), [data]);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+
+  // the columns: "not sorted", then each board; a board's tickets in its order, only the ones the filters show
+  const columns = useMemo(() => {
+    const cardOf = new Map((data?.cards ?? []).map((c) => [c.ticketId, c]));
+    const known = new Set(boards.map((b) => b.id));
+    const sorted = (id: string) =>
+      items
+        .filter((tk) => cardOf.get(tk.id)?.boardId === id)
+        .sort((a, b) => (cardOf.get(a.id)!.position - cardOf.get(b.id)!.position));
+    return [
+      { id: NONE, board: null as Board | null, items: items.filter((tk) => !cardOf.has(tk.id) || !known.has(cardOf.get(tk.id)!.boardId)) },
+      ...boards.map((b) => ({ id: b.id, board: b as Board | null, items: sorted(b.id) })),
+    ];
+  }, [items, boards, data]);
+
+  const refresh = (next: BoardData) => qc.setQueryData(BOARDS_KEY, next);
+  const fail = (e: unknown) => {
+    toast.error(ticketErrorText(t, e));
+    void qc.invalidateQueries({ queryKey: BOARDS_KEY });
+  };
+  const place = useMutation({
+    mutationFn: (p: { ticketId: number; boardId: string | null; before: number | null }) => api.put<BoardData>(`/ticket-boards/cards/${p.ticketId}`, { boardId: p.boardId, before: p.before }),
+    onMutate: async (p) => {
+      await qc.cancelQueries({ queryKey: BOARDS_KEY });
+      const prev = qc.getQueryData<BoardData>(BOARDS_KEY);
+      if (prev) qc.setQueryData(BOARDS_KEY, { ...prev, cards: moveCard(prev.cards, p.ticketId, p.boardId, p.before) });
+    },
+    onSuccess: refresh,
+    onError: fail,
+  });
+  const add = useMutation({
+    mutationFn: (name: string) => api.post<Board>("/ticket-boards", { name }),
+    onSuccess: () => {
+      setAdding(false);
+      void qc.invalidateQueries({ queryKey: BOARDS_KEY });
+    },
+    onError: fail,
+  });
+  const rename = useMutation({
+    mutationFn: (p: { id: string; name: string }) => api.patch(`/ticket-boards/${p.id}`, { name: p.name }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: BOARDS_KEY }),
+    onError: fail,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/ticket-boards/${id}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: BOARDS_KEY }),
+    onError: fail,
+  });
+  const order = useMutation({
+    mutationFn: (ids: string[]) => api.put<BoardData>("/ticket-boards/order", { ids }),
+    onSuccess: refresh,
+    onError: fail,
+  });
+  const shift = (id: string, by: -1 | 1) => {
+    const ids = boards.map((b) => b.id);
+    const i = ids.indexOf(id);
+    const j = i + by;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    order.mutate(ids);
+  };
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || !canEdit) return;
+    const ticketId = Number(String(active.id).slice(1));
+    const overId = String(over.id);
+    let boardId: string | null;
+    let before: number | null = null;
+    if (overId.startsWith("col:")) {
+      boardId = overId === `col:${NONE}` ? null : overId.slice(4);
+    } else {
+      const overTicket = Number(overId.slice(1));
+      const col = columns.find((c) => c.items.some((x) => x.id === overTicket));
+      if (!col) return;
+      boardId = col.id === NONE ? null : col.id;
+      const list = col.items;
+      const oi = list.findIndex((x) => x.id === overTicket);
+      const ai = list.findIndex((x) => x.id === ticketId);
+      // dragged down inside the same column: it lands after the one it was dropped on
+      before = ai !== -1 && ai < oi ? (list[oi + 1]?.id ?? null) : overTicket;
+    }
+    if (before === ticketId) return;
+    place.mutate({ ticketId, boardId, before });
+  };
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
+      <div className="flex items-start gap-3 overflow-x-auto p-3 scrollbar-thin">
+        {columns.map((col, i) => (
+          <Column
+            key={col.id}
+            id={col.id}
+            board={col.board}
+            items={col.items}
+            canEdit={canEdit}
+            onOpen={onOpen}
+            onRename={(name) => col.board && rename.mutate({ id: col.board.id, name })}
+            onDelete={() =>
+              col.board &&
+              void confirm({ title: t("tickets.kanban.deleteTitle", { name: col.board.name }), description: t("tickets.kanban.deleteText"), confirmLabel: t("common.delete"), destructive: true }).then((ok) => ok && remove.mutate(col.board!.id))
+            }
+            onShift={(by) => col.board && shift(col.board.id, by)}
+            first={i === 1}
+            last={i === columns.length - 1}
+          />
+        ))}
+        {canEdit && (
+          <div className="w-72 shrink-0">
+            {adding ? (
+              <NewBoard onSave={(name) => add.mutate(name)} onCancel={() => setAdding(false)} busy={add.isPending} />
+            ) : (
+              <Button variant="outline" className="w-full justify-start border-dashed" onClick={() => setAdding(true)}>
+                <Plus className="size-4" /> {t("tickets.kanban.add")}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    </DndContext>
+  );
+}
+
+function NewBoard({ onSave, onCancel, busy }: { onSave: (name: string) => void; onCancel: () => void; busy: boolean }) {
+  const { t } = useTranslation();
+  const [name, setName] = useState("");
+  return (
+    <form
+      className="space-y-2 rounded-xl border bg-card/60 p-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (name.trim() && !busy) onSave(name.trim());
+      }}
+    >
+      <Input autoFocus value={name} maxLength={60} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Escape" && onCancel()} placeholder={t("tickets.kanban.name")} className="h-8" />
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+          {t("common.cancel")}
+        </Button>
+        <Button type="submit" size="sm" disabled={!name.trim() || busy}>
+          {t("common.create")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function Column({
+  id,
+  board,
+  items,
+  canEdit,
+  onOpen,
+  onRename,
+  onDelete,
+  onShift,
+  first,
+  last,
+}: {
+  id: string;
+  board: Board | null;
+  items: TicketSummary[];
+  canEdit: boolean;
+  onOpen: (id: number) => void;
+  onRename: (name: string) => void;
+  onDelete: () => void;
+  onShift: (by: -1 | 1) => void;
+  first: boolean;
+  last: boolean;
+}) {
+  const { t } = useTranslation();
+  const { setNodeRef, isOver } = useDroppable({ id: `col:${id}` });
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(board?.name ?? "");
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => setName(board?.name ?? ""), [board?.name]);
+  useEffect(() => {
+    if (editing) input.current?.select();
+  }, [editing]);
+  const save = () => {
+    setEditing(false);
+    if (board && name.trim() && name.trim() !== board.name) onRename(name.trim());
+    else setName(board?.name ?? "");
+  };
+  return (
+    <section className={cn("flex max-h-[70vh] w-72 shrink-0 flex-col rounded-xl border bg-card/40", isOver && "border-[color:var(--gold)]/50 bg-[color:var(--gold)]/[0.04]")}>
+      <header className="flex items-center gap-2 border-b px-3 py-2">
+        {editing && board ? (
+          <Input ref={input} value={name} maxLength={60} onChange={(e) => setName(e.target.value)} onBlur={save} onKeyDown={(e) => (e.key === "Enter" ? save() : e.key === "Escape" && (setName(board.name), setEditing(false)))} className="h-7" />
+        ) : (
+          <h3 className={cn("min-w-0 flex-1 truncate text-sm font-semibold", !board && "text-muted-foreground")} onDoubleClick={() => canEdit && board && setEditing(true)}>
+            {board ? board.name : t("tickets.kanban.notSorted")}
+          </h3>
+        )}
+        <span className="rounded-full bg-foreground/[0.07] px-1.5 font-mono text-[11px] text-muted-foreground">{items.length}</span>
+        {canEdit && board && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" aria-label={t("tickets.kanban.menu")} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+                <MoreHorizontal className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setEditing(true)}>
+                <Pencil className="size-4" /> {t("tickets.kanban.rename")}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={first} onSelect={() => onShift(-1)}>
+                <ArrowLeft className="size-4" /> {t("tickets.kanban.left")}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={last} onSelect={() => onShift(1)}>
+                <ArrowRight className="size-4" /> {t("tickets.kanban.right")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+                <Trash2 className="size-4" /> {t("common.delete")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </header>
+      <div ref={setNodeRef} className="min-h-24 flex-1 space-y-2 overflow-y-auto p-2 scrollbar-thin">
+        <SortableContext items={items.map((x) => `t${x.id}`)} strategy={verticalListSortingStrategy}>
+          {items.map((tk) => (
+            <KanbanCard key={tk.id} tk={tk} canEdit={canEdit} onOpen={() => onOpen(tk.id)} />
+          ))}
+        </SortableContext>
+        {!items.length && <p className="px-2 py-6 text-center text-xs text-muted-foreground">{board ? t("tickets.kanban.emptyBoard") : t("tickets.kanban.emptyNotSorted")}</p>}
+      </div>
+    </section>
+  );
+}
+
+function KanbanCard({ tk, canEdit, onOpen }: { tk: TicketSummary; canEdit: boolean; onOpen: () => void }) {
+  const txt = useChoiceText();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `t${tk.id}`, disabled: !canEdit });
+  const due = dueState(tk.dueAt, tk.statusKind);
+  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={onOpen}
+      className="cursor-pointer touch-none select-none rounded-lg border bg-background/70 p-2.5 text-left shadow-sm transition-colors hover:border-[color:var(--gold)]/40"
+    >
+      <p className="flex items-baseline gap-1.5 text-sm">
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{tk.number}</span>
+        <span className="line-clamp-2 font-medium">{tk.title}</span>
+      </p>
+      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{tk.company.name}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+        <span className={cn("flex items-center gap-1 font-medium", PRIORITY_STYLE[tk.priorityKind].text)}>
+          <span className={cn("size-1.5 rounded-full", PRIORITY_STYLE[tk.priorityKind].dot)} />
+          {txt.priority({ label: tk.priorityLabel, kind: tk.priorityKind })}
+        </span>
+        <span className={cn("font-mono tabular-nums", due === "overdue" ? "text-destructive" : due === "today" ? "text-orange-400" : "text-muted-foreground")}>{shortDate(tk.dueAt)}</span>
+        {tk.assignee && <span className="ml-auto flex size-5 items-center justify-center rounded-full border bg-background/60 text-[9px] font-semibold" title={tk.assignee.name}>{initials(tk.assignee.name)}</span>}
+      </div>
+      <span className={cn("mt-2 inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium leading-tight", STATUS_STYLE[tk.statusKind])}>
+        <span className="size-1 rounded-full bg-current" />
+        {txt.status({ label: tk.statusLabel, kind: tk.statusKind })}
+      </span>
+    </div>
+  );
+}

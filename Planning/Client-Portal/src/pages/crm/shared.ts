@@ -1,0 +1,183 @@
+import { useQuery } from "@tanstack/react-query";
+import { api, ApiError } from "@/lib/api";
+import type { PriorityKind, StatusKind } from "@/pages/tickets/shared";
+
+/** The CRM: the portal's clients. */
+export type CrmClient = {
+  id: string;
+  name: string;
+  code: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  province: string | null;
+  postalCode: string | null;
+  website: string | null;
+  notes: string | null;
+  active: boolean;
+  autotaskId: number | null;
+  parentId: string | null;
+  classKey: string | null;
+  /** The client portal is open for the whole company */
+  portalEnabled: boolean;
+  syncedAt: string | null;
+};
+export type CrmListItem = CrmClient & { parentName: string | null; children: number; contacts: number; contracts: number; billingEmail: string | null; openTickets: number };
+export type InvoiceSettings = {
+  billingEmail?: string;
+  termsDays?: number;
+  delivery?: "email" | "mail";
+  taxes?: boolean;
+  taxNumber?: string;
+  poRequired?: boolean;
+  payOnline?: boolean | null;
+  consumer?: boolean;
+  hourlyRate?: number | null;
+  notes?: string;
+  /** Kinds of work approved automatically when imported */
+  autoApprove?: string[];
+};
+export type CrmDetail = CrmClient & {
+  parent: { id: string; name: string } | null;
+  children: { id: string; name: string; active: boolean }[];
+  /** null: no right to see it */
+  invoice: InvoiceSettings | null;
+};
+export type CrmContact = {
+  id: string;
+  clientId: string;
+  autotaskId: string | null;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  mobile: string | null;
+  title: string | null;
+  active: boolean;
+  /** The contact invoices go to by default */
+  billing?: boolean;
+  /** The client's main contact */
+  isPrimary?: boolean;
+  userId: string | null;
+  /** Client portal access (null: none) */
+  portal: { lastLoginAt: string | null; pending: boolean; role: string | null; /** account ready, the company's portal not open yet */ dormant: boolean } | null;
+};
+export type InvoiceStatus = "paid" | "partial" | "due" | "overdue" | "voided";
+export type InvoicePayment = { id: string; amountCents: number; paidOn: string; method: string; reference: string | null; note: string | null; source: string; by: string | null };
+export type CrmInvoice = {
+  id: string;
+  /** The taxes would change by this much when put on the line-by-line rounding of QuickBooks (0: they already are, or cannot be changed) */
+  taxFixCents?: number;
+  number: string;
+  company: string;
+  issuedOn: string;
+  dueOn: string | null;
+  totalCents: number;
+  taxCents: number;
+  paidCents: number;
+  balanceCents: number;
+  paidOn: string | null;
+  status: InvoiceStatus;
+  late: boolean;
+  daysLate: number;
+  payments: InvoicePayment[];
+  /** autotask: copied from the old system · portal: made here (with its lines) */
+  source: "autotask" | "quickbooks" | "portal";
+  notes: string | null;
+  poNumber: string | null;
+  lines: { id: string; kind: string; description: string; quantity: number; unitPriceCents: number; amountCents: number; taxable: boolean }[];
+  /** In QuickBooks: its id once sent, the last send, its error */
+  quickbooks: { id: string | null; syncedAt: string | null; error: string | null } | null;
+};
+export type CrmInvoices = { summary: { dueCents: number; overdueCents: number; overdueCount: number; partialCount: number; paidYearCents: number }; items: CrmInvoice[] };
+/** 1 234,56 $ */
+export const money = (cents: number, lang: string) => new Intl.NumberFormat(lang === "en" ? "en-CA" : "fr-CA", { style: "currency", currency: "CAD" }).format(cents / 100);
+
+export type CrmContract = {
+  id: string;
+  name: string;
+  type: string | null;
+  active: boolean;
+  isDefault: boolean;
+  autoApprove: boolean;
+  startDate: string | null;
+  endDate: string | null;
+  /** hourly | monthly | per_ticket | none | banked | fixed */
+  billingMode: "hourly" | "monthly" | "per_ticket" | "none" | "banked" | "fixed";
+  typeKey: string | null;
+  bankedHoursX100: number | null;
+  /** A rebate on everything the contract charges (percent × 100) */
+  rebateBps?: number;
+  /** Hours bank: the price of an hour, what becomes of the hours not used in a month, and where it stands this month */
+  bankRateCents?: number | null;
+  bankRollover?: "lose" | "carry" | "topup";
+  bank?: { hours: number; rateCents: number | null; rollover: "lose" | "carry" | "topup"; available: number; used: number; left: number; over: number } | null;
+  fixedPriceCents: number | null;
+  /** A recurring contract sold as a bundle: one price per billing period and a quantity (none: the services are charged one by one) */
+  bundlePriceCents?: number | null;
+  bundleQuantity?: number;
+  /** Hours worked under it */
+  usedHours: number;
+  hourlyRateCents: number | null;
+  monthlyRateCents: number | null;
+  ticketRateCents: number | null;
+  /** A parent company's contract its children can use; a child's contract the parent pays */
+  sharedWithChildren?: boolean;
+  billedToParent?: boolean;
+  /** The client's default support contract */
+  isSupportDefault: boolean;
+  /** The usual hourly rate of Admin › Facturation, in cents */
+  usualRateCents: number;
+  /** How a recurring services contract is charged */
+  billingPeriod?: "monthly" | "yearly";
+  /** The day charging was stopped (inactive after charges had started) */
+  endedOn?: string | null;
+  serviceCount?: number;
+  /** What it charges: potential revenue over its term, a full period (per month or per year), the next charge */
+  summary?: { revenueCents: number; perPeriodCents: number; yearlyExtraCents: number; endsOn: string | null; dueCents: number; next: { date: string; amountCents: number; prorated: boolean } | null };
+};
+/** A contract type of Admin › Types de contrats, as the contract forms list it */
+export type ContractTypeOption = { key: string; name: string; kind: "recurring" | "hourly" | "banked" | "fixed" };
+export const useContractTypes = () => useQuery({ queryKey: ["crm", "contract-types"], queryFn: () => api.get<ContractTypeOption[]>("/crm/contract-types"), staleTime: 60_000 });
+export type CrmTicket = {
+  id: number;
+  number: string;
+  title: string;
+  company: string;
+  contact: string;
+  statusLabel: string | null;
+  statusKind: StatusKind;
+  priorityLabel: string | null;
+  priorityKind: PriorityKind;
+  assignee: string | null;
+  dueAt: string;
+  updatedAt: string;
+};
+export type SyncStatus = {
+  mode: "sample" | "local";
+  lastSync: string | null;
+  ok: boolean | null;
+  error: string | null;
+  counts: { clients: number; contacts: number; contracts: number } | null;
+  every: number;
+};
+
+export const useCrmClients = () => useQuery({ queryKey: ["crm", "clients"], queryFn: () => api.get<CrmListItem[]>("/crm/clients"), staleTime: 30_000 });
+export const useSyncStatus = () => useQuery({ queryKey: ["crm", "status"], queryFn: () => api.get<SyncStatus>("/crm/status"), refetchInterval: 60_000 });
+
+/** A message for an API error of the CRM. */
+export function crmErrorText(t: (k: string, o?: Record<string, unknown>) => string, e: unknown) {
+  if (e instanceof ApiError && (e.code === "parent_loop" || e.code === "company_exists")) return t(`crm.errors.${e.code}`);
+  return null;
+}
+
+/** "3 min", "2 h", "4 j" */
+export function since(iso: string, lang: string) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(lang === "en" ? "en-CA" : "fr-CA", { numeric: "auto", style: "short" });
+  if (s < 60) return rtf.format(0, "minute");
+  if (s < 3600) return rtf.format(-Math.round(s / 60), "minute");
+  if (s < 86_400) return rtf.format(-Math.round(s / 3600), "hour");
+  return rtf.format(-Math.round(s / 86_400), "day");
+}

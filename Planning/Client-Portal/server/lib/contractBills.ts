@@ -1,0 +1,84 @@
+import { and, asc, eq, isNotNull } from "drizzle-orm";
+import { db, schema } from "../db/index.ts";
+import { contractCharges, hasBundle, linesForCharges, type ChargeLine } from "../../shared/contractCharges.ts";
+import { adjustmentsOf, bankRowsOf, usedByMonthOf } from "./contracts.ts";
+import { netCents, rebateNote } from "../../shared/rebate.ts";
+import type { Billable } from "./ticketSource.ts";
+
+/**
+ * The recurring charges of the contracts as work to bill: one line per service and per charge date (what the contract
+ * window shows under "Facturation"), ready to approve in Accounting › Approbation. A line is quantity × unit price, so
+ * 10 units at $45 is 10 × $45 = $450 (never the total as the unit price); a part period (a service starting mid-month,
+ * a contract that ends) is one line with quantity 1 and the prorated total. Only the charge dates that have come, from
+ * `since` on, and after the day the contract was invoiced through in the old system.
+ */
+const todayQc = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
+const dmy = (ymd: string) => ymd.split("-").reverse().join("/");
+
+export async function contractBillables(since: string): Promise<Billable[]> {
+  const d = db();
+  const today = todayQc();
+  const contracts = await d
+    .select({ k: schema.clientContracts, companyId: schema.clients.autotaskId })
+    .from(schema.clientContracts)
+    .innerJoin(schema.clients, eq(schema.clients.id, schema.clientContracts.clientId))
+    .where(and(isNotNull(schema.clients.autotaskId), isNotNull(schema.clientContracts.startDate), isNotNull(schema.clientContracts.endDate)));
+  if (!contracts.length) return [];
+  const rows = await d
+    .select({ s: schema.contractServices, taxable: schema.services.taxable })
+    .from(schema.contractServices)
+    .leftJoin(schema.services, eq(schema.services.id, schema.contractServices.serviceId))
+    .orderBy(asc(schema.contractServices.addedOn), asc(schema.contractServices.name));
+  const out: Billable[] = [];
+  const usedBy = await usedByMonthOf(contracts.filter(({ k }) => k.billingMode === "banked").map(({ k }) => k));
+  const adjusted = await adjustmentsOf(contracts.filter(({ k }) => k.billingMode === "banked").map(({ k }) => k.id));
+  for (const { k, companyId } of contracts) {
+    const mine = rows.filter((r) => r.s.contractId === k.id);
+    // a bundle is charged even with no service listed under it
+    if (!mine.length && !hasBundle(k)) continue;
+    const byId = new Map(mine.map((r) => [r.s.id, r]));
+    const period = k.billingPeriod === "yearly" ? "yearly" : "monthly";
+    const services: ChargeLine[] = mine.map(({ s }) => ({ id: s.id, name: s.name, kind: s.kind === "recurring_yearly" ? "recurring_yearly" : "recurring", priceCents: s.priceCents, quantity: s.quantity, addedOn: s.addedOn, rebateBps: s.rebateBps }));
+    // a bundle replaces the services' own prices: one line for the package, its price and quantity
+    const lines = linesForCharges({ name: k.name, startDate: k.startDate, billingPeriod: period, bundlePriceCents: k.bundlePriceCents, bundleQuantity: k.bundleQuantity, rebateBps: k.rebateBps }, services);
+    const charges = contractCharges({ startDate: k.startDate, endDate: k.endDate, endedOn: k.endedOn, billingPeriod: period }, lines);
+    // an hours bank that tops up each month only buys what the month before left unused
+    const bankMonths = k.billingMode === "banked" && k.bankRollover === "topup" ? new Map(bankRowsOf(k, usedBy.get(k.id), today, adjusted.get(k.id)).map((r) => [r.month, r.charge])) : null;
+    for (const e of charges.entries) {
+      if (e.date > today || e.date < since || (k.billedThrough && e.date <= k.billedThrough)) continue;
+      for (const p of e.pieces) {
+        const svc = byId.get(p.lineId);
+        const bundled = p.lineId === "bundle";
+        if (!svc && !bundled) continue;
+        let qty = Math.max(1, bundled ? k.bundleQuantity : svc!.s.quantity);
+        let amountCents = p.amountCents;
+        let whole = !p.prorated && amountCents % qty === 0;
+        let name = p.name;
+        if (bundled && bankMonths && !p.prorated && k.bankRateCents != null) {
+          const hours = bankMonths.get(e.date.slice(0, 7));
+          if (hours !== undefined) {
+            if (hours <= 0) continue;
+            amountCents = Math.round(hours * netCents(k.bankRateCents, k.rebateBps));
+            qty = Number.isInteger(hours) ? hours : 1;
+            whole = Number.isInteger(hours);
+            name = `${p.name} — ${hours} h`;
+          }
+        }
+        out.push({
+          id: `contract:${k.id}:${bundled ? "bundle" : svc!.s.id}:${e.date}`,
+          kind: "contract",
+          companyId: companyId!,
+          date: e.date,
+          dateEnd: p.to,
+          description: `${name}${p.rebateBps ? ` (${rebateNote(Math.round(p.amountCents / (1 - Math.min(p.rebateBps, 9999) / 10000)), p.rebateBps)})` : ""}${p.prorated ? ` (prorata ${p.days}/${p.periodDays} j)` : ""} — ${dmy(p.from)} – ${dmy(p.to)}`,
+          contractName: k.name,
+          contractSourceId: k.autotaskId,
+          quantity: whole ? qty : 1,
+          unitPriceCents: whole ? amountCents / qty : amountCents,
+          taxable: bundled ? true : (svc!.taxable ?? true),
+        });
+      }
+    }
+  }
+  return out;
+}

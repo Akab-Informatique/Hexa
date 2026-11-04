@@ -1,0 +1,396 @@
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Ban, BellRing, CreditCard, Download, ExternalLink, Eye, FileText, Loader2, Mail, MailWarning, Search, Send } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { api, ApiError } from "@/lib/api";
+import { useCan } from "@/lib/session";
+import { cn } from "@/lib/utils";
+import { money } from "@/pages/crm/shared";
+import { shortDate } from "@/pages/tickets/shared";
+
+type Statement = {
+  client: { id: string; name: string; email: string | null };
+  date: string;
+  count: number;
+  totalDueCents: number;
+  overdueCents: number;
+  buckets: { current: number; d30: number; d60: number; d90: number; over90: number };
+  items: { id: string; number: string; issuedOn: string; dueOn: string | null; totalCents: number; balanceCents: number; daysLate: number; poNumber: string | null }[];
+};
+type Target = { id: string; name: string; email: string | null; count: number; totalDueCents: number; overdueCents: number; maxDaysLate: number };
+
+/** The reason an email did not go, in words */
+export function mailError(t: (k: string) => string, e: unknown) {
+  const code = e instanceof ApiError ? e.code : "";
+  return code.startsWith("invoice_mail_") && code !== "invoice_mail_mail_failed" ? t(`statements.error.${code.slice("invoice_mail_".length)}`) : code === "rate_limited" ? t("statements.error.rate_limited") : t("statements.error.mail_failed");
+}
+
+/** One client's account statement: what is unpaid, how late, and the way to email it. */
+export function ClientStatementDialog({ clientId, onClose }: { clientId: string; onClose: () => void }) {
+  const { t, i18n } = useTranslation();
+  const can = useCan();
+  const m = (c: number) => money(c, i18n.language);
+  const { data, isLoading } = useQuery({ queryKey: ["crm", "client", clientId, "statement"], queryFn: () => api.get<Statement>(`/crm/clients/${clientId}/statement`) });
+  const send = useMutation({
+    mutationFn: () => api.post<{ to: string; count: number }>(`/crm/clients/${clientId}/statement/send`, {}),
+    onSuccess: (r) => {
+      toast.success(t("statements.sentTo", { to: r.to }));
+      onClose();
+    },
+    onError: (e) => toast.error(mailError(t, e)),
+  });
+  const B = data?.buckets;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="size-5 text-primary" /> {t("statements.title")}
+          </DialogTitle>
+          <DialogDescription>{data ? `${data.client.name} — ${shortDate(data.date)}` : ""}</DialogDescription>
+        </DialogHeader>
+        {isLoading || !data ? (
+          <Loader2 className="mx-auto my-8 size-5 animate-spin text-muted-foreground" />
+        ) : (
+          <div className="space-y-4 text-sm">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <Fig label={t("statements.totalDue")} value={m(data.totalDueCents)} />
+              <Fig label={t("statements.overdue")} value={m(data.overdueCents)} tone={data.overdueCents ? "text-red-300" : undefined} />
+              <Fig label={t("statements.invoices")} value={String(data.count)} />
+            </div>
+            {B && (
+              <div className="grid grid-cols-5 gap-1 text-center text-[11px]">
+                {(["current", "d30", "d60", "d90", "over90"] as const).map((k) => (
+                  <div key={k} className="rounded-lg border px-1 py-1.5">
+                    <p className="text-muted-foreground">{t(`statements.bucket.${k}`)}</p>
+                    <p className="font-mono text-xs font-semibold">{m(B[k])}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {data.items.length === 0 ? (
+              <p className="rounded-lg border border-dashed py-6 text-center text-muted-foreground">{t("statements.nothing")}</p>
+            ) : (
+              <ul className="divide-y divide-border/50 overflow-hidden rounded-lg border">
+                {data.items.map((i) => (
+                  <li key={i.id} className="flex flex-wrap items-center gap-x-4 gap-y-0.5 px-3 py-2 text-xs">
+                    <span className="w-24 font-mono">{i.number}</span>
+                    <span className="text-muted-foreground">{shortDate(i.issuedOn)}</span>
+                    <span className={cn("min-w-0 flex-1", i.daysLate > 0 ? "font-medium text-red-300" : "text-muted-foreground")}>
+                      {i.dueOn ? shortDate(i.dueOn) : "—"}
+                      {i.daysLate > 0 && ` · ${t("crm.invoices.late", { count: i.daysLate })}`}
+                    </span>
+                    <span className="font-mono">{m(i.balanceCents)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Mail className="size-3.5" /> {data.client.email ?? t("statements.noEmail")}
+              </span>
+              {can("accounting.manage") && (
+                <Button disabled={send.isPending || !data.count || !data.client.email} onClick={() => send.mutate()} className="bg-grad-gold font-semibold text-[#1a1204] hover:brightness-105">
+                  {send.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} {t("statements.send")}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Fig({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="rounded-xl border px-3 py-2">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className={cn("font-mono text-lg font-bold", tone)}>{value}</p>
+    </div>
+  );
+}
+
+/** Statements for every client that owes something, or only the ones ticked. */
+export function StatementsDialog({ onClose }: { onClose: () => void }) {
+  const { t, i18n } = useTranslation();
+  const confirm = useConfirm();
+  const m = (c: number) => money(c, i18n.language);
+  const { data, isLoading } = useQuery({ queryKey: ["crm", "statements", "targets"], queryFn: () => api.get<Target[]>("/crm/statements/targets") });
+  const [q, setQ] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [result, setResult] = useState<{ sent: number; results: { id: string; name: string; status: string }[] } | null>(null);
+  const shown = useMemo(() => (data ?? []).filter((x) => x.name.toLowerCase().includes(q.toLowerCase())), [data, q]);
+  const canSend = (x: Target) => Boolean(x.email);
+  const chosen = (data ?? []).filter((x) => picked.has(x.id) && canSend(x));
+  const send = useMutation({
+    mutationFn: (ids: string[] | null) => api.post<{ sent: number; results: { id: string; name: string; status: string }[] }>("/crm/statements/send", ids ? { clientIds: ids } : {}),
+    onSuccess: (r) => setResult(r),
+    onError: (e) => toast.error(mailError(t, e)),
+  });
+  const allShown = shown.filter(canSend);
+  const toggle = (id: string, on: boolean) => setPicked((s) => new Set(on ? [...s, id] : [...s].filter((x) => x !== id)));
+  const ask = async (ids: string[] | null, count: number) => {
+    if (await confirm({ title: t("statements.bulkConfirm", { count }), description: t("statements.bulkText") })) send.mutate(ids);
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="size-5 text-primary" /> {t("statements.bulkTitle")}
+          </DialogTitle>
+          <DialogDescription>{t("statements.bulkSubtitle")}</DialogDescription>
+        </DialogHeader>
+        {result ? (
+          <div className="space-y-3 text-sm">
+            <p className="font-medium">{t("statements.bulkDone", { count: result.sent })}</p>
+            {result.results.filter((r) => r.status !== "sent").length > 0 && (
+              <ul className="divide-y divide-border/50 rounded-lg border">
+                {result.results
+                  .filter((r) => r.status !== "sent")
+                  .map((r) => (
+                    <li key={r.id} className="flex justify-between px-3 py-1.5 text-xs">
+                      <span>{r.name}</span>
+                      <span className="text-amber-300">{t(`statements.result.${r.status}`)}</span>
+                    </li>
+                  ))}
+              </ul>
+            )}
+            <Button variant="outline" onClick={onClose}>
+              {t("common.close")}
+            </Button>
+          </div>
+        ) : isLoading || !data ? (
+          <Loader2 className="mx-auto my-8 size-5 animate-spin text-muted-foreground" />
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-52 flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("common.search")} className="h-8 pl-8" />
+              </div>
+              <Button type="button" size="sm" variant="outline" onClick={() => setPicked(new Set([...picked, ...allShown.map((x) => x.id)]))}>
+                {t("statements.selectShown")}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setPicked(new Set())} disabled={!picked.size}>
+                {t("statements.clear")}
+              </Button>
+            </div>
+            <ul className="max-h-[22rem] divide-y divide-border/50 overflow-y-auto rounded-xl border scrollbar-thin">
+              {shown.map((x) => (
+                <li key={x.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                  <Checkbox checked={picked.has(x.id)} disabled={!canSend(x)} onCheckedChange={(v) => toggle(x.id, Boolean(v))} aria-label={x.name} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{x.name}</span>
+                    <span className={cn("block truncate text-[11px]", x.email ? "text-muted-foreground" : "text-amber-300")}>{x.email ?? t("statements.noEmail")}</span>
+                  </span>
+                  <span className="text-right text-xs">
+                    <span className="block font-mono font-semibold">{m(x.totalDueCents)}</span>
+                    {x.overdueCents > 0 && <span className="block text-[11px] text-red-300">{t("statements.lateOf", { amount: m(x.overdueCents), days: x.maxDaysLate })}</span>}
+                  </span>
+                </li>
+              ))}
+              {shown.length === 0 && <li className="px-3 py-6 text-center text-xs text-muted-foreground">{t("statements.none")}</li>}
+            </ul>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">{t("statements.picked", { count: chosen.length, total: data.length })}</span>
+              <span className="flex gap-2">
+                <Button disabled={!chosen.length || send.isPending} onClick={() => void ask(chosen.map((x) => x.id), chosen.length)} className="bg-grad-gold font-semibold text-[#1a1204] hover:brightness-105">
+                  {send.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} {t("statements.sendPicked", { count: chosen.length })}
+                </Button>
+                <Button variant="outline" disabled={!data.filter(canSend).length || send.isPending} onClick={() => void ask(null, data.filter(canSend).length)}>
+                  {t("statements.sendAll", { count: data.filter(canSend).length })}
+                </Button>
+              </span>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The Stripe pay link of an invoice: on, the emails of this invoice (the invoice, its reminders) carry a "Pay online" button
+ * for the balance; a click turns it on or off for this invoice only (the client's or the template's choice applies until then).
+ */
+export function InvoicePayButton({ invoice }: { invoice: { id: string; status: string; balanceCents: number; payOnline?: boolean; payOwn?: boolean | null; payReady?: boolean } }) {
+  const { t } = useTranslation();
+  const can = useCan();
+  const qc = useQueryClient();
+  const run = useMutation({
+    mutationFn: (payOnline: boolean) => api.put(`/crm/invoices/${invoice.id}/pay-online`, { payOnline }),
+    onSuccess: (_r, on) => {
+      void qc.invalidateQueries();
+      toast.success(t(on ? "statements.payAdded" : "statements.payRemoved"));
+    },
+    onError: () => toast.error(t("common.error")),
+  });
+  if (invoice.payOnline === undefined || invoice.status === "voided" || invoice.balanceCents <= 0) return null;
+  const on = invoice.payOnline;
+  const title = [t(on ? "statements.payOn" : "statements.payOff"), !invoice.payReady && t("statements.payNotReady"), invoice.payOwn == null && t("statements.payInherited")].filter(Boolean).join(" · ");
+  return (
+    <Button
+      type="button"
+      size="icon"
+      variant="ghost"
+      className={cn("size-7", on && invoice.payReady ? "text-[#8b85ff]" : on ? "text-amber-300" : "text-muted-foreground/50")}
+      disabled={!can("accounting.manage") || run.isPending}
+      aria-pressed={on}
+      onClick={() => run.mutate(!on)}
+      title={title}
+      aria-label={title}
+    >
+      {run.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <CreditCard className="size-3.5" />}
+    </Button>
+  );
+}
+
+/** The two emails of an invoice: the invoice itself, and (when it is past due) a reminder that follows how late it is. */
+export function InvoiceMailButtons({ invoice, compact }: { invoice: { id: string; number: string; late: boolean; balanceCents: number; status: string; noEmail?: boolean }; compact?: boolean }) {
+  const { t } = useTranslation();
+  const can = useCan();
+  const confirm = useConfirm();
+  const send = useMutation({
+    mutationFn: (kind: "sent" | "reminder") => api.post<{ to: string }>(`/crm/invoices/${invoice.id}/mail`, { kind }),
+    onSuccess: (r) => toast.success(t("statements.sentTo", { to: r.to })),
+    onError: (e) => toast.error(mailError(t, e)),
+  });
+  if (!can("accounting.manage") || invoice.status === "voided") return null;
+  const ask = async (kind: "sent" | "reminder") => {
+    if (await confirm({ title: t(kind === "sent" ? "statements.invoiceConfirm" : "statements.reminderConfirm", { number: invoice.number }) })) send.mutate(kind);
+  };
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Button
+        type="button"
+        size={compact ? "icon" : "sm"}
+        variant="ghost"
+        className={cn(compact ? "size-7" : "h-7 text-xs", invoice.noEmail && "text-red-400 hover:text-red-300")}
+        disabled={send.isPending}
+        onClick={() => (invoice.noEmail ? toast.error(t("statements.noEmailInvoice")) : void ask("sent"))}
+        title={invoice.noEmail ? t("statements.noEmailInvoice") : t("statements.sendInvoice")}
+      >
+        {invoice.noEmail ? <MailWarning className="size-3.5" /> : <Mail className="size-3.5" />} {!compact && t("statements.sendInvoice")}
+      </Button>
+      {invoice.late && invoice.balanceCents > 0 && (
+        <Button type="button" size={compact ? "icon" : "sm"} variant="ghost" className={compact ? "size-7 text-red-300" : "h-7 text-xs text-red-300"} disabled={send.isPending} onClick={() => void ask("reminder")} title={t("statements.sendReminder")}>
+          <BellRing className="size-3.5" /> {!compact && t("statements.sendReminder")}
+        </Button>
+      )}
+    </span>
+  );
+}
+
+/** The invoice as a PDF in a window over the page (opened where it is, or in a tab, or downloaded). */
+export function InvoicePdfDialog({ invoice, onClose }: { invoice: { id: string; number: string }; onClose: () => void }) {
+  const { t } = useTranslation();
+  const src = `/api/crm/invoices/${invoice.id}/pdf`;
+  // the PDF is read here and shown from a local blob address: a proxy's frame header (X-Frame-Options) cannot block it
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let url: string | null = null;
+    let live = true;
+    fetch(src, { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
+      .then((b) => {
+        url = URL.createObjectURL(new Blob([b], { type: "application/pdf" }));
+        if (live) setBlobUrl(url);
+      })
+      .catch(() => live && setFailed(true));
+    return () => {
+      live = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [src]);
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="flex h-[90vh] max-h-[90vh] flex-col gap-3 sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle className="flex flex-wrap items-center gap-2 pr-6">
+            <FileText className="size-5 text-primary" /> {t("statements.pdfTitle", { number: invoice.number })}
+            <span className="ml-auto flex gap-1.5">
+              <Button asChild size="sm" variant="outline" className="h-8 text-xs">
+                <a href={src} target="_blank" rel="noreferrer">
+                  <ExternalLink className="size-3.5" /> {t("statements.pdfOpen")}
+                </a>
+              </Button>
+              <Button asChild size="sm" variant="outline" className="h-8 text-xs">
+                <a href={`${src}?download=1`}>
+                  <Download className="size-3.5" /> {t("statements.pdfDownload")}
+                </a>
+              </Button>
+            </span>
+          </DialogTitle>
+          <DialogDescription className="sr-only">{t("statements.pdfTitle", { number: invoice.number })}</DialogDescription>
+        </DialogHeader>
+        {failed ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">{t("common.error")}</p>
+        ) : blobUrl ? (
+          <iframe src={blobUrl} title={invoice.number} className="min-h-0 w-full flex-1 rounded-lg border bg-white" />
+        ) : (
+          <div className="flex flex-1 items-center justify-center"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The button that shows an invoice's PDF in a window (a small icon, or with its name). */
+export function InvoicePdfButton({ invoice, compact }: { invoice: { id: string; number: string }; compact?: boolean }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button type="button" size={compact ? "icon" : "sm"} variant="ghost" className={compact ? "size-7" : "h-7 text-xs"} onClick={() => setOpen(true)} title={t("statements.pdfPreview")}>
+        <Eye className="size-3.5" /> {!compact && t("statements.pdfPreview")}
+      </Button>
+      {open && <InvoicePdfDialog invoice={invoice} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/**
+ * Void an invoice made by the portal: it is voided in the portal and, when it went there, in QuickBooks (the number stays,
+ * never used again), and its work goes back to approve. Not once a payment is received.
+ */
+export function InvoiceVoidButton({ invoice, compact }: { invoice: { id: string; number: string; status: string; source?: string; paidCents?: number }; compact?: boolean }) {
+  const { t } = useTranslation();
+  const can = useCan();
+  const confirm = useConfirm();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const run = useMutation({
+    mutationFn: () => api.post<{ number: string; items: number; quickbooks: boolean; from: string | null; to: string | null }>("/billables/unpost", { invoiceId: invoice.id }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries();
+      // Éléments à facturer lists one time frame: open it on the days of the work given back
+      toast.success(t(r.quickbooks ? "statements.voidedQb" : "statements.voided", { number: r.number, count: r.items }), {
+        duration: 10000,
+        ...(r.from && r.to ? { action: { label: t("statements.voidedSee"), onClick: () => navigate(`/accounting/invoices?tab=items&period=custom&from=${r.from}&to=${r.to}`) } } : {}),
+      });
+    },
+    onError: (e) => {
+      const code = e instanceof ApiError ? e.code : "";
+      toast.error(["invoice_has_payments", "invoice_voided", "invoice_not_portal", "quickbooks_void_failed"].includes(code) ? t(`statements.voidError.${code}`) : t("common.error"));
+    },
+  });
+  if (!can("accounting.manage") || invoice.status === "voided" || (invoice.source && invoice.source !== "portal") || (invoice.paidCents ?? 0) > 0) return null;
+  const ask = async () => {
+    if (await confirm({ title: t("statements.voidTitle", { number: invoice.number }), description: t("statements.voidText"), confirmLabel: t("statements.void"), destructive: true })) run.mutate();
+  };
+  return (
+    <Button type="button" size={compact ? "icon" : "sm"} variant="ghost" className={compact ? "size-7 text-red-300" : "h-7 text-xs text-red-300"} disabled={run.isPending} onClick={() => void ask()} title={t("statements.void")}>
+      {run.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Ban className="size-3.5" />} {!compact && t("statements.void")}
+    </Button>
+  );
+}
