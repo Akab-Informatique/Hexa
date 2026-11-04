@@ -15,7 +15,7 @@
     "dev:instance": "node --watch --import tsx apps/instance/src/index.ts",
     "dev:console": "node --watch --import tsx apps/console/src/index.ts",
     "dev:updater": "node --watch --import tsx apps/updater/src/index.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit",
     "dev": "node scripts/dev.mjs",
     "test": "vitest run"
   },
@@ -23,7 +23,9 @@
     "@hono/node-server": "^1.13.7",
     "fflate": "^0.8.2",
     "hono": "^4.6.14",
+    "otpauth": "^9.6.0",
     "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
     "tsx": "^4.19.2",
     "zod": "^3.24.1"
   },
@@ -32,6 +34,7 @@
     "@electric-sql/pglite-socket": "^0.2.18",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
+    "@types/qrcode": "^1.5.6",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }

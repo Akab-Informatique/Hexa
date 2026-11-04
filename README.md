@@ -5,8 +5,10 @@ White-label app sold per client. **One install per client** (own server, own dat
 ```
 apps/console    Your admin console: clients, branding, modules, pinned versions, releases, fleet view,
                 install-bundle generator, license check endpoint.
-apps/instance   The client app (same Docker image for everyone). Checks its license, loads only the
-                modules enabled for that client, shows "Update available" and triggers the updater.
+apps/instance   The client API (same Docker image for everyone): login + 2FA, users, groups, permissions, admin API,
+                license check, module loader, update trigger. Also serves the built web app.
+apps/web        The staff app (React): branded glass UI, login, collapsible module sidebar, admin screens. FR/EN.
+apps/site       One-page "coming soon" marketing site with "Find your firm" login and console login link.
 apps/updater    Sidecar next to each instance: backup -> pull -> restart -> health check -> auto-rollback.
 packages/shared Shared types, license/branding schemas, version helpers, SQL migration runner.
 modules/        Client-specific code as plugins (never edit the core for one client).
@@ -42,9 +44,15 @@ Put your Nginx in front (proxy to `127.0.0.1:8080`, HTTPS) and set `PUBLIC_URL` 
 ```bash
 npm install
 npm run typecheck && npm test
-npm run dev:console    # needs Postgres + ADMIN_PASSWORD + CONSOLE_SECRET (32+ chars)
-npm run dev:instance   # needs Postgres; runs unlicensed when CONSOLE_URL is unset
+npm run dev            # whole stack, no Docker/Postgres (embedded PGlite); prints the demo sign-in
 ```
+`npm run dev` serves the staff app on :5173, the marketing page on :8081, the console on :8080 (admin/admin) and the API on :3000.
+Delete `.data/` to reset the demo.
+
+## Access control
+Every right is a key in `packages/shared/src/permissions.ts` (`<module>.<page>.<action>`). Users get rights from groups plus
+per-user allow/deny overrides (deny wins). Nobody can grant a right they do not hold. Staff and client users share one users table;
+client users (portal) come later.
 
 ## Status / TODO
 - Typecheck and unit tests pass. **Not yet run end-to-end with Docker** (not available on the build machine): test the bundle install, the update and the rollback on a real server before selling.

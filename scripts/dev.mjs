@@ -3,6 +3,8 @@
 // Data persists in .data/ (delete it to reset). Dev only: never used in production images.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { unzipSync, strFromU8 } from "fflate";
@@ -55,7 +57,7 @@ await waitFor(`http://127.0.0.1:${CONSOLE_PORT}/api/ping`, "console");
 await api("/api/releases", { version: "0.1.0", notes: "First release" });
 await api("/api/releases", { version: "0.2.0", notes: "Demo update" });
 await api("/api/clients", {
-  id: "demo", name: "Acme Corp", domain: "portal.acme.test", pinnedVersion: "0.2.0",
+  id: "demo", name: "Acme Corp", domain: "portal.acme.test", adminEmail: "admin@acme.test", pinnedVersion: "0.2.0",
   maxUsers: 25, modules: ["example-hello"],
   branding: { appName: "Acme Portal", primaryColor: "#7c3aed", accentColor: "#1e1b4b" },
 });
@@ -73,10 +75,33 @@ run("instance", "apps/instance/src/index.ts", {
   LICENSE_KEY: get("LICENSE_KEY"),
   CONSOLE_URL: `http://127.0.0.1:${CONSOLE_PORT}`,
   APP_VERSION: "0.1.0",
-  INSTANCE_ADMIN_TOKEN: "dev",
+  INITIAL_ADMIN_EMAIL: get("INITIAL_ADMIN_EMAIL"),
+  INITIAL_ADMIN_PASSWORD: get("INITIAL_ADMIN_PASSWORD"),
+  APP_SECRET: get("APP_SECRET"),
+  DEV_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173",
 });
 await waitFor(`http://127.0.0.1:${INSTANCE_PORT}/api/health`, "instance");
-console.log(`\n[dev] ready\n  console:  http://localhost:${CONSOLE_PORT}  (admin / admin)\n  instance: http://localhost:${INSTANCE_PORT}  (client "Acme Portal")\n`);
+
+// Web app (Vite dev server, proxies /api to the instance) and the marketing page (static).
+const viteBin = "apps/web/node_modules/vite/bin/vite.js";
+const vite = spawn(process.execPath, [fs.existsSync(viteBin) ? path.resolve(viteBin) : path.resolve("node_modules/vite/bin/vite.js")], {
+  cwd: "apps/web", stdio: "inherit", env: { ...process.env, API_URL: `http://127.0.0.1:${INSTANCE_PORT}` },
+});
+children.push(vite);
+http.createServer((req, res) => {
+  const js = req.url === "/config.js";
+  res.writeHead(200, { "content-type": js ? "text/javascript" : "text/html; charset=utf-8" });
+  res.end(fs.readFileSync(js ? "apps/site/config.js" : "apps/site/index.html"));
+}).listen(8081, "127.0.0.1");
+await waitFor("http://localhost:5173/", "web app");
+
+console.log(`
+[dev] ready
+  web app:  http://localhost:5173   sign in: ${get("INITIAL_ADMIN_EMAIL")} / ${get("INITIAL_ADMIN_PASSWORD")}  (first login forces a new password)
+  site:     http://localhost:8081   (marketing page; firm id "demo")
+  console:  http://localhost:${CONSOLE_PORT}   (admin / admin)
+  api:      http://localhost:${INSTANCE_PORT}
+`);
 
 const stop = () => { children.forEach((c) => c.kill()); process.exit(0); };
 process.on("SIGINT", stop);

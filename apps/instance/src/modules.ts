@@ -15,7 +15,7 @@ export const loadedModules: string[] = [];
  * `modules/<name>/` with an index.ts that default-exports a NexoModule. Client-specific
  * work lives here, never in the core.
  */
-export async function loadModules(app: Hono): Promise<void> {
+export async function loadModules(app: Hono<any>): Promise<void> {
   const wanted = license.current().modules;
   const flags = license.current().flags;
   for (const name of wanted) {

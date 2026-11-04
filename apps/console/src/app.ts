@@ -11,7 +11,7 @@ import {
   type LicenseCheckResponse,
 } from "@nexo/shared";
 import { config } from "./config.ts";
-import { decrypt, encrypt, randomToken, safeEqual } from "./crypto.ts";
+import { decrypt, derive, encrypt, randomToken, safeEqual } from "./crypto.ts";
 import { buildBundle, newSecrets } from "./bundle.ts";
 
 const Slug = z.string().regex(/^[a-z][a-z0-9-]{1,30}$/, "lowercase letters, digits, dashes");
@@ -22,6 +22,7 @@ const ClientInput = z.object({
   id: Slug,
   name: z.string().min(1),
   domain: Domain,
+  adminEmail: z.string().email(),
   plan: z.string().default("standard"),
   maxUsers: z.number().int().positive().nullable().default(null),
   modules: z.array(Slug).default([]),
@@ -37,7 +38,7 @@ const ClientPatch = ClientInput.omit({ id: true }).partial().extend({ active: z.
 
 type Row = Record<string, any>;
 const publicClient = (r: Row) => ({
-  id: r.id, name: r.name, domain: r.domain, plan: r.plan, maxUsers: r.max_users, modules: r.modules,
+  id: r.id, name: r.name, domain: r.domain, adminEmail: r.admin_email, plan: r.plan, maxUsers: r.max_users, modules: r.modules,
   flags: r.flags, branding: r.branding, pinnedVersion: r.pinned_version, channel: r.channel,
   active: r.active, expiresAt: r.expires_at, appPort: r.app_port, notes: r.notes, createdAt: r.created_at,
   lastSeenAt: r.last_seen_at, lastVersion: r.last_version, lastHealth: r.last_health, lastUserCount: r.last_user_count,
@@ -68,6 +69,15 @@ export function buildApp(pool: pg.Pool): Hono {
       valid: true, plan: r.plan, maxUsers: r.max_users, modules: r.modules, flags: r.flags, branding,
       pinnedVersion: r.pinned_version, channel: r.channel, expiresAt: r.expires_at,
     } satisfies LicenseCheckResponse);
+  });
+
+  // Used by the marketing site's "Find your firm": slug -> that firm's sign-in address. Public on purpose
+  // (it only reveals a login URL), CORS-open so the static site can call it.
+  app.get("/api/tenants/lookup", async (c) => {
+    const slug = (c.req.query("slug") ?? "").toLowerCase().trim();
+    const r = /^[a-z][a-z0-9-]{1,30}$/.test(slug) ? await pool.query("select domain, name from clients where id=$1 and active", [slug]) : { rows: [] as Row[] };
+    c.header("access-control-allow-origin", "*");
+    return r.rows[0] ? c.json({ url: "https://" + r.rows[0].domain, name: r.rows[0].name }) : c.json({ error: "not found" }, 404);
   });
 
   // CI registers a release after pushing images: POST /api/releases with Bearer RELEASE_TOKEN.
@@ -116,10 +126,10 @@ export function buildApp(pool: pg.Pool): Hono {
     try {
       await pool.query(
         `insert into clients (id,name,domain,plan,max_users,modules,flags,branding,pinned_version,channel,
-           license_key_enc,secrets_enc,expires_at,app_port,notes)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+           license_key_enc,secrets_enc,expires_at,app_port,notes,admin_email)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
         [d.id, d.name, d.domain, d.plan, d.maxUsers, d.modules, d.flags, d.branding, d.pinnedVersion, d.channel,
-         encrypt(randomToken(32), secret), encrypt(JSON.stringify(newSecrets()), secret), d.expiresAt, d.appPort, d.notes],
+         encrypt(randomToken(32), secret), encrypt(JSON.stringify(newSecrets()), secret), d.expiresAt, d.appPort, d.notes, d.adminEmail],
       );
     } catch (err) {
       if ((err as { code?: string }).code === "23505") return c.json({ error: "client id already exists" }, 409);
@@ -133,7 +143,7 @@ export function buildApp(pool: pg.Pool): Hono {
     const parsed = ClientPatch.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
     const map: Record<string, string> = {
-      name: "name", domain: "domain", plan: "plan", maxUsers: "max_users", modules: "modules", flags: "flags",
+      name: "name", domain: "domain", adminEmail: "admin_email", plan: "plan", maxUsers: "max_users", modules: "modules", flags: "flags",
       branding: "branding", pinnedVersion: "pinned_version", channel: "channel", expiresAt: "expires_at",
       appPort: "app_port", notes: "notes", active: "active",
     };
@@ -165,6 +175,7 @@ export function buildApp(pool: pg.Pool): Hono {
       {
         id: r.id, name: r.name, domain: r.domain, pinnedVersion: r.pinned_version, appPort: r.app_port,
         licenseKey: decrypt(r.license_key_enc, secret), branding: { appName: r.name, ...r.branding },
+        adminEmail: r.admin_email, initialAdminPassword: derive(secret, "admin", r.id, 20), appSecret: derive(secret, "app", r.id, 48),
       },
       {
         templatesDir: config.bundleTemplatesDir, consoleUrl: config.publicUrl, instanceImage: config.instanceImage,

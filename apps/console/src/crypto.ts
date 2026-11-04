@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const keyFrom = (secret: string) => createHash("sha256").update(secret).digest();
 
@@ -16,6 +16,13 @@ export function decrypt(payload: string, secret: string): string {
   d.setAuthTag(tag);
   return Buffer.concat([d.update(enc), d.final()]).toString("utf8");
 }
+
+/**
+ * Deterministic per-client secrets derived from CONSOLE_SECRET, so a re-downloaded bundle always
+ * matches the running install without storing anything extra.
+ */
+export const derive = (secret: string, purpose: string, clientId: string, length = 32) =>
+  createHmac("sha256", secret).update(`${purpose}:${clientId}`).digest("hex").slice(0, length);
 
 export const randomToken = (bytes = 24) => randomBytes(bytes).toString("hex");
 

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="Nexo CRM: la plateforme de gestion pour les cabinets comptables. Bientôt disponible." />
+  <title>Nexo CRM</title>
+  <style>
+    :root { --bg:#07060d; --fg:#ecebf5; --muted:#9b99b5; --brand:#7c3aed; --brand-2:#2563eb; --line:rgb(255 255 255 / .12); --glow:color-mix(in oklab,var(--brand) 60%,transparent); --glow-2:color-mix(in oklab,var(--brand-2) 55%,transparent); }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin:0; background:var(--bg); color:var(--fg); font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; overflow-x:hidden; }
+    a { color:inherit; }
+    .canvas { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+    .canvas::before,.canvas::after { content:""; position:absolute; width:62vmax; height:62vmax; border-radius:50%; filter:blur(95px); opacity:.55; }
+    .canvas::before { background:radial-gradient(circle,var(--glow),transparent 65%); top:-24vmax; left:-14vmax; animation:drift 26s ease-in-out infinite alternate; }
+    .canvas::after { background:radial-gradient(circle,var(--glow-2),transparent 65%); bottom:-28vmax; right:-16vmax; animation:drift 32s ease-in-out infinite alternate-reverse; }
+    @keyframes drift { to { transform:translate3d(6vmax,4vmax,0) scale(1.08); } }
+    @media (prefers-reduced-motion:reduce){ .canvas::before,.canvas::after{animation:none} html{scroll-behavior:auto} }
+    .wrap { position:relative; z-index:1; max-width:1080px; margin:0 auto; padding:0 20px; }
+    .glass { position:relative; background:linear-gradient(135deg,rgb(255 255 255/.09),rgb(255 255 255/.03)); backdrop-filter:blur(22px) saturate(165%); -webkit-backdrop-filter:blur(22px) saturate(165%); border:1px solid var(--line); border-radius:20px; box-shadow:inset 0 1px 0 rgb(255 255 255/.2),0 24px 50px -24px rgb(0 0 0/.7); }
+    .glass::before { content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; background:linear-gradient(115deg,color-mix(in oklab,var(--brand) 26%,transparent),transparent 38%,transparent 70%,color-mix(in oklab,var(--brand-2) 18%,transparent)); mix-blend-mode:screen; opacity:.8; }
+    .glass > * { position:relative; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:20px 0; }
+    .logo { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:-.02em; font-size:20px; }
+    .logo i { width:34px; height:34px; border-radius:11px; display:grid; place-items:center; color:#fff; font-style:normal; background:linear-gradient(135deg,var(--brand),var(--brand-2)); box-shadow:0 8px 24px -8px var(--glow); }
+    .btn { display:inline-flex; align-items:center; gap:8px; padding:10px 18px; border-radius:12px; border:1px solid var(--line); background:rgb(255 255 255/.08); color:var(--fg); font:inherit; font-size:14px; font-weight:500; cursor:pointer; text-decoration:none; transition:background .15s,transform .12s; }
+    .btn:hover { background:rgb(255 255 255/.15); } .btn:active { transform:translateY(1px); }
+    .btn.primary { border-color:transparent; color:#fff; background:linear-gradient(135deg,var(--brand),var(--brand-2)); box-shadow:0 10px 28px -10px var(--glow),inset 0 1px 0 rgb(255 255 255/.3); }
+    .btn.primary:hover { filter:brightness(1.12); }
+    .lang { display:inline-flex; padding:3px; border:1px solid var(--line); border-radius:11px; background:rgb(255 255 255/.05); }
+    .lang button { all:unset; cursor:pointer; padding:4px 10px; border-radius:8px; font-size:12px; font-weight:600; text-transform:uppercase; color:var(--muted); }
+    .lang button[aria-pressed=true] { color:#fff; background:linear-gradient(135deg,var(--brand),var(--brand-2)); }
+    .nav { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .hero { padding:72px 0 56px; text-align:center; }
+    .pill { display:inline-block; padding:5px 14px; border-radius:99px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; border:1px solid var(--line); background:rgb(255 255 255/.06); color:#cfc8ff; margin-bottom:22px; }
+    h1 { font-size:clamp(38px,7vw,68px); line-height:1.04; letter-spacing:-.035em; margin:0 0 18px; }
+    h1 span { background:linear-gradient(120deg,#c4b5fd,var(--brand) 40%,#60a5fa); -webkit-background-clip:text; background-clip:text; color:transparent; }
+    .lead { max-width:640px; margin:0 auto 30px; font-size:18px; line-height:1.55; color:var(--muted); }
+    .cta { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+    .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); padding:24px 0 64px; }
+    .card { padding:22px; } .card h3 { margin:12px 0 6px; font-size:17px; } .card p { margin:0; color:var(--muted); font-size:14px; line-height:1.55; }
+    .ico { width:40px; height:40px; border-radius:12px; display:grid; place-items:center; font-size:19px; background:linear-gradient(135deg,color-mix(in oklab,var(--brand) 45%,transparent),color-mix(in oklab,var(--brand-2) 35%,transparent)); border:1px solid var(--line); }
+    .band { padding:30px; text-align:center; margin-bottom:56px; } .band h2 { margin:0 0 8px; font-size:24px; letter-spacing:-.02em; } .band p { margin:0 0 20px; color:var(--muted); }
+    footer { padding:28px 0 40px; text-align:center; font-size:13px; color:var(--muted); }
+    dialog { border:0; padding:0; background:transparent; color:var(--fg); max-width:min(440px,92vw); width:100%; }
+    dialog::backdrop { background:rgb(0 0 0/.6); backdrop-filter:blur(5px); }
+    .dlg { padding:26px; } .dlg h2 { margin:0 0 6px; font-size:20px; } .dlg p { margin:0 0 18px; color:var(--muted); font-size:14px; }
+    .row { display:flex; gap:8px; align-items:stretch; }
+    input { flex:1; min-width:0; padding:11px 13px; border-radius:12px; border:1px solid var(--line); background:rgb(0 0 0/.3); color:var(--fg); font:inherit; font-size:15px; outline:none; }
+    input:focus { border-color:color-mix(in oklab,var(--brand) 80%,white); box-shadow:0 0 0 3px color-mix(in oklab,var(--brand) 30%,transparent); }
+    .msg { min-height:20px; margin:12px 0 0; font-size:13px; color:#f87171; } .msg.ok { color:#4ade80; }
+    .sep { display:flex; align-items:center; gap:10px; margin:18px 0 12px; color:var(--muted); font-size:12px; } .sep::before,.sep::after { content:""; height:1px; flex:1; background:var(--line); }
+  </style>
+</head>
+<body>
+  <div class="canvas"></div>
+  <div class="wrap">
+    <header>
+      <div class="logo"><i>N</i> Nexo</div>
+      <div class="nav">
+        <div class="lang" role="group" aria-label="Language"><button data-lang="fr">fr</button><button data-lang="en">en</button></div>
+        <button class="btn primary" id="open-login" data-i18n="login">Connexion</button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <span class="pill" data-i18n="soon">Bientôt disponible</span>
+      <h1><span>Nexo CRM</span><br /><span style="background:none;color:var(--fg);-webkit-text-fill-color:var(--fg)" data-i18n="h1">pour les cabinets comptables</span></h1>
+      <p class="lead" data-i18n="lead">Clients, tâches, équipe, facturation et documents réunis dans un seul espace moderne, à l'image de votre cabinet.</p>
+      <div class="cta">
+        <button class="btn primary" id="open-login-2" data-i18n="login">Connexion</button>
+        <a class="btn" href="#features" data-i18n="discover">Découvrir</a>
+      </div>
+    </section>
+
+    <section class="grid" id="features">
+      <article class="glass card"><div class="ico">👥</div><h3 data-i18n="f1t">Clients et contrats</h3><p data-i18n="f1d">Fiches clients complètes: contacts, contrats, tâches assignées et accès portail pour vos clients.</p></article>
+      <article class="glass card"><div class="ico">✅</div><h3 data-i18n="f2t">Tâches et pipeline</h3><p data-i18n="f2d">Organisez le travail de la journée, les échéances et les dossiers récurrents de toute l'équipe.</p></article>
+      <article class="glass card"><div class="ico">📊</div><h3 data-i18n="f3t">Tableaux de bord d'équipe</h3><p data-i18n="f3d">Tableaux personnalisables, partagés ou verrouillés, et une rencontre d'équipe hebdomadaire intégrée.</p></article>
+      <article class="glass card"><div class="ico">🧾</div><h3 data-i18n="f4t">Facturation et QuickBooks</h3><p data-i18n="f4d">Approuvez le travail à facturer, émettez vos factures et gardez QuickBooks synchronisé.</p></article>
+      <article class="glass card"><div class="ico">📬</div><h3 data-i18n="f5t">Microsoft 365 et SharePoint</h3><p data-i18n="f5d">Calendrier, courriels et documentation reliés à vos outils Microsoft.</p></article>
+      <article class="glass card"><div class="ico">🎨</div><h3 data-i18n="f6t">À votre image</h3><p data-i18n="f6d">Votre logo, vos couleurs, votre adresse. Un environnement dédié pour chaque cabinet.</p></article>
+    </section>
+
+    <section class="glass band">
+      <h2 data-i18n="bandT">Déjà client Nexo?</h2>
+      <p data-i18n="bandD">Trouvez l'adresse de votre cabinet pour vous connecter.</p>
+      <button class="btn primary" id="open-login-3" data-i18n="login">Connexion</button>
+    </section>
+
+    <footer>© <span id="year"></span> Nexo · <a href="#" id="console-link" data-i18n="consoleLogin">Connexion à la console</a></footer>
+  </div>
+
+  <dialog id="dlg">
+    <form method="dialog" class="glass dlg" id="find">
+      <h2 data-i18n="dlgT">Trouvez votre cabinet</h2>
+      <p data-i18n="dlgD">Entrez l'identifiant de votre cabinet. Vous serez redirigé vers votre page de connexion.</p>
+      <div class="row">
+        <input id="slug" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ex. acme" aria-label="Firm identifier" />
+        <button class="btn primary" id="go" type="submit" data-i18n="continue">Continuer</button>
+      </div>
+      <div class="msg" id="msg" role="alert"></div>
+      <div class="sep" data-i18n="or">ou</div>
+      <a class="btn" id="console-link-2" style="width:100%;justify-content:center" href="#" data-i18n="consoleLogin">Connexion à la console</a>
+      <div style="margin-top:14px;text-align:right"><button class="btn" type="button" id="close" data-i18n="close">Fermer</button></div>
+    </form>
+  </dialog>
+
+  <script src="config.js"></script>
+  <script>
+    const T = {
+      fr: { login:"Connexion", soon:"Bientôt disponible", h1:"pour les cabinets comptables", lead:"Clients, tâches, équipe, facturation et documents réunis dans un seul espace moderne, à l'image de votre cabinet.", discover:"Découvrir",
+        f1t:"Clients et contrats", f1d:"Fiches clients complètes: contacts, contrats, tâches assignées et accès portail pour vos clients.", f2t:"Tâches et pipeline", f2d:"Organisez le travail de la journée, les échéances et les dossiers récurrents de toute l'équipe.",
+        f3t:"Tableaux de bord d'équipe", f3d:"Tableaux personnalisables, partagés ou verrouillés, et une rencontre d'équipe hebdomadaire intégrée.", f4t:"Facturation et QuickBooks", f4d:"Approuvez le travail à facturer, émettez vos factures et gardez QuickBooks synchronisé.",
+        f5t:"Microsoft 365 et SharePoint", f5d:"Calendrier, courriels et documentation reliés à vos outils Microsoft.", f6t:"À votre image", f6d:"Votre logo, vos couleurs, votre adresse. Un environnement dédié pour chaque cabinet.",
+        bandT:"Déjà client Nexo?", bandD:"Trouvez l'adresse de votre cabinet pour vous connecter.", consoleLogin:"Connexion à la console", dlgT:"Trouvez votre cabinet", dlgD:"Entrez l'identifiant de votre cabinet. Vous serez redirigé vers votre page de connexion.",
+        continue:"Continuer", or:"ou", close:"Fermer", notFound:"Cabinet introuvable. Vérifiez l'identifiant.", error:"Service indisponible. Réessayez plus tard.", redirect:"Redirection vers" },
+      en: { login:"Sign in", soon:"Coming soon", h1:"for accounting firms", lead:"Clients, tasks, team, billing and documents in one modern workspace, styled after your firm.", discover:"Discover",
+        f1t:"Clients and contracts", f1d:"Complete client profiles: contacts, contracts, assigned tasks and portal access for your clients.", f2t:"Tasks and pipeline", f2d:"Organize the day's work, deadlines and recurring files for the whole team.",
+        f3t:"Team dashboards", f3d:"Customizable, shared or locked dashboards, and a built-in weekly team meeting.", f4t:"Billing and QuickBooks", f4d:"Approve work to bill, issue your invoices and keep QuickBooks in sync.",
+        f5t:"Microsoft 365 and SharePoint", f5d:"Calendar, mail and documentation connected to your Microsoft tools.", f6t:"Made in your image", f6d:"Your logo, your colors, your address. A dedicated environment for every firm.",
+        bandT:"Already a Nexo customer?", bandD:"Find your firm's address to sign in.", consoleLogin:"Console sign-in", dlgT:"Find your firm", dlgD:"Enter your firm's identifier. You will be redirected to your sign-in page.",
+        continue:"Continue", or:"or", close:"Close", notFound:"Firm not found. Check the identifier.", error:"Service unavailable. Try again later.", redirect:"Redirecting to" },
+    };
+    let lang = (navigator.language || "fr").startsWith("en") ? "en" : "fr";
+    try { const s = localStorage.getItem("nexo.site.lang"); if (s === "fr" || s === "en") lang = s; } catch {}
+    const $ = (s) => document.querySelector(s);
+    function render() {
+      document.documentElement.lang = lang;
+      document.querySelectorAll("[data-i18n]").forEach((e) => (e.textContent = T[lang][e.dataset.i18n]));
+      document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+    }
+    document.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => { lang = b.dataset.lang; try { localStorage.setItem("nexo.site.lang", lang); } catch {} render(); }));
+    $("#year").textContent = new Date().getFullYear();
+
+    const consoleUrl = ((window.NEXO && window.NEXO.consoleUrl) || "").replace(/\/$/, "");
+    $("#console-link").href = $("#console-link-2").href = consoleUrl || "#";
+    const dlg = $("#dlg");
+    ["#open-login", "#open-login-2", "#open-login-3"].forEach((s) => $(s).addEventListener("click", () => { $("#msg").textContent = ""; dlg.showModal(); $("#slug").focus(); }));
+    $("#close").addEventListener("click", () => dlg.close());
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+
+    $("#find").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = $("#msg"); msg.className = "msg"; msg.textContent = "";
+      const slug = $("#slug").value.trim().toLowerCase();
+      try {
+        const r = await fetch(consoleUrl + "/api/tenants/lookup?slug=" + encodeURIComponent(slug));
+        if (r.status === 404) { msg.textContent = T[lang].notFound; return; }
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        const url = new URL(d.url);
+        // Only follow plain web addresses returned by the console.
+        if (!["https:", "http:"].includes(url.protocol)) throw new Error();
+        msg.className = "msg ok"; msg.textContent = T[lang].redirect + " " + url.host + "…";
+        location.href = url.href;
+      } catch { msg.textContent = T[lang].error; }
+    });
+    render();
+  </script>
+</body>
+</html>

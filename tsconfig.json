@@ -14,9 +14,10 @@
     "baseUrl": ".",
     "paths": {
       "@nexo/shared": ["packages/shared/src/index.ts"],
-      "@nexo/shared/migrate": ["packages/shared/src/migrate.ts"]
+      "@nexo/shared/migrate": ["packages/shared/src/migrate.ts"],
+      "@nexo/shared/permissions": ["packages/shared/src/permissions.ts"]
     }
   },
-  "include": ["packages/*/src", "apps/*/src", "modules/*", "tests"],
+  "include": ["packages/*/src", "apps/instance/src", "apps/console/src", "apps/updater/src", "modules/*", "tests"],
   "exclude": ["node_modules", "Planning"]
 }

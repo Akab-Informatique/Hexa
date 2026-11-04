@@ -11,6 +11,11 @@ export interface BundleClient {
   appPort: number;
   licenseKey: string;
   branding: Record<string, unknown>;
+  /** First master administrator of the instance (must change the password at first login). */
+  adminEmail: string;
+  initialAdminPassword: string;
+  /** Encrypts the instance's TOTP secrets and integration credentials. */
+  appSecret: string;
 }
 
 export interface BundleOptions {
@@ -51,6 +56,9 @@ export function buildBundle(client: BundleClient, opts: BundleOptions): Uint8Arr
     POSTGRES_PASSWORD: opts.secrets.postgresPassword,
     UPDATER_TOKEN: opts.secrets.updaterToken,
     INSTANCE_ADMIN_TOKEN: opts.secrets.adminToken,
+    INITIAL_ADMIN_EMAIL: client.adminEmail,
+    INITIAL_ADMIN_PASSWORD: client.initialAdminPassword,
+    APP_SECRET: client.appSecret,
     GHCR_USER: opts.ghcrUser,
     GHCR_TOKEN: opts.ghcrToken,
     // Single quotes wrap this value in .env, so escape any inside the JSON.

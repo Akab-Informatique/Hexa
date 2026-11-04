@@ -4,8 +4,9 @@ import { z } from "zod";
 export const BrandingSchema = z.object({
   appName: z.string().default("Nexo"),
   logoUrl: z.string().optional(),
-  primaryColor: z.string().default("#2563eb"),
-  accentColor: z.string().default("#0f172a"),
+  // Nexo default: near-black canvas with purple and blue light. Tenants override both.
+  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#7c3aed"),
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"),
   supportEmail: z.string().optional(),
 });
 export type Branding = z.infer<typeof BrandingSchema>;

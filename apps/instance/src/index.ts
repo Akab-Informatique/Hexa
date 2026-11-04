@@ -5,12 +5,15 @@ import { pool } from "./db.ts";
 import * as license from "./license.ts";
 import { loadModules } from "./modules.ts";
 import { buildApp } from "./app.ts";
+import { bootstrap } from "./bootstrap.ts";
 
 async function main() {
   console.log(`[nexo] instance v${config.version} starting`);
   const applied = await migrate(pool, config.migrationsDir, "core");
   if (applied.length) console.log(`[migrate] applied: ${applied.join(", ")}`);
 
+  if (config.isProd && config.appSecret.length < 32) throw new Error("APP_SECRET (32+ chars) is required in production");
+  await bootstrap();
   await license.loadCached();
   await license.check();
   license.startPeriodicCheck();

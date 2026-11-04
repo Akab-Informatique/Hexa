@@ -29,6 +29,15 @@ export const config = {
   adminToken: e.INSTANCE_ADMIN_TOKEN ?? "",
   modulesDir: e.MODULES_DIR ?? "modules",
   migrationsDir: e.MIGRATIONS_DIR ?? "apps/instance/migrations",
-  publicDir: e.PUBLIC_DIR ?? "apps/instance/public",
   fallbackBranding: envBranding(),
+  isProd: e.NODE_ENV === "production",
+  /** Encrypts TOTP secrets and integration credentials at rest. Required in production. */
+  appSecret: e.APP_SECRET ?? (e.NODE_ENV === "production" ? "" : "dev-only-app-secret-change-me"),
+  requireMfa: (e.REQUIRE_MFA ?? (e.NODE_ENV === "production" ? "true" : "false")) === "true",
+  /** First-run master administrator (created only when there are no users yet). */
+  initialAdminEmail: e.INITIAL_ADMIN_EMAIL ?? "",
+  initialAdminPassword: e.INITIAL_ADMIN_PASSWORD ?? "",
+  webDir: e.WEB_DIR ?? "apps/web/dist",
+  /** Extra browser origins allowed to call the API (the Vite dev server only). */
+  devOrigins: (e.DEV_ORIGINS ?? "").split(",").filter(Boolean),
 };

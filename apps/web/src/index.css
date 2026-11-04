@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+/*
+  Nexo look: near-black canvas lit by purple and blue, frosted "glass" panels with a reflection
+  tinted by the tenant's brand colors. --brand / --brand-2 are set at runtime from the tenant's
+  branding (see lib/theme.ts); everything below is derived from them, so a new brand re-skins all.
+*/
+:root {
+  --brand: #7c3aed;
+  --brand-2: #2563eb;
+  --bg: #07060d;
+  --fg: #ecebf5;
+  --muted: #9b99b5;
+  --line: rgb(255 255 255 / 0.12);
+  --danger: #f87171;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --glow: color-mix(in oklab, var(--brand) 60%, transparent);
+  --glow-2: color-mix(in oklab, var(--brand-2) 55%, transparent);
+  --radius: 18px;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand-2: var(--brand-2);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-danger: var(--danger);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--font-sans);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Ambient light: two slow-drifting colored glows behind everything. */
+.canvas { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.canvas::before, .canvas::after {
+  content: ""; position: absolute; width: 60vmax; height: 60vmax; border-radius: 50%; filter: blur(90px); opacity: 0.55;
+}
+.canvas::before { background: radial-gradient(circle, var(--glow), transparent 65%); top: -22vmax; left: -14vmax; animation: drift 26s ease-in-out infinite alternate; }
+.canvas::after  { background: radial-gradient(circle, var(--glow-2), transparent 65%); bottom: -26vmax; right: -16vmax; animation: drift 32s ease-in-out infinite alternate-reverse; }
+@keyframes drift { to { transform: translate3d(6vmax, 4vmax, 0) scale(1.08); } }
+@media (prefers-reduced-motion: reduce) { .canvas::before, .canvas::after { animation: none; } }
+
+/* Glass panel: frosted blur, bright top edge, and a brand-tinted diagonal reflection. */
+.glass {
+  position: relative;
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.09), rgb(255 255 255 / 0.03));
+  backdrop-filter: blur(22px) saturate(165%);
+  -webkit-backdrop-filter: blur(22px) saturate(165%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2), 0 24px 50px -24px rgb(0 0 0 / 0.7);
+}
+.glass::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(115deg, color-mix(in oklab, var(--brand) 26%, transparent), transparent 38%, transparent 70%, color-mix(in oklab, var(--brand-2) 18%, transparent));
+  mix-blend-mode: screen; opacity: 0.8;
+}
+.glass > * { position: relative; }
+.glass-flat { background: rgb(255 255 255 / 0.05); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(10px); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;
+  padding: 9px 16px; border-radius: 12px; font-size: 14px; font-weight: 500; color: var(--fg);
+  background: rgb(255 255 255 / 0.08); border: 1px solid var(--line); transition: transform .12s, background .15s, box-shadow .15s;
+}
+.btn:hover { background: rgb(255 255 255 / 0.14); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary {
+  border-color: transparent; color: #fff;
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  box-shadow: 0 10px 28px -10px var(--glow), inset 0 1px 0 rgb(255 255 255 / 0.3);
+}
+.btn-primary:hover { background: linear-gradient(135deg, var(--brand), var(--brand-2)); filter: brightness(1.12); }
+.btn-danger { color: var(--danger); }
+
+.input {
+  width: 100%; padding: 10px 12px; border-radius: 12px; font-size: 14px; color: var(--fg);
+  background: rgb(0 0 0 / 0.28); border: 1px solid var(--line); outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.input:focus { border-color: color-mix(in oklab, var(--brand) 80%, white); box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 30%, transparent); }
+.input::placeholder { color: color-mix(in oklab, var(--muted) 70%, transparent); }
+.label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 99px; font-size: 12px; background: rgb(255 255 255 / 0.08); border: 1px solid var(--line); }
+.chip-ok { color: var(--ok); } .chip-warn { color: var(--warn); } .chip-off { color: var(--muted); }
+
+.nav-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; font-size: 14px; color: var(--muted);
+  transition: background .15s, color .15s; text-decoration: none;
+}
+.nav-item:hover { background: rgb(255 255 255 / 0.07); color: var(--fg); }
+.nav-item.active {
+  color: #fff; background: linear-gradient(135deg, color-mix(in oklab, var(--brand) 55%, transparent), color-mix(in oklab, var(--brand-2) 40%, transparent));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 8px 22px -12px var(--glow);
+}
+.nav-item.upcoming { opacity: .5; }
+
+table.grid { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.grid th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); }
+table.grid td { padding: 11px 12px; border-bottom: 1px solid rgb(255 255 255 / 0.06); vertical-align: middle; }
+table.grid tr:hover td { background: rgb(255 255 255 / 0.03); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 0.16); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+:focus-visible { outline: 2px solid color-mix(in oklab, var(--brand) 70%, white); outline-offset: 2px; }

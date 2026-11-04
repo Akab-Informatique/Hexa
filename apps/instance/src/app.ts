@@ -1,4 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { compareVersions, VERSION_RE, type UpdaterStatus } from "@nexo/shared";
@@ -6,12 +7,9 @@ import { config } from "./config.ts";
 import * as license from "./license.ts";
 import { loadedModules } from "./modules.ts";
 import { pool } from "./db.ts";
-
-function safeEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ba.length === bb.length && timingSafeEqual(ba, bb);
-}
+import { loadAuth, requireReady, sameOriginWrites, type Env } from "./auth/session.ts";
+import { authRoutes } from "./routes/auth.ts";
+import { adminRoutes } from "./routes/admin.ts";
 
 async function updater<T>(path: string, init?: RequestInit): Promise<T | null> {
   if (!config.updaterUrl) return null;
@@ -27,10 +25,13 @@ async function updater<T>(path: string, init?: RequestInit): Promise<T | null> {
   }
 }
 
-export function buildApp(): Hono {
-  const app = new Hono();
+export function buildApp(): Hono<Env> {
+  const app = new Hono<Env>();
 
-  // Public: needed by Docker healthcheck, the updater, and the login/branding screen.
+  app.use("/api/*", sameOriginWrites);
+  app.use("/api/*", loadAuth);
+
+  // Public: Docker healthcheck, the updater, and the login screen (needs branding before sign-in).
   app.get("/api/health", async (c) => {
     const db = await pool.query("select 1").then(() => true, () => false);
     return c.json({ ok: db, version: config.version }, db ? 200 : 503);
@@ -38,26 +39,27 @@ export function buildApp(): Hono {
   app.get("/api/version", (c) => c.json({ version: config.version }));
   app.get("/api/config", (c) => {
     const lic = license.current();
+    const a = c.get("auth");
     return c.json({
       version: config.version,
       branding: lic.branding,
-      plan: lic.plan,
-      maxUsers: lic.maxUsers,
-      flags: lic.flags,
-      modules: loadedModules,
-      license: license.status(),
+      // Detail only for signed-in users; the login page needs branding and nothing else.
+      ...(a?.stage === "ready" ? { plan: lic.plan, maxUsers: lic.maxUsers, flags: lic.flags, modules: loadedModules, license: license.status() } : {}),
     });
   });
 
-  // Everything else (modules, future app routes) requires a usable license.
-  app.use("/api/modules/*", async (c, next) => {
+  app.route("/api/auth", authRoutes);
+  app.route("/api/admin", adminRoutes);
+
+  // Module routes require a signed-in user and a usable license.
+  app.use("/api/modules/*", requireReady, async (c, next) => {
     const s = license.status();
     if (!s.usable) return c.json({ error: "license", reason: s.reason }, 402);
     await next();
   });
 
-  // ---- Updates (pull model) ----
-  app.get("/api/update/status", async (c) => {
+  // ---- Updates (pull model). Only the master administrator may install. ----
+  app.get("/api/update/status", requireReady, async (c) => {
     const lic = license.current();
     const target = lic.pinnedVersion;
     const updateAvailable = Boolean(target) && VERSION_RE.test(target) && compareVersions(target, config.version) > 0;
@@ -65,22 +67,20 @@ export function buildApp(): Hono {
     return c.json({ current: config.version, target, updateAvailable, updater: run, updaterConfigured: Boolean(config.updaterUrl) });
   });
 
-  app.post("/api/update/apply", async (c) => {
-    // TODO(app): replace the shared admin token with the app's real "administrator" permission.
-    const token = c.req.header("x-admin-token") ?? "";
-    if (!config.adminToken || !safeEqual(token, config.adminToken)) return c.json({ error: "forbidden" }, 403);
+  app.post("/api/update/apply", requireReady, async (c) => {
+    if (!c.get("auth")!.user.isMaster) return c.json({ error: "forbidden" }, 403);
     const target = license.current().pinnedVersion;
-    if (!VERSION_RE.test(target) || compareVersions(target, config.version) <= 0) {
-      return c.json({ error: "no update available" }, 409);
-    }
-    const res = await updater<{ accepted?: boolean; error?: string }>("/apply", {
-      method: "POST",
-      body: JSON.stringify({ version: target }),
-    });
+    if (!VERSION_RE.test(target) || compareVersions(target, config.version) <= 0) return c.json({ error: "no update available" }, 409);
+    const res = await updater<{ accepted?: boolean; error?: string }>("/apply", { method: "POST", body: JSON.stringify({ version: target }) });
     if (!res) return c.json({ error: "updater unreachable" }, 502);
     return c.json(res, res.accepted ? 202 : 409);
   });
 
-  app.use("/*", serveStatic({ root: config.publicDir }));
+  app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
+
+  // ---- Single-page app: static assets, with index.html fallback for client-side routes ----
+  const index = path.resolve(config.webDir, "index.html");
+  app.use("/*", serveStatic({ root: config.webDir }));
+  app.get("*", (c) => (fs.existsSync(index) ? c.html(fs.readFileSync(index, "utf8")) : c.text("Web app not built (run: npm run build -w @nexo/web)", 503)));
   return app;
 }
