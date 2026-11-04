@@ -56,6 +56,6 @@ client users (portal) come later.
 
 ## Status / TODO
 - Typecheck and unit tests pass. **Not yet run end-to-end with Docker** (not available on the build machine): test the bundle install, the update and the rollback on a real server before selling.
-- The instance's update button is protected by a shared admin token until the real app has users/permissions.
+- Only the master administrator can install an update from the app.
 - Max-user enforcement: `maxUsers` is delivered to the instance and `userCount` is reported back; enforcement belongs in the app's user-creation code.
 - Real app and client modules come next.
