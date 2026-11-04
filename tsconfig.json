@@ -15,7 +15,8 @@
     "paths": {
       "@nexo/shared": ["packages/shared/src/index.ts"],
       "@nexo/shared/migrate": ["packages/shared/src/migrate.ts"],
-      "@nexo/shared/permissions": ["packages/shared/src/permissions.ts"]
+      "@nexo/shared/permissions": ["packages/shared/src/permissions.ts"],
+      "@nexo/shared/billing": ["packages/shared/src/billing.ts"]
     }
   },
   "include": ["packages/*/src", "apps/instance/src", "apps/console/src", "apps/updater/src", "modules/*", "tests"],

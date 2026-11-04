@@ -12,7 +12,10 @@
     "noEmit": true,
     "types": ["vite/client"],
     "baseUrl": ".",
-    "paths": { "@nexo/shared/permissions": ["../../packages/shared/src/permissions.ts"] }
+    "paths": {
+      "@nexo/shared/permissions": ["../../packages/shared/src/permissions.ts"],
+      "@nexo/shared/billing": ["../../packages/shared/src/billing.ts"]
+    }
   },
   "include": ["src"]
 }

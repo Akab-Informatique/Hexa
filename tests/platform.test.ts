@@ -98,3 +98,23 @@ describe("instance crypto", () => {
     expect(() => unseal(seal("x", s), "z".repeat(32))).toThrow();
   });
 });
+
+import { computeInvoice, roundCents, addRecurrence, mondayOf } from "@nexo/shared/billing";
+
+describe("billing and dates", () => {
+  it("rounds half-up per line so totals match QuickBooks", () => {
+    expect(roundCents(1.005)).toBe(1.01);
+    const r = computeInvoice([{ quantity: 2, unitPrice: 100.5, taxable: true }, { quantity: 1, unitPrice: 10, taxable: false }], { gst: 5, qst: 9.975 });
+    expect(r.subtotal).toBe(211);
+    expect(r.gst).toBe(10.05);
+    expect(r.qst).toBe(20.05);
+    expect(r.total).toBe(241.1);
+  });
+  it("recurrence keeps month ends valid and finds the week's Monday", () => {
+    expect(addRecurrence("2026-01-31", { every: 1, unit: "month" })).toBe("2026-02-28");
+    expect(addRecurrence("2026-11-30", { every: 1, unit: "month" })).toBe("2026-12-30");
+    expect(addRecurrence("2026-11-04", { every: 2, unit: "week" })).toBe("2026-11-18");
+    expect(mondayOf("2026-11-04")).toBe("2026-11-02");
+    expect(mondayOf("2026-11-08")).toBe("2026-11-02");
+  });
+});

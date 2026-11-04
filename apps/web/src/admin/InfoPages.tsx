@@ -1,22 +1,53 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Plug } from "lucide-react";
 import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { PageHeader } from "../components/ui";
 
-const PROVIDERS = ["o365", "mailjet", "quickbooks", "sharepoint"] as const;
+interface IField { key: string; label: { fr: string; en: string }; secret?: boolean; options?: string[]; placeholder?: string; value: string; isSet: boolean }
+interface Integration { provider: string; label: string; enabled: boolean; configured: boolean; updatedAt: string | null; fields: IField[] }
 
+/** Each firm enters its own app credentials here. Secrets are stored encrypted and are never shown again. */
 export function IntegrationPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { provider = "" } = useParams();
-  if (!(PROVIDERS as readonly string[]).includes(provider)) return null;
+  const { can } = useAuth();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["integrations"], queryFn: () => api<Integration[]>("/api/admin/integrations") });
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [msg, setMsg] = useState("");
+  const lang = i18n.language === "en" ? "en" : "fr";
+  const it = q.data?.find((x) => x.provider === provider);
+  if (!it) return null;
+  const manage = can("admin.integrations.manage");
+  const val = (f: IField) => values[f.key] ?? f.value;
+  const save = async () => {
+    setMsg("");
+    try {
+      await api(`/api/admin/integrations/${provider}`, { method: "PUT", body: { values, enabled: enabled ?? it.enabled } });
+      setValues({}); setEnabled(null); setMsg(t("common.copied") === "Copié" ? "Enregistré" : "Saved");
+      await qc.invalidateQueries({ queryKey: ["integrations"] }); await qc.invalidateQueries({ queryKey: ["dir-integrations"] });
+    } catch (e) { setMsg(e instanceof Error ? e.message : "Error"); }
+  };
   return (
     <>
-      <PageHeader title={t(`admin.${provider}`)} actions={<span className="chip chip-warn">● {t("admin.notConfigured")}</span>} />
-      <div className="glass p-6">
-        <div className="mb-4 flex items-center gap-3"><Plug className="text-brand" /><p className="text-sm">{t(`admin.${provider}Help`)}</p></div>
-        <p className="text-sm text-muted">{t("admin.integrationSoon")}</p>
+      <PageHeader title={it.label} subtitle={t(`admin.${provider}Help`)} actions={<span className={`chip ${it.configured ? "chip-ok" : "chip-warn"}`}>● {it.configured ? (lang === "fr" ? "Configurée" : "Configured") : t("admin.notConfigured")}</span>} />
+      <div className="glass max-w-2xl p-6">
+        {it.fields.map((f) => (
+          <label key={f.key} className="mb-4 block"><span className="label">{f.label[lang]}{f.secret && it.fields.find((x) => x.key === f.key)?.isSet ? (lang === "fr" ? " (enregistré, laisser vide pour conserver)" : " (saved, leave blank to keep)") : ""}</span>
+            {f.options ? (
+              <select className="input" disabled={!manage} value={val(f)} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}><option value="">—</option>{f.options.map((o) => <option key={o}>{o}</option>)}</select>
+            ) : (
+              <input className="input" disabled={!manage} type={f.secret ? "password" : "text"} autoComplete="off" placeholder={f.secret && f.isSet ? "••••••••••••" : f.placeholder} value={val(f)} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />
+            )}
+          </label>
+        ))}
+        <label className="mb-5 flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" disabled={!manage} checked={enabled ?? it.enabled} onChange={(e) => setEnabled(e.target.checked)} />{lang === "fr" ? "Activée" : "Enabled"}</label>
+        {manage && <div className="flex items-center gap-3"><button className="btn btn-primary" onClick={() => void save()}>{t("common.save")}</button>{msg && <span role="status" className="text-sm text-muted">{msg}</span>}</div>}
+        <p className="mt-5 text-xs text-muted">{t("admin.integrationSoon")}</p>
       </div>
     </>
   );

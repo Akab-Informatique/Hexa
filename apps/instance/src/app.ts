@@ -10,6 +10,16 @@ import { pool } from "./db.ts";
 import { loadAuth, requireReady, sameOriginWrites, type Env } from "./auth/session.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { adminRoutes } from "./routes/admin.ts";
+import { clientRoutes } from "./routes/clients.ts";
+import { taskRoutes } from "./routes/tasks.ts";
+import { teamRoutes } from "./routes/team.ts";
+import { myToolsRoutes } from "./routes/mytools.ts";
+import { commandRoutes } from "./routes/command.ts";
+import { accountingRoutes } from "./routes/accounting.ts";
+import { hrRoutes } from "./routes/hr.ts";
+import { directoryRoutes } from "./routes/directory.ts";
+import { integrationRoutes } from "./routes/integrations.ts";
+import { ZodError } from "zod";
 
 async function updater<T>(path: string, init?: RequestInit): Promise<T | null> {
   if (!config.updaterUrl) return null;
@@ -49,7 +59,24 @@ export function buildApp(): Hono<Env> {
   });
 
   app.route("/api/auth", authRoutes);
+  app.route("/api/admin/integrations", integrationRoutes);
   app.route("/api/admin", adminRoutes);
+
+  // Business modules. Each route file enforces its own permissions (see packages/shared/src/permissions.ts).
+  app.route("/api/clients", clientRoutes);
+  app.route("/api/tasks", taskRoutes);
+  app.route("/api/team", teamRoutes);
+  app.route("/api/my", myToolsRoutes);
+  app.route("/api/command", commandRoutes);
+  app.route("/api/accounting", accountingRoutes);
+  app.route("/api/hr", hrRoutes);
+  app.route("/api/directory", directoryRoutes);
+
+  app.onError((err, c) => {
+    if (err instanceof ZodError) return c.json({ error: err.issues.map((i) => i.path.join(".") + ": " + i.message).join("; ") }, 400);
+    console.error(err);
+    return c.json({ error: "internal error" }, 500);
+  });
 
   // Module routes require a signed-in user and a usable license.
   app.use("/api/modules/*", requireReady, async (c, next) => {
