@@ -59,3 +59,6 @@ Planning/Client-Portal/**/import-data/
 
 # keep example env files
 !.env.example
+
+# local dev databases
+.data/

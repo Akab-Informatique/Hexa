@@ -3,13 +3,20 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=22" },
-  "workspaces": ["packages/*", "apps/*", "modules/*"],
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "modules/*"
+  ],
   "scripts": {
     "dev:instance": "node --watch --import tsx apps/instance/src/index.ts",
     "dev:console": "node --watch --import tsx apps/console/src/index.ts",
     "dev:updater": "node --watch --import tsx apps/updater/src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "node scripts/dev.mjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -21,6 +28,8 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
+    "@electric-sql/pglite-socket": "^0.2.18",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
     "typescript": "^5.7.2",

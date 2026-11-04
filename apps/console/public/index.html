@@ -75,7 +75,8 @@
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     const say = (t) => { const m = $("#msg"); m.textContent = t; m.style.display = "block"; setTimeout(() => (m.style.display = "none"), 6000); };
     async function api(path, opts = {}) {
-      const r = await fetch(path, { ...opts, headers: { "content-type": "application/json" }, body: opts.body && JSON.stringify(opts.body) });
+      // location.origin has no embedded credentials (a page opened as user:pass@host would otherwise break fetch).
+      const r = await fetch(location.origin + path, { ...opts, headers: { "content-type": "application/json" }, body: opts.body && JSON.stringify(opts.body) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(JSON.stringify(j.error ?? j));
       return j;
