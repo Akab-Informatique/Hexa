@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>App</title>
+  <style>
+    :root { --primary: #2563eb; --accent: #0f172a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; color: var(--accent); background: #f8fafc; }
+    header { background: var(--primary); color: #fff; padding: 14px 20px; display: flex; align-items: center; gap: 12px; }
+    header img { height: 32px; }
+    main { max-width: 720px; margin: 32px auto; padding: 0 20px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+    button { background: var(--primary); color: #fff; border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-size: 14px; }
+    button:disabled { opacity: .5; cursor: default; }
+    input { padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; }
+    .muted { color: #64748b; font-size: 13px; }
+    .warn { color: #b45309; }
+  </style>
+</head>
+<body>
+  <header><img id="logo" alt="" hidden /><strong id="name">App</strong></header>
+  <main>
+    <div class="card">
+      <h2>Welcome</h2>
+      <p class="muted">Placeholder screen. The real application replaces this.</p>
+      <p>Version <strong id="version"></strong> · Modules: <span id="modules">none</span></p>
+      <p id="license" class="muted"></p>
+    </div>
+    <div class="card" id="update-card" hidden>
+      <h3>Update available</h3>
+      <p>Version <strong id="target"></strong> is ready to install.</p>
+      <input id="token" type="password" placeholder="Admin token" />
+      <button id="apply">Install update</button>
+      <p id="update-msg" class="muted"></p>
+    </div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    async function load() {
+      const cfg = await (await fetch("/api/config")).json();
+      const b = cfg.branding;
+      document.documentElement.style.setProperty("--primary", b.primaryColor);
+      document.documentElement.style.setProperty("--accent", b.accentColor);
+      document.title = b.appName; $("name").textContent = b.appName;
+      if (b.logoUrl) { $("logo").src = b.logoUrl; $("logo").hidden = false; }
+      $("version").textContent = cfg.version;
+      $("modules").textContent = cfg.modules.join(", ") || "none";
+      if (!cfg.license.usable) { $("license").textContent = "License problem: " + cfg.license.reason; $("license").className = "warn"; }
+    }
+    async function pollUpdate() {
+      const u = await (await fetch("/api/update/status")).json();
+      const run = u.updater;
+      if (run && run.state === "running") {
+        $("update-card").hidden = false; $("apply").disabled = true;
+        $("update-msg").textContent = "Updating… " + (run.step || ""); return setTimeout(pollUpdate, 3000);
+      }
+      if (run && (run.state === "failed" || run.state === "rolled_back")) $("update-msg").textContent = "Last update failed and was rolled back: " + (run.error || "");
+      $("update-card").hidden = !u.updateAvailable; $("target").textContent = u.target; $("apply").disabled = false;
+    }
+    $("apply").onclick = async () => {
+      $("apply").disabled = true;
+      const r = await fetch("/api/update/apply", { method: "POST", headers: { "x-admin-token": $("token").value } });
+      $("update-msg").textContent = r.ok ? "Update started. The page reloads when it finishes." : "Could not start update (" + r.status + ").";
+      if (r.ok) { const v = $("version").textContent; const t = setInterval(async () => { try { const c = await (await fetch("/api/config")).json(); if (c.version !== v) { clearInterval(t); location.reload(); } } catch {} }, 4000); }
+      else $("apply").disabled = false;
+    };
+    load().then(pollUpdate);
+  </script>
+</body>
+</html>

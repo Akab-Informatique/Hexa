@@ -56,3 +56,6 @@ Planning/Client-Portal/**/.codesandbox/
 Planning/Client-Portal/**/.devcontainer/
 Planning/Client-Portal/**/.data/
 Planning/Client-Portal/**/import-data/
+
+# keep example env files
+!.env.example

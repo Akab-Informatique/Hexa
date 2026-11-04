@@ -1,0 +1,61 @@
+# Nexo instance for {{CLIENT_NAME}}.
+# Start with:  sh install.sh      (or: docker compose up -d)
+# Data lives in named volumes. NEVER run `docker compose down -v`.
+# No host bind mounts on purpose: the updater runs `docker compose` from inside a container.
+
+services:
+  db:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    logging: &logs
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  app:
+    image: ${INSTANCE_IMAGE}:${APP_VERSION}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      POSTGRES_HOST: db
+      UPDATER_URL: http://updater:4000
+    # Bound to localhost only: your Nginx is the public entry point.
+    ports:
+      - "127.0.0.1:${APP_PORT}:3000"
+    logging: *logs
+
+  updater:
+    image: ${UPDATER_IMAGE}:${APP_VERSION_UPDATER:-stable}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      COMPOSE_DIR: /deploy
+      BACKUP_DIR: /backups
+      HEALTH_URL: http://app:3000/api/health
+      PORT: "4000"
+    volumes:
+      - ./:/deploy
+      - /var/run/docker.sock:/var/run/docker.sock
+      - backups:/backups
+    # No published port: only reachable from the app container on the internal network.
+    logging: *logs
+
+volumes:
+  pgdata:
+  backups:

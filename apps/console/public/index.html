@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexo Console</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #f1f5f9; color: #0f172a; }
+    header { background: #0f172a; color: #fff; padding: 14px 24px; }
+    main { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    section { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin-bottom: 20px; }
+    h2 { margin: 0 0 12px; font-size: 17px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    .pill { padding: 2px 8px; border-radius: 99px; font-size: 12px; color: #fff; }
+    .online { background: #16a34a; } .offline { background: #dc2626; } .degraded { background: #d97706; }
+    .never, .suspended { background: #64748b; }
+    form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+    label { font-size: 12px; color: #475569; display: flex; flex-direction: column; gap: 4px; }
+    input, select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+    button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; font-size: 13px; }
+    button.secondary { background: #e2e8f0; color: #0f172a; }
+    button.danger { background: #dc2626; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .muted { color: #64748b; font-size: 12px; }
+    #msg { padding: 8px 12px; border-radius: 6px; background: #dbeafe; display: none; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+  <header><strong>Nexo Console</strong> <span class="muted" id="latest"></span></header>
+  <main>
+    <div id="msg"></div>
+
+    <section>
+      <h2>Clients</h2>
+      <table>
+        <thead><tr><th>Client</th><th>Status</th><th>Running</th><th>Pinned</th><th>Users</th><th>Last seen</th><th></th></tr></thead>
+        <tbody id="clients"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>New client</h2>
+      <form id="new">
+        <label>ID (slug)<input name="id" required pattern="[a-z][a-z0-9-]{1,30}" /></label>
+        <label>Name<input name="name" required /></label>
+        <label>Domain<input name="domain" required placeholder="portal.client.com" /></label>
+        <label>Pinned version<select name="pinnedVersion" class="versions" required></select></label>
+        <label>Plan<input name="plan" value="standard" /></label>
+        <label>Max users (blank = unlimited)<input name="maxUsers" type="number" min="1" /></label>
+        <label>Modules (comma separated)<input name="modules" placeholder="example-hello" /></label>
+        <label>Primary color<input name="primaryColor" type="color" value="#2563eb" /></label>
+        <label>Logo URL<input name="logoUrl" /></label>
+        <label>Host port<input name="appPort" type="number" value="3000" /></label>
+        <label>&nbsp;<button>Create client</button></label>
+      </form>
+    </section>
+
+    <section>
+      <h2>Releases</h2>
+      <form id="release">
+        <label>Version<input name="version" required placeholder="1.0.0" /></label>
+        <label>Channel<select name="channel"><option>stable</option><option>beta</option></select></label>
+        <label>Notes<input name="notes" /></label>
+        <label>&nbsp;<button>Register release</button></label>
+      </form>
+      <table style="margin-top:12px"><tbody id="releases"></tbody></table>
+      <p class="muted">CI normally registers releases automatically after publishing images.</p>
+    </section>
+  </main>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const say = (t) => { const m = $("#msg"); m.textContent = t; m.style.display = "block"; setTimeout(() => (m.style.display = "none"), 6000); };
+    async function api(path, opts = {}) {
+      const r = await fetch(path, { ...opts, headers: { "content-type": "application/json" }, body: opts.body && JSON.stringify(opts.body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(JSON.stringify(j.error ?? j));
+      return j;
+    }
+    async function refresh() {
+      const [fleet, releases] = await Promise.all([api("/api/fleet"), api("/api/releases")]);
+      $("#latest").textContent = fleet.latestRelease ? "· latest release " + fleet.latestRelease : "";
+      $(".versions").innerHTML = releases.map((r) => `<option>${esc(r.version)}</option>`).join("");
+      $("#releases").innerHTML = releases.map((r) => `<tr><td><strong>${esc(r.version)}</strong></td><td>${esc(r.channel)}</td><td>${esc(r.notes)}</td></tr>`).join("");
+      $("#clients").innerHTML = fleet.clients.map((c) => `
+        <tr>
+          <td><strong>${esc(c.name)}</strong><br><span class="muted">${esc(c.id)} · ${esc(c.domain)}</span></td>
+          <td><span class="pill ${c.status}">${c.status}</span></td>
+          <td>${esc(c.lastVersion ?? "—")}${c.behindPinned ? ' <span class="muted">(update pending)</span>' : ""}</td>
+          <td><select data-pin="${esc(c.id)}">${releases.map((r) => `<option ${r.version === c.pinnedVersion ? "selected" : ""}>${esc(r.version)}</option>`).join("")}</select></td>
+          <td>${esc(c.lastUserCount ?? "—")}${c.maxUsers ? " / " + c.maxUsers : ""}</td>
+          <td class="muted">${c.lastSeenAt ? new Date(c.lastSeenAt).toLocaleString() : "never"}</td>
+          <td class="actions">
+            <button class="secondary" data-bundle="${esc(c.id)}">Bundle</button>
+            <button class="secondary" data-toggle="${esc(c.id)}" data-active="${c.active}">${c.active ? "Suspend" : "Resume"}</button>
+            <button class="danger" data-rotate="${esc(c.id)}">Rotate key</button>
+          </td>
+        </tr>`).join("");
+    }
+    document.addEventListener("change", async (e) => {
+      const id = e.target.dataset.pin; if (!id) return;
+      try { await api("/api/clients/" + id, { method: "PATCH", body: { pinnedVersion: e.target.value } }); say(`${id} pinned to ${e.target.value}. The client will show an Update button.`); refresh(); } catch (err) { say(err.message); }
+    });
+    document.addEventListener("click", async (e) => {
+      const t = e.target;
+      try {
+        if (t.dataset.bundle) location.href = `/api/clients/${t.dataset.bundle}/bundle`;
+        if (t.dataset.toggle) { await api("/api/clients/" + t.dataset.toggle, { method: "PATCH", body: { active: t.dataset.active !== "true" } }); refresh(); }
+        if (t.dataset.rotate && confirm("Rotate the license key? The running install stops validating until it receives the new bundle.")) {
+          await api(`/api/clients/${t.dataset.rotate}/rotate-key`, { method: "POST" }); say("Key rotated. Download and deploy the new bundle."); }
+      } catch (err) { say(err.message); }
+    });
+    $("#new").onsubmit = async (e) => {
+      e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
+      const body = {
+        id: f.id, name: f.name, domain: f.domain, plan: f.plan, pinnedVersion: f.pinnedVersion, appPort: Number(f.appPort),
+        maxUsers: f.maxUsers ? Number(f.maxUsers) : null,
+        modules: f.modules ? f.modules.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        branding: { primaryColor: f.primaryColor, ...(f.logoUrl ? { logoUrl: f.logoUrl } : {}) },
+      };
+      try { await api("/api/clients", { method: "POST", body }); say("Client created. Use Bundle to download the install package."); e.target.reset(); refresh(); } catch (err) { say(err.message); }
+    };
+    $("#release").onsubmit = async (e) => {
+      e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
+      try { await api("/api/releases", { method: "POST", body: f }); e.target.reset(); refresh(); } catch (err) { say(err.message); }
+    };
+    refresh().catch((err) => say(err.message)); setInterval(() => refresh().catch(() => {}), 30000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "name": "nexo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "workspaces": ["packages/*", "apps/*", "modules/*"],
+  "scripts": {
+    "dev:instance": "node --watch --import tsx apps/instance/src/index.ts",
+    "dev:console": "node --watch --import tsx apps/console/src/index.ts",
+    "dev:updater": "node --watch --import tsx apps/updater/src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "fflate": "^0.8.2",
+    "hono": "^4.6.14",
+    "pg": "^8.13.1",
+    "tsx": "^4.19.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

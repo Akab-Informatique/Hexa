@@ -1,0 +1,20 @@
+#!/bin/sh
+# Installs {{CLIENT_NAME}}. Run from this folder:  sh install.sh
+set -eu
+cd "$(dirname "$0")"
+
+command -v docker >/dev/null || { echo "Docker is required."; exit 1; }
+docker compose version >/dev/null || { echo "Docker Compose v2 is required."; exit 1; }
+
+# shellcheck disable=SC1091
+. ./.env
+if [ -n "${GHCR_USER:-}" ] && [ -n "${GHCR_TOKEN:-}" ]; then
+  echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+fi
+
+docker compose pull
+docker compose up -d
+
+echo
+echo "Started. Local address: http://127.0.0.1:${APP_PORT}"
+echo "Next: install nginx/*.conf, get a TLS certificate, and open https://{{DOMAIN}}"

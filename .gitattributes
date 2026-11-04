@@ -1,0 +1,4 @@
+# Force LF: shell scripts and templates ship to Linux servers inside bundles.
+* text=auto eol=lf
+*.sh text eol=lf
+*.template text eol=lf

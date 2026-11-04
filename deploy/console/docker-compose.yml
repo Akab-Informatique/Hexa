@@ -1,0 +1,35 @@
+# Your admin console. Run on YOUR server, behind your Nginx (proxy to 127.0.0.1:8080, HTTPS).
+#   cp .env.example .env  # fill it in
+#   docker compose up -d --build        (from the repo root: -f deploy/console/docker-compose.yml)
+services:
+  db:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nexo_console
+      POSTGRES_USER: nexo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - console_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexo -d nexo_console"]
+      interval: 5s
+      retries: 30
+
+  console:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args: { APP: console }
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      PORT: "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  console_pgdata:
