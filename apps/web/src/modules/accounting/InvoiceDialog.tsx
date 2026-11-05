@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Eye, Mail, Pencil, Plus, Printer, Trash2 } from "lucide-react";
+import { BellRing, Eye, Mail, Pencil, Plus, Printer, Send, Trash2 } from "lucide-react";
 import { computeInvoice } from "@nexo/shared/billing";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
@@ -8,6 +8,7 @@ import { useBranding } from "../../lib/theme";
 import { fmtDate, money, todayISO, useL, useLocale } from "../../lib/l";
 import { Chip, errMsg, useClients } from "../../components/kit";
 import { Modal } from "../../components/ui";
+import { codeText as igCode } from "../../admin/IntegrationPanels";
 
 interface Line { description: string; quantity: number; unitPrice: number; taxable: boolean; billingItemId?: string | null; contractName?: string | null; amount?: number }
 interface Pay { id: string; paidOn: string; amountCents: number; method: string; reference: string; note: string; byName: string | null }
@@ -15,6 +16,7 @@ interface Detail {
   id: string; number: string; clientId: string; clientName: string; status: "draft" | "sent" | "paid" | "void"; view: string; issueDate: string; dueDate: string; sentAt: string | null; total: number; subtotal: number; gst: number; qst: number;
   notes: string; poNumber: string; emailedAt: string | null; paid: number; balance: number; lines: Line[]; payments: Pay[]; rates: { gst: number; qst: number };
   address: string; city: string; province: string; postalCode: string; billingEmail: string; clientEmail: string;
+  quickbooksId: string | null; quickbooksError: string;
 }
 
 export const viewTone = (v: string) => (v === "paid" ? "ok" : v === "overdue" ? "danger" : v === "partial" || v === "open" ? "warn" : "off") as "ok" | "warn" | "danger" | "off";
@@ -45,6 +47,8 @@ export function InvoiceDialog({ id, onClose, onChanged, onStatement }: { id: str
   const [sheet, setSheet] = useState(false);
   const [pay, setPay] = useState<null | { amount: string; method: string; reference: string; paidOn: string }>(null);
   const [error, setError] = useState("");
+  const [send, setSend] = useState<null | "sent" | "reminder">(null);
+  const qb = useQuery({ queryKey: ["qb-status"], queryFn: () => api<{ connected: boolean }>("/api/accounting/quickbooks/status"), enabled: can("accounting.invoices.manage") });
   const d = detail.data;
   useEffect(() => { setLines(null); setSheet(false); }, [id]);
   if (id && !d) return null;
@@ -71,6 +75,9 @@ export function InvoiceDialog({ id, onClose, onChanged, onStatement }: { id: str
         <div className="flex-1" />
         {d.status === "draft" && <button className="btn !py-1 text-xs" onClick={() => setSheet(!sheet)}>{sheet ? <><Pencil size={13} />{l("Modifier", "Edit")}</> : <><Eye size={13} />{l("Aperçu", "Preview")}</>}</button>}
         {manage && d.status !== "draft" && d.status !== "void" && <button className="btn !py-1 text-xs" onClick={() => void run(() => api(`/api/accounting/invoices/${id}/emailed`, { body: { emailed: !d.emailedAt } }))}><Mail size={13} color={d.emailedAt ? "var(--ok)" : undefined} />{d.emailedAt ? l("Marquée envoyée par courriel", "Marked as emailed") : l("Marquer envoyée par courriel", "Mark as emailed")}</button>}
+        {manage && d.status === "sent" && <button className="btn !py-1 text-xs" onClick={() => setSend("sent")}><Send size={13} />{l("Envoyer par courriel", "Email it")}</button>}
+        {manage && d.status === "sent" && d.balance > 0 && d.dueDate < todayISO() && <button className="btn !py-1 text-xs" onClick={() => setSend("reminder")}><BellRing size={13} />{l("Rappel", "Reminder")}</button>}
+        {manage && qb.data?.connected && d.status === "sent" && <button className="btn !py-1 text-xs" title={d.quickbooksError || undefined} onClick={() => void run(async () => { await api(`/api/accounting/quickbooks/invoices/${d.id}`, { body: {} }); })}>QuickBooks{d.quickbooksId ? " ✓" : ""}{d.quickbooksError ? " ⚠" : ""}</button>}
         <button className="btn !py-1 text-xs" onClick={() => onStatement(d.clientId)}>{l("Relevé du client", "Client statement")}</button></div>}
 
       {showSheet && d ? (
@@ -152,7 +159,34 @@ export function InvoiceDialog({ id, onClose, onChanged, onStatement }: { id: str
           {draft && !sheet && <button className="btn" disabled={!d && !clientId} onClick={() => void save()}>{l("Enregistrer", "Save")}</button>}
           {d && manage && d.status === "draft" && <button className="btn btn-primary" onClick={() => void action("send")}>{l("Envoyer (finaliser)", "Send (finalize)")}</button>}</div>
       </div>
-      <p className="mt-3 text-xs text-muted">{l("L'envoi par courriel, le PDF serveur et la synchronisation QuickBooks arrivent avec les intégrations Mailjet et QuickBooks.", "Emailing, server PDF and QuickBooks sync arrive with the Mailjet and QuickBooks integrations.")}</p>
+      {d?.quickbooksError && <p className="mt-3 text-xs text-warn">QuickBooks : {d.quickbooksError}</p>}
+      {send && d && <SendDialog kind={send} invoiceId={d.id} number={d.number} defaultTo={d.billingEmail || d.clientEmail} onClose={() => setSend(null)} onSent={refreshAll} />}
+    </Modal>
+  );
+}
+
+/** Emails the invoice (or a reminder) with its figures in the body; the address can be changed. */
+function SendDialog({ kind, invoiceId, number, defaultTo, onClose, onSent }: { kind: "sent" | "reminder"; invoiceId: string; number: string; defaultTo: string; onClose: () => void; onSent: () => Promise<unknown> }) {
+  const l = useL();
+  const [to, setTo] = useState(defaultTo ?? "");
+  const [lang, setLang] = useState<"fr" | "en">(l("fr", "en") as "fr" | "en");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true); setError("");
+    try { await api(`/api/accounting/invoices/${invoiceId}/${kind === "sent" ? "email" : "reminder"}`, { body: { to: to || undefined, lang, ...(kind === "sent" && note ? { note } : {}) } }); await onSent(); onClose(); }
+    catch (e) { const c = errMsg(e, "Error"); setError(c === "no_billing_email" ? l("Ce client n'a pas de courriel de facturation : saisissez une adresse.", "This client has no billing email: type an address.") : c === "nothing_due" ? l("Cette facture n'est pas en retard.", "This invoice is not late.") : igCode(c, l)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={kind === "sent" ? `${l("Envoyer la facture", "Email invoice")} ${number}` : `${l("Rappel de paiement", "Payment reminder")} · ${number}`} onClose={onClose}>
+      <label className="mb-4 block"><span className="label">{l("Destinataire", "Recipient")}</span><input className="input" type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder={l("Courriel de facturation du client", "The client's billing email")} /></label>
+      <label className="mb-4 block"><span className="label">{l("Langue du message", "Message language")}</span><select className="input" value={lang} onChange={(e) => setLang(e.target.value as "fr" | "en")}><option value="fr">Français</option><option value="en">English</option></select></label>
+      {kind === "sent" && <label className="mb-4 block"><span className="label">{l("Mot personnel (option)", "Personal note (optional)")}</span><textarea className="input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
+      <p className="mb-3 text-xs text-muted">{l("Le message contient le détail de la facture (échéance, solde). Le PDF en pièce jointe viendra plus tard : imprimez la facture au besoin.", "The message holds the invoice's details (due date, balance). The PDF attachment comes later: print the invoice if needed.")}</p>
+      {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
+      <div className="flex justify-end gap-2"><button className="btn" onClick={onClose}>{l("Annuler", "Cancel")}</button><button className="btn btn-primary" disabled={busy} onClick={() => void go()}><Send size={14} />{l("Envoyer", "Send")}</button></div>
     </Modal>
   );
 }

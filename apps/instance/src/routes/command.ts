@@ -5,6 +5,7 @@ import { audit } from "../auth/access.ts";
 import { open, seal } from "../auth/secrets.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { config } from "../config.ts";
+import { emailBoardMessage } from "./mailing.ts";
 import { auth, body, buildUpdate, camel, camelRows, can } from "./util.ts";
 
 export const commandRoutes = new Hono<Env>();
@@ -39,7 +40,9 @@ commandRoutes.post("/board", requirePermission("command.board.post", "command.bo
   const id = r.rows[0].id as string;
   if (d.audience === "selected") for (const cid of d.clientIds) await pool.query("insert into message_targets values ($1, $2) on conflict do nothing", [id, cid]);
   await audit("message.posted", { userId: auth(c).user.id, target: d.title, detail: { audience: d.audience, emailCopy: d.emailCopy } });
-  return c.json({ id }, 201);
+  // The email copy goes out right away when Mailjet is set up; otherwise it waits as "pending".
+  const email = d.emailCopy ? await emailBoardMessage(id).catch(() => ({ status: "failed" as const, sent: 0, failed: 0 })) : null;
+  return c.json({ id, email }, 201);
 });
 
 commandRoutes.patch("/board/:id", requirePermission("command.board.manage"), async (c) => {

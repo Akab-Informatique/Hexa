@@ -462,5 +462,117 @@ ok("a pay delay pushes the payment of a bill later", (await call("GET", "/api/ac
 ok("staff cannot record a recurring payment", (await post("/api/accounting/recurring", { label: "x", amount: 1, frequency: "weekly", nextDate: today }, uc)).status === 403);
 void bToday;
 
+// ---- Real integrations, against the local mock (scripts/mock-services.mjs) ----
+const MOCK = "http://127.0.0.1:9099";
+const mockPost = (p, b) => fetch(MOCK + p, { method: "POST", body: b ? JSON.stringify(b) : undefined });
+const mockMails = async () => (await fetch(MOCK + "/_mock/mail")).json();
+const mockQb = async () => (await fetch(MOCK + "/_mock/qbo/state")).json();
+const dance = async (connectPath, as) => {
+  const { url } = (await call("GET", connectPath, undefined, as)).body;
+  const hop = await fetch(url, { redirect: "manual" });
+  const loc = new URL(hop.headers.get("location"));
+  const back = await fetch(BASE + loc.pathname + loc.search, { headers: { cookie: as ?? cookie }, redirect: "manual" });
+  return { url, redirect: back.headers.get("location") ?? "" };
+};
+await mockPost("/_mock/reset");
+const igPut = (provider, values, enabled = true) => call("PUT", `/api/admin/integrations/${provider}`, { values, enabled });
+
+// Mailjet
+ok("a test email is refused until Mailjet is set up", (await post("/api/admin/integrations/mailjet/test", {})).body?.error === "mailjet_not_configured");
+await igPut("mailjet", { apiKey: "mock-key", secretKey: "wrong", senderEmail: "firme@acme.test", senderName: "Acme" });
+ok("wrong Mailjet keys are reported, not hidden", (await post("/api/admin/integrations/mailjet/test", {})).body?.error === "mailjet_refused");
+await igPut("mailjet", { apiKey: "mock-key", secretKey: "mock-secret", senderEmail: "firme@acme.test", senderName: "Acme" });
+const tm = await post("/api/admin/integrations/mailjet/test", { to: "dest@example.com" });
+ok("the test email goes out with the right credentials", tm.status === 200 && (await mockMails()).some((m) => m.subject.startsWith("Test Nexo") && m.to[0].Email === "dest@example.com" && m.from.Email === "firme@acme.test"));
+const bm = await post("/api/command/board", { title: "SMOKE avis aux clients", body: "Bonjour a tous", audience: "selected", clientIds: [cid], emailCopy: true });
+ok("a board message is emailed to the clients it targets", bm.body.email.status === "sent" && bm.body.email.sent === 1 && (await mockMails()).some((m) => m.subject === "SMOKE avis aux clients" && m.to[0].Email === "jane@example.com"));
+ok("…and its status shows as sent", (await call("GET", "/api/command/board")).body.find((m) => m.id === bm.body.id)?.emailStatus === "sent");
+const draftInv = (await post("/api/accounting/invoices", { clientId: bid, lines: [{ description: "SMOKE draft", quantity: 1, unitPrice: 10 }] })).body.id;
+ok("a draft invoice cannot be emailed", (await post(`/api/accounting/invoices/${draftInv}/email`, { to: "x@example.com" })).body?.error === "invoice_not_sent");
+ok("an invoice with no billing address asks for one", (await post(`/api/accounting/invoices/${madeInv.created[0]}/email`, {})).body?.error === "no_billing_email");
+const ie = await post(`/api/accounting/invoices/${madeInv.created[0]}/email`, { to: "compta@client.example", lang: "en", note: "SMOKE merci" });
+const ieMail = (await mockMails()).find((m) => m.to[0].Email === "compta@client.example");
+ok("the invoice email carries its figures and marks the invoice as emailed", ie.status === 200 && ieMail.subject.startsWith("Invoice F-") && ieMail.html.includes("SMOKE merci") && ieMail.text.includes("Balance due") && (await call("GET", `/api/accounting/invoices/${madeInv.created[0]}`)).body.emailedAt !== null);
+ok("staff cannot email invoices", (await post(`/api/accounting/invoices/${madeInv.created[0]}/email`, { to: "x@example.com" }, uc)).status === 403);
+const lateInv = (await post("/api/accounting/invoices", { clientId: ccid, lines: [{ description: "SMOKE en retard", quantity: 1, unitPrice: 200 }], dueDate: plus(-20) })).body.id;
+await post(`/api/accounting/invoices/${lateInv}/action`, { action: "send" });
+ok("a reminder only for an invoice that is late", (await post(`/api/accounting/invoices/${bi.id}/reminder`, { to: "x@example.com" })).body?.error === "nothing_due");
+ok("the reminder says how late it is", (await post(`/api/accounting/invoices/${lateInv}/reminder`, { to: "rappel@client.example" })).status === 200 && (await mockMails()).some((m) => m.to[0].Email === "rappel@client.example" && /Rappel/.test(m.subject) && /20/.test(m.subject)));
+ok("account statement by email", (await post(`/api/accounting/clients/${ccid}/statement/email`, {})).status === 200 && (await mockMails()).some((m) => m.to[0].Email === "other@smoke.example" && m.subject.startsWith("Relevé")));
+await call("PUT", "/api/accounting/reminders/settings", { enabled: true, from: null, levels: [5, 15], lang: "fr" });
+const run1 = (await post("/api/accounting/reminders/run", {})).body, run2 = (await post("/api/accounting/reminders/run", {})).body;
+ok("automatic reminders: the first run sends, a second run sends nothing more (once per level)", run1.sent >= 1 && run2.sent === 0, JSON.stringify([run1, run2]));
+ok("…to the client's billing address", (await mockMails()).filter((m) => m.to[0].Email === "other@smoke.example" && /^Rappel/.test(m.subject)).length === 1);
+
+// Microsoft 365
+await igPut("o365", { tenantId: "tenant-1", clientId: "ms-client-id", clientSecret: "ms-secret" });
+ok("Microsoft: configured but not yet connected", (await call("GET", "/api/microsoft/status")).body.configured === true && (await call("GET", "/api/microsoft/status")).body.connected === false);
+ok("calendar needs a connection", (await call("GET", "/api/microsoft/calendar")).body?.error === "ms_not_connected");
+const msd = await dance("/api/microsoft/connect");
+ok("the sign-in goes to Microsoft with our client, redirect address and a signed state", msd.url.includes("/oauth2/v2.0/authorize") && msd.url.includes("client_id=ms-client-id") && msd.url.includes("state=") && msd.url.includes(encodeURIComponent("/api/microsoft/callback")));
+ok("coming back connects the account", msd.redirect.includes("connected=1") && (await call("GET", "/api/microsoft/status")).body.email === "marie@acme.test");
+const other = await dance("/api/microsoft/connect", uc);
+const stolen = new URL(other.url).searchParams.get("state");
+const bad = await fetch(BASE + `/api/microsoft/callback?code=MSCODE&state=${encodeURIComponent(stolen)}`, { headers: { cookie }, redirect: "manual" });
+ok("a state from another person is refused", (bad.headers.get("location") ?? "").includes("error=state"));
+const evs = (await call("GET", `/api/microsoft/calendar?from=${D}&to=${D}`)).body.events;
+ok("the calendar shows events, hides what is private, and knows all-day ones", evs.length === 3 && evs.find((e) => e.id === "ev2").subject === "" && evs.find((e) => e.id === "ev2").isPrivate === true && evs.find((e) => e.id === "ev3").allDay === true && evs[0].start === `${D}T09:00:00`);
+const inbox = (await call("GET", "/api/microsoft/mail")).body.messages;
+ok("the inbox lists messages", inbox.length === 2 && inbox[0].isRead === false && inbox[0].from === "Luc Lavoie");
+const oneMail = (await call("GET", `/api/microsoft/mail/${inbox[0].id}`)).body;
+ok("one message comes as plain text", oneMail.body.includes("Voici les pièces") && oneMail.to[0] === "marie@acme.test");
+ok("a strange message id is refused", (await call("GET", "/api/microsoft/mail/..%2F..%2Fme")).status === 404);
+await mockPost("/_mock/expire");
+ok("an expired access token is refreshed by itself", (await call("GET", `/api/microsoft/calendar?from=${D}&to=${D}`)).body.events.length === 3);
+const dayOut = (await dayOf(D)).body;
+ok("Outlook events take their hours off the day plan", dayOut.blocks.some((b) => b.kind === "event" && b.title === "Réunion client" && b.start === "09:00") && dayOut.blocks.some((b) => b.kind === "event" && b.title === "Occupé" && b.start === "14:00") && dayOut.capacityMinutes === 450 - 120, JSON.stringify(dayOut.blocks.filter((b) => b.kind === "event")));
+ok("no task is planned over an Outlook event", dayOut.blocks.filter((b) => b.kind === "task").every((b) => toMin(b.end) <= 540 || toMin(b.start) >= 600) );
+await mockPost("/_mock/revoke");
+ok("a refused refresh token asks the person to sign in again", (await call("GET", `/api/microsoft/calendar?from=${plus(1)}&to=${plus(1)}`)).body?.error === "ms_reauth" && (await call("GET", "/api/microsoft/status")).body.needsReauth === true);
+const msd2 = await dance("/api/microsoft/connect");
+ok("signing in again fixes it", msd2.redirect.includes("connected=1") && (await call("GET", "/api/microsoft/status")).body.needsReauth === false);
+await call("DELETE", "/api/microsoft/disconnect");
+ok("disconnecting forgets the account", (await call("GET", "/api/microsoft/status")).body.connected === false && (await call("GET", "/api/microsoft/calendar")).body?.error === "ms_not_connected");
+
+// QuickBooks
+await igPut("quickbooks", { environment: "sandbox", clientId: "qb-client-id", clientSecret: "qb-secret" });
+ok("QuickBooks: configured but not connected", (await call("GET", "/api/accounting/quickbooks/status")).body.configured === true && (await call("GET", "/api/accounting/quickbooks/status")).body.connected === false);
+ok("nothing is sent before it is connected", (await post(`/api/accounting/quickbooks/invoices/${madeInv.created[0]}`, {})).body?.error === "quickbooks_not_connected");
+ok("staff cannot connect QuickBooks", (await call("GET", "/api/accounting/quickbooks/connect", undefined, uc)).status === 403);
+const qbd = await dance("/api/accounting/quickbooks/connect");
+const qbs = (await call("GET", "/api/accounting/quickbooks/status")).body;
+ok("QuickBooks sign-in connects the company", qbd.url.includes("client_id=qb-client-id") && qbd.redirect.includes("connected=1") && qbs.connected === true && qbs.realmId === "9130000000000001");
+const plan = (await call("GET", "/api/accounting/quickbooks/customers/plan")).body.rows;
+const dupont = plan.find((r) => r.name.startsWith("Boulangerie Dupont"));
+ok("clients are matched to customers by name (ignoring inc/accents) and the rest would be created", dupont?.action === "link" && dupont.customer.DisplayName === "Boulangerie Dupont" && plan.find((r) => r.clientId === bid)?.action === "create");
+const sy = (await post("/api/accounting/quickbooks/customers/sync", { clientIds: [dupont.clientId, bid] })).body;
+ok("applying the review links one and creates one", sy.linked === 1 && sy.created === 1 && sy.errors.length === 0 && (await mockQb()).customers.some((c) => c.DisplayName.startsWith("SMOKE Billing")));
+const qbInv = (await post("/api/accounting/invoices", { clientId: bid, lines: [{ description: "SMOKE QB service", quantity: 2, unitPrice: 100 }], poNumber: "PO-QB" })).body.id;
+ok("a draft invoice is not sent to QuickBooks", (await post(`/api/accounting/quickbooks/invoices/${qbInv}`, {})).body?.error === "invoice_not_sent");
+await post(`/api/accounting/invoices/${qbInv}/action`, { action: "send" });
+const qbPush = (await post(`/api/accounting/quickbooks/invoices/${qbInv}`, {})).body;
+const qbDetail = (await call("GET", `/api/accounting/invoices/${qbInv}`)).body;
+const qbRemote = (await mockQb()).invoices.find((i) => i.Id === qbPush.quickbooksId);
+ok("the invoice reaches QuickBooks with the same total (taxes as their own lines)", qbPush.ok === true && qbPush.warning === null && qbRemote.TotalAmt === Number(qbDetail.total) && qbRemote.DocNumber === qbDetail.number && qbRemote.Line.length === 3 && qbRemote.Line.some((l) => /TPS/.test(l.Description)) && qbRemote.PrivateNote.includes("PO-QB"));
+const qbAgain = (await post(`/api/accounting/quickbooks/invoices/${qbInv}`, {})).body;
+ok("sending it again updates it and never doubles it", qbAgain.updated === true && qbAgain.quickbooksId === qbPush.quickbooksId && (await mockQb()).invoices.filter((i) => i.DocNumber === qbDetail.number).length === 1);
+await mockPost("/_mock/expire");
+ok("an expired QuickBooks token is refreshed by itself", (await post(`/api/accounting/quickbooks/invoices/${qbInv}`, {})).status === 200);
+await mockPost("/_mock/qbo/pay", { invoiceId: qbPush.quickbooksId, amount: 40 });
+const pull1 = (await post("/api/accounting/quickbooks/payments/pull", {})).body;
+const afterPull = (await call("GET", `/api/accounting/invoices/${qbInv}`)).body;
+ok("a payment made in QuickBooks becomes a payment here", pull1.recorded >= 1 && afterPull.paid === 40 && afterPull.view === "partial" && afterPull.payments[0].method === "quickbooks");
+ok("pulling again records nothing twice", (await post("/api/accounting/quickbooks/payments/pull", {})).body.recorded === 0);
+await mockPost("/_mock/qbo/pay", { invoiceId: qbPush.quickbooksId, amount: Number(qbDetail.total) - 40 });
+await post("/api/accounting/quickbooks/payments/pull", {});
+ok("the rest paid in QuickBooks closes the invoice here", (await call("GET", `/api/accounting/invoices/${qbInv}`)).body.view === "paid");
+await mockPost("/_mock/revoke");
+ok("a refused QuickBooks token asks to connect again", (await post(`/api/accounting/quickbooks/invoices/${qbInv}`, {})).body?.error === "qb_reauth" && (await call("GET", "/api/accounting/quickbooks/status")).body.needsReauth === true);
+await dance("/api/accounting/quickbooks/connect");
+ok("connecting again fixes it", (await call("GET", "/api/accounting/quickbooks/status")).body.needsReauth === false);
+await post("/api/accounting/quickbooks/disconnect", {});
+ok("disconnecting forgets the company", (await call("GET", "/api/accounting/quickbooks/status")).body.connected === false);
+ok("tokens never come back from the integrations list", !/qb-access|qb-refresh|ms-access|ms-refresh/.test(JSON.stringify((await call("GET", "/api/admin/integrations")).body)));
+
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");
 process.exit(failures ? 1 : 0);

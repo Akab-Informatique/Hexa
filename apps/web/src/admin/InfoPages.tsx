@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { PageHeader } from "../components/ui";
+import { ProviderPanel } from "./IntegrationPanels";
 
 interface IField { key: string; label: { fr: string; en: string }; secret?: boolean; options?: string[]; placeholder?: string; value: string; isSet: boolean }
 interface Integration { provider: string; label: string; enabled: boolean; configured: boolean; updatedAt: string | null; fields: IField[] }
@@ -47,7 +48,7 @@ export function IntegrationPage() {
         ))}
         <label className="mb-5 flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" disabled={!manage} checked={enabled ?? it.enabled} onChange={(e) => setEnabled(e.target.checked)} />{lang === "fr" ? "Activée" : "Enabled"}</label>
         {manage && <div className="flex items-center gap-3"><button className="btn btn-primary" onClick={() => void save()}>{t("common.save")}</button>{msg && <span role="status" className="text-sm text-muted">{msg}</span>}</div>}
-        <p className="mt-5 text-xs text-muted">{t("admin.integrationSoon")}</p>
+        <ProviderPanel provider={provider} />
       </div>
     </>
   );

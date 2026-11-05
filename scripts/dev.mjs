@@ -69,7 +69,14 @@ const files = unzipSync(new Uint8Array(await zipRes.arrayBuffer()));
 const envText = strFromU8(files["nexo-demo/.env"]);
 const get = (k) => envText.match(new RegExp(`^${k}=(.*)$`, "m"))?.[1];
 
+// Local stand-in for Mailjet, Microsoft and Intuit, so the integrations can be tried without any account.
+run("mock-services", "scripts/mock-services.mjs", {});
+await waitFor("http://127.0.0.1:9099/_mock/mail", "mock services");
+
 run("instance", "apps/instance/src/index.ts", {
+  PUBLIC_URL: "http://localhost:5173", // where the browser reaches the app: OAuth sign-ins come back here
+  MAILJET_URL: "http://127.0.0.1:9099", GRAPH_URL: "http://127.0.0.1:9099/graph/v1.0", MS_LOGIN_URL: "http://127.0.0.1:9099/mslogin",
+  INTUIT_AUTH_URL: "http://127.0.0.1:9099/intuit/connect/oauth2", INTUIT_TOKEN_URL: "http://127.0.0.1:9099/intuit/oauth2/v1/tokens/bearer", QBO_API_URL: "http://127.0.0.1:9099/qbo",
   PORT: String(INSTANCE_PORT),
   DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5434/postgres",
   CLIENT_ID: get("CLIENT_ID"),

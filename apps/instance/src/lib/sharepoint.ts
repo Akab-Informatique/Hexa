@@ -1,5 +1,6 @@
 import { pool } from "../db.ts";
 import { open } from "../auth/secrets.ts";
+import { URLS } from "./services.ts";
 import { PROFILES } from "../seed/profiles.ts";
 
 // SharePoint through Microsoft Graph with the firm's own app registration (application permissions,
@@ -29,7 +30,6 @@ export function cleanPath(p: string): string {
 }
 
 // ------------------------------------------------------------------ Graph
-const GRAPH = "https://graph.microsoft.com/v1.0";
 let tokenCache: { key: string; token: string; exp: number } | null = null;
 let siteCache: { url: string; id: string } | null = null;
 
@@ -47,7 +47,7 @@ async function creds(): Promise<Creds | null> {
 async function token(c: Creds): Promise<string> {
   const key = `${c.tenantId}:${c.clientId}`;
   if (tokenCache && tokenCache.key === key && tokenCache.exp > Date.now() + 60_000) return tokenCache.token;
-  const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(c.tenantId)}/oauth2/v2.0/token`, {
+  const res = await fetch(`${URLS.msLogin()}/${encodeURIComponent(c.tenantId)}/oauth2/v2.0/token`, {
     method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ client_id: c.clientId, client_secret: c.clientSecret, scope: "https://graph.microsoft.com/.default", grant_type: "client_credentials" }),
   });
@@ -61,7 +61,7 @@ const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
 
 function graphProvider(c: Creds): Provider {
   const call = async (path: string, init: RequestInit = {}): Promise<Response> => {
-    const res = await fetch(path.startsWith("http") ? path : GRAPH + path, { ...init, headers: { authorization: `Bearer ${await token(c)}`, ...(init.headers ?? {}) } });
+    const res = await fetch(path.startsWith("http") ? path : URLS.graph() + path, { ...init, headers: { authorization: `Bearer ${await token(c)}`, ...(init.headers ?? {}) } });
     if (!res.ok) {
       if (res.status === 404) throw new SpError(404, "not found");
       if (res.status === 409) throw new SpError(409, "already exists");

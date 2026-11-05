@@ -4,6 +4,7 @@ import { addDays, mondayOf, quebecHolidays, todayISO } from "@nexo/shared/billin
 import { pool, getSetting, setSetting } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
+import { busyBlocks } from "../lib/microsoft.ts";
 import { auth, body, camelRows, can, isUuid } from "./util.ts";
 
 // Pipeline "My day", modelled on the reference. What is on a person's plate (tasks due, late, urgent, in progress,
@@ -85,6 +86,9 @@ pipelineRoutes.get("/day", async (c) => {
   const away = (await pool.query("select kind from absences where user_id = $1 and starts_on <= $2 and ends_on >= $2 limit 1", [userId, date])).rows[0];
   const dayOff = dow >= 5 ? "weekend" : holiday ? "holiday" : away ? "absence" : null;
   const events = (await pool.query("select title, start_time, end_time from meeting_events where event_date = $1 and (user_id is null or user_id = $2) and start_time is not null and end_time is not null order by start_time", [date, userId])).rows;
+  // The person's own Outlook calendar (when connected) takes its hours off the day too.
+  const outlook = own ? await busyBlocks(userId, date) : [];
+  events.push(...outlook.map((o) => ({ title: `${o.title}`, start_time: o.start, end_time: o.end })));
   const ws = mins(s.workStart), we = mins(s.workEnd), ls = mins(s.lunchStart), le = mins(s.lunchEnd);
   const busy = [{ s: ls, e: le, kind: "lunch" as const, title: "" }, ...events.map((e) => ({ s: mins(e.start_time), e: mins(e.end_time), kind: "event" as const, title: e.title as string }))].sort((a, b) => a.s - b.s);
   const overlapIn = (a: number, b: number) => busy.reduce((t, x) => t + Math.max(0, Math.min(b, x.e) - Math.max(a, x.s)), 0);

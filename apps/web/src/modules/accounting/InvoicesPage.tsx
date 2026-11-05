@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Mail, Plus, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, BellRing, ChevronLeft, ChevronRight, Mail, Plus, Search } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fmtDate, money, todayISO, useL, useLocale } from "../../lib/l";
@@ -9,6 +9,7 @@ import { Chip, Empty, Stat, Toolbar, useClients } from "../../components/kit";
 import { PageHeader } from "../../components/ui";
 import { InvoiceDialog, viewLabel, viewTone } from "./InvoiceDialog";
 import { StatementDialog } from "./Statement";
+import { RemindersDialog } from "./Reminders";
 
 interface Inv { id: string; number: string; clientId: string; clientName: string; status: string; view: string; issueDate: string; dueDate: string; total: number; paid: number; balance: number; poNumber: string; emailedAt: string | null }
 interface Page { rows: Inv[]; total: number; page: number; size: number; totals: { amount: number; balance: number } }
@@ -23,6 +24,7 @@ export default function InvoicesPage() {
   const [sp, setSp] = useSearchParams();
   const [open, setOpen] = useState<string | "new" | null>(null);
   const [statementFor, setStatementFor] = useState<string | null>(null);
+  const [reminders, setReminders] = useState(false);
   const get = (k: string, d = "") => sp.get(k) ?? d;
   const set = (patch: Record<string, string | null>, keepPage = false) => { const n = new URLSearchParams(sp); for (const [k, v] of Object.entries(patch)) { if (v === null || v === "") n.delete(k); else n.set(k, v); } if (!keepPage) n.delete("page"); setSp(n, { replace: true }); };
   const status = get("istatus", "open"), client = get("iclient"), from = get("ifrom"), to = get("ito"), q = get("iq"), emailed = get("iemailed");
@@ -41,7 +43,7 @@ export default function InvoicesPage() {
   return (
     <>
       <PageHeader title={l("Factures", "Invoices")} subtitle={l("Toutes les factures aux clients", "All customer invoices")}
-        actions={<div className="flex gap-2">{client && <button className="btn" onClick={() => setStatementFor(client)}>{l("Relevé de compte", "Account statement")}</button>}{can("accounting.invoices.edit", "accounting.invoices.manage") && <button className="btn btn-primary" onClick={() => setOpen("new")}><Plus size={16} />{l("Nouvelle facture", "New invoice")}</button>}</div>} />
+        actions={<div className="flex gap-2">{can("accounting.invoices.manage") && <button className="btn" onClick={() => setReminders(true)}><BellRing size={15} />{l("Rappels automatiques", "Automatic reminders")}</button>}{client && <button className="btn" onClick={() => setStatementFor(client)}>{l("Relevé de compte", "Account statement")}</button>}{can("accounting.invoices.edit", "accounting.invoices.manage") && <button className="btn btn-primary" onClick={() => setOpen("new")}><Plus size={16} />{l("Nouvelle facture", "New invoice")}</button>}</div>} />
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label={l("Factures (filtre)", "Invoices (filter)")} value={list.data?.total ?? 0} /><Stat label={l("Montant", "Amount")} value={money(list.data?.totals.amount, loc)} />
         <Stat label={l("Solde à recevoir", "Balance receivable")} value={money(list.data?.totals.balance, loc)} tone={list.data?.totals.balance ? "warn" : undefined} />
@@ -71,6 +73,7 @@ export default function InvoicesPage() {
         </div>
       </div>
       {open && <InvoiceDialog id={open === "new" ? null : open} onClose={() => setOpen(null)} onStatement={(cid) => { setOpen(null); setStatementFor(cid); }} onChanged={async () => { await qc.invalidateQueries({ queryKey: ["invoices"] }); await qc.invalidateQueries({ queryKey: ["billing-items"] }); await qc.invalidateQueries({ queryKey: ["billing-summary"] }); await qc.invalidateQueries({ queryKey: ["invoice"] }); }} />}
+      {reminders && <RemindersDialog onClose={() => setReminders(false)} />}
       {statementFor && <StatementDialog clientId={statementFor} onClose={() => setStatementFor(null)} />}
     </>
   );

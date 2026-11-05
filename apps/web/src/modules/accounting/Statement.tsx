@@ -1,7 +1,10 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Send } from "lucide-react";
 import { api } from "../../lib/api";
 import { fmtDate, money, useL, useLocale } from "../../lib/l";
-import { Empty, Stat } from "../../components/kit";
+import { Empty, errMsg, Stat } from "../../components/kit";
+import { codeText } from "../../admin/IntegrationPanels";
 import { Modal } from "../../components/ui";
 
 interface Statement {
@@ -16,6 +19,12 @@ export function StatementDialog({ clientId, onClose }: { clientId: string; onClo
   const loc = useLocale();
   const q = useQuery({ queryKey: ["statement", clientId], queryFn: () => api<Statement>(`/api/accounting/clients/${clientId}/statement`) });
   const s = q.data;
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const email = async () => {
+    setMsg(null);
+    try { const r = await api<{ to: string }>(`/api/accounting/clients/${clientId}/statement/email`, { body: { lang: l("fr", "en") } }); setMsg({ ok: true, text: l(`Relevé envoyé à ${r.to}.`, `Statement sent to ${r.to}.`) }); }
+    catch (e) { const c = errMsg(e, "Error"); setMsg({ ok: false, text: c === "no_billing_email" ? l("Ce client n'a pas de courriel de facturation.", "This client has no billing email.") : c === "nothing_due" ? l("Rien à payer.", "Nothing owed.") : codeText(c, l) }); }
+  };
   return (
     <Modal title={l("Relevé de compte", "Account statement")} onClose={onClose} wide>
       {!s ? null : (
@@ -32,7 +41,8 @@ export function StatementDialog({ clientId, onClose }: { clientId: string; onClo
             <Stat label="61–90 j" value={money(s.buckets.d61_90, loc)} /><Stat label="90+ j" value={money(s.buckets.d90, loc)} tone={s.buckets.d90 ? "danger" : undefined} /><Stat label={l("Total dû", "Total owed")} value={money(s.total, loc)} tone={s.pastDue ? "warn" : undefined} />
           </div>
         </div>)}
-      <div className="mt-4 flex justify-end gap-2"><button className="btn" onClick={() => window.print()}>{l("Imprimer / PDF", "Print / PDF")}</button><button className="btn" onClick={onClose}>{l("Fermer", "Close")}</button></div>
+      {msg && <p role="status" className="mt-3 text-sm" style={{ color: msg.ok ? "var(--ok)" : "var(--danger)" }}>{msg.text}</p>}
+      <div className="mt-4 flex justify-end gap-2"><button className="btn" onClick={() => void email()}><Send size={14} />{l("Envoyer par courriel", "Email it")}</button><button className="btn" onClick={() => window.print()}>{l("Imprimer / PDF", "Print / PDF")}</button><button className="btn" onClick={onClose}>{l("Fermer", "Close")}</button></div>
     </Modal>
   );
 }

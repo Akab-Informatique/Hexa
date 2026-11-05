@@ -17,6 +17,7 @@ export default function BoardPage() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["board"], queryFn: () => api<Message[]>("/api/command/board") });
   const [composing, setComposing] = useState(false);
+  const [notice, setNotice] = useState("");
   const refresh = () => qc.invalidateQueries({ queryKey: ["board"] });
   const post = can("command.board.post", "command.board.manage");
   const manage = can("command.board.manage");
@@ -25,6 +26,7 @@ export default function BoardPage() {
     <>
       <PageHeader title={l("Babillard", "Message board")} subtitle={l("Messages aux clients, dans leur portail ou par courriel", "Messages to clients, in their portal or by email")}
         actions={post && <button className="btn btn-primary" onClick={() => setComposing(true)}><Plus size={16} />{l("Nouveau message", "New message")}</button>} />
+      {notice && <p role="status" className="mb-3 text-sm text-muted">{notice}</p>}
       {list.data?.length === 0 && <div className="glass"><Empty>{l("Aucun message publié.", "No messages posted.")}</Empty></div>}
       <div className="space-y-3">
         {list.data?.map((m) => (
@@ -42,12 +44,12 @@ export default function BoardPage() {
             {m.audience === "selected" && <div className="mt-3 flex flex-wrap gap-1.5">{m.targets.map((t) => <span key={t.id} className="chip">{t.name}</span>)}</div>}
           </article>))}
       </div>
-      {composing && <Compose onClose={() => setComposing(false)} onPosted={refresh} />}
+      {composing && <Compose onClose={() => setComposing(false)} onPosted={async (email) => { await refresh(); setNotice(!email ? "" : email.status === "sent" ? l(`Courriel envoyé à ${email.sent} client(s).`, `Email sent to ${email.sent} client(s).`) : email.status === "pending" ? l("Mailjet n'est pas configuré : le courriel reste en attente.", "Mailjet is not set up: the email stays pending.") : l(`Le courriel n'a pas pu être envoyé à ${email.failed} adresse(s).`, `The email could not be sent to ${email.failed} address(es).`)); }} />}
     </>
   );
 }
 
-function Compose({ onClose, onPosted }: { onClose: () => void; onPosted: () => Promise<unknown> }) {
+function Compose({ onClose, onPosted }: { onClose: () => void; onPosted: (email: { status: string; sent: number; failed: number } | null) => Promise<unknown> }) {
   const l = useL();
   const { can } = useAuth();
   const clients = useClients();
@@ -78,7 +80,7 @@ function Compose({ onClose, onPosted }: { onClose: () => void; onPosted: () => P
       {emailCopy && !mailReady && <p className="mb-3 text-xs text-warn">{l("Mailjet n'est pas encore configuré: le courriel restera « en attente d'envoi » jusqu'à la configuration.", "Mailjet is not configured yet: the email will stay “pending” until it is set up.")}</p>}
       {error && <p role="alert" className="my-3 text-sm text-danger">{error}</p>}
       <div className="mt-4 flex justify-end gap-2"><button className="btn" onClick={onClose}>{l("Annuler", "Cancel")}</button>
-        <button className="btn btn-primary" disabled={!title.trim() || (audience === "selected" && !clientIds.length)} onClick={async () => { try { await api("/api/command/board", { body: { title, body, audience, clientIds, emailCopy } }); await onPosted(); onClose(); } catch (e) { setError(errMsg(e, "Error")); } }}>{l("Publier", "Post")}</button></div>
+        <button className="btn btn-primary" disabled={!title.trim() || (audience === "selected" && !clientIds.length)} onClick={async () => { try { const r = await api<{ email: { status: string; sent: number; failed: number } | null }>("/api/command/board", { body: { title, body, audience, clientIds, emailCopy } }); await onPosted(r.email); onClose(); } catch (e) { setError(errMsg(e, "Error")); } }}>{l("Publier", "Post")}</button></div>
     </Modal>
   );
 }

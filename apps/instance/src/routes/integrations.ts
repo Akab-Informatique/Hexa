@@ -5,6 +5,8 @@ import { audit } from "../auth/access.ts";
 import { open, seal } from "../auth/secrets.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { auth, body } from "./util.ts";
+import { sendMail, validEmail } from "../lib/mail.ts";
+import { ServiceError } from "../lib/services.ts";
 
 // Each firm registers its own apps with Microsoft, Intuit and Mailjet and enters the credentials here.
 // Secret fields are sealed at rest and never returned: the API only says whether they are set.
@@ -72,6 +74,21 @@ integrationRoutes.put("/:provider", requirePermission("admin.integrations.manage
   );
   await audit("integration.updated", { userId: auth(c).user.id, target: c.req.param("provider") });
   return c.json({ ok: true });
+});
+
+/** Sends a test message so the firm knows the Mailjet keys and the sender address work. */
+integrationRoutes.post("/mailjet/test", requirePermission("admin.integrations.manage"), async (c) => {
+  const d = await body(c, z.object({ to: z.string().email().optional() }));
+  const to = d.to ?? auth(c).user.email;
+  if (!validEmail(to)) return c.json({ error: "invalid_address" }, 400);
+  try {
+    const r = await sendMail({ to: [{ email: to }], subject: "Test Nexo / Mailjet", html: "<p>Ceci est un message de test. Si vous le lisez, l'envoi de courriels fonctionne.</p><p>This is a test message. If you can read it, email sending works.</p>", text: "Test Nexo / Mailjet: email sending works." });
+    if (!r.sent) return c.json({ error: "mail_failed", detail: r.failed[0]?.error }, 502);
+    return c.json({ ok: true, to });
+  } catch (e) {
+    if (e instanceof ServiceError) return c.json({ error: e.code, detail: e.detail }, e.status as 400);
+    throw e;
+  }
 });
 
 /** Light status for pages that depend on an integration (calendar, inbox, email copy). */

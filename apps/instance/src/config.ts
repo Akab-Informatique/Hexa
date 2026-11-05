@@ -39,6 +39,8 @@ export const config = {
   initialAdminPassword: e.INITIAL_ADMIN_PASSWORD ?? "",
   /** Demo data seeded once on a brand-new install: none | accounting | bookkeeping | tax. */
   seedProfile: e.SEED_PROFILE ?? "none",
+  /** The address people use in the browser (OAuth sign-ins come back to it). */
+  publicUrl: (e.PUBLIC_URL ?? "").replace(/\/$/, ""),
   webDir: e.WEB_DIR ?? "apps/web/dist",
   /** Extra browser origins allowed to call the API (the Vite dev server only). */
   devOrigins: (e.DEV_ORIGINS ?? "").split(",").filter(Boolean),

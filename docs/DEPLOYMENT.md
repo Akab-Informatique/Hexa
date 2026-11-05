@@ -168,6 +168,24 @@ To update the page later: edit the files in `apps/site`, copy them over again.
 
 Fine, as long as each has its own folder (own `.env`, own `COMPOSE_PROJECT_NAME`, so separate volumes), its own **App port**, its own domain and Nginx file. Each is still a fully separate app and database.
 
+### 3d. Connect the firm's own accounts (Administration › Integrations)
+
+Each firm registers its **own** apps and enters their keys in the app; nothing is shared between firms. The tenant's `.env` already
+carries `PUBLIC_URL=https://<its domain>`: the sign-ins below come back to that address, so it must be the address people really use
+(HTTPS, through your Nginx). Each integration page shows the exact redirect address to copy.
+
+| Service | What the firm does | What it gives |
+|---|---|---|
+| **Mailjet** | Create an account, validate the sender address, copy the API key and secret key. In the app: Integrations › Mailjet, save, tick *Enabled*, press *Send a test*. | Invoices, reminders and account statements by email; the board's email copy. |
+| **Microsoft 365** | In Entra ID: *App registrations* › New. Add the redirect address `https://<domain>/api/microsoft/callback` (type Web). Create a client secret. API permissions, **delegated**: `User.Read`, `Calendars.Read`, `Mail.Read`, `offline_access`. For SharePoint also **application** `Sites.ReadWrite.All` with admin consent. In the app: tenant ID, client ID, secret, *Enabled*. | Each person connects their own calendar and inbox (read only) from My tools; their Outlook events take hours off their day in Pipeline. SharePoint browsing in Documentation. |
+| **QuickBooks Online** | At developer.intuit.com create an app (scope *Accounting*). Add the redirect address `https://<domain>/api/accounting/quickbooks/callback`. Copy the client ID and secret (development keys for *sandbox*, production keys for *production*). In the app: environment, ID, secret, *Enabled*, then *Connect to QuickBooks*. | Clients matched to customers (reviewed first), invoices sent to QuickBooks (taxes as their own lines for now), payments brought back automatically. |
+
+Notes: a person's Microsoft refresh token and QuickBooks' tokens are stored encrypted with `APP_SECRET` and are never shown again;
+*Disconnect* removes them. Intuit rotates its refresh token on every refresh and it expires after 100 days without use: if QuickBooks
+asks to *connect again*, press Reconnect. Automatic invoice reminders are **off** until someone switches them on in Invoices.
+
+For development there is a local mock of all three (`scripts/mock-services.mjs`, started by `npm run dev`, never active in production).
+
 ---
 
 ## 4. Everyday operations
@@ -193,5 +211,8 @@ Fine, as long as each has its own folder (own `.env`, own `COMPOSE_PROJECT_NAME`
 | "Find your firm" says not found | Client id mismatch, or the client is inactive |
 | Login works but pages say forbidden | The user has no group yet (Administration, Users) |
 | Documentation says "SharePoint is not connected" | Microsoft 365 and SharePoint integrations not filled in or not enabled |
+| Microsoft / QuickBooks sign-in ends on an error page | The redirect address in the provider's app differs from the one shown in the integration page, or `PUBLIC_URL` is wrong |
+| "Public address not set" | `PUBLIC_URL` is missing from the tenant's `.env` (add it and `docker compose up -d`) |
+| Test email says the keys were refused | Mailjet API key or secret key wrong, or the sender address is not validated in Mailjet |
 | Update fails and rolls back | Read the updater log: `docker compose logs updater`; the previous version keeps running |
 | CI cannot register the release | Console not reachable at `CONSOLE_URL`, or `RELEASE_TOKEN` differs; register it by hand (1.6) |

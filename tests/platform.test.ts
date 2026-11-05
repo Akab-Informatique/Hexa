@@ -281,3 +281,39 @@ describe("recurring payments and the cash forecast", () => {
     expect(f.rows[1]!.items.some((i) => i.kind === "bill")).toBe(false);
   });
 });
+
+import { readState, signState } from "../apps/instance/src/lib/oauthState.ts";
+import { invoiceMail, boardMail, validEmail } from "../apps/instance/src/lib/mail.ts";
+import { normName } from "../apps/instance/src/lib/quickbooks.ts";
+
+describe("integrations helpers", () => {
+  it("signs an OAuth state for one person and one provider, valid ten minutes", () => {
+    const s = signState("ms", "user-1", 1_000);
+    expect(readState("ms", s, 2_000)).toBe("user-1");
+    expect(readState("qb", s, 2_000)).toBeNull(); // another provider cannot use it
+    expect(readState("ms", s, 1_000 + 11 * 60_000)).toBeNull(); // expired
+    expect(readState("ms", s.slice(0, -2) + "xx", 2_000)).toBeNull(); // tampered
+    expect(readState("ms", "garbage", 2_000)).toBeNull();
+  });
+  it("checks email addresses", () => {
+    expect(validEmail("a@b.co")).toBe(true);
+    expect(validEmail("not an email")).toBe(false);
+    expect(validEmail(null)).toBe(false);
+  });
+  it("writes invoice emails in both languages and escapes client text", () => {
+    const d = { firm: "Acme <b>", number: "F-1001", client: "A & B", total: 114.98, balance: 100, issueDate: "2026-01-05", dueDate: "2026-02-04", poNumber: "PO-7", daysLate: 12 };
+    const fr = invoiceMail(d, "fr", "reminder");
+    expect(fr.subject).toContain("Rappel");
+    expect(fr.subject).toContain("12");
+    expect(fr.html).toContain("A &amp; B");
+    expect(fr.html).toContain("Acme &lt;b&gt;");
+    expect(fr.text).toContain("Solde dû");
+    expect(invoiceMail(d, "en", "sent").subject).toBe("Invoice F-1001");
+    expect(boardMail("Acme", "Titre <x>", "ligne1\nligne2", "fr").html).toContain("ligne1<br>ligne2");
+  });
+  it("matches company names ignoring case, accents and legal endings", () => {
+    expect(normName("Boulangerie Dupont inc.")).toBe(normName("BOULANGERIE DUPONT"));
+    expect(normName("Café Le Matin")).toBe(normName("Cafe le matin"));
+    expect(normName("Autre Client Ltée")).toBe("autre client");
+  });
+});
