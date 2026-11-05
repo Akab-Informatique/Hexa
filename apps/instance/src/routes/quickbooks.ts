@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { roundCents } from "@nexo/shared/billing";
+import { roundCents } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, requireReady, type Env } from "../auth/session.ts";

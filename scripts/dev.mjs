@@ -59,7 +59,7 @@ await api("/api/releases", { version: "0.2.0", notes: "Demo update" });
 await api("/api/clients", {
   id: "demo", name: "A Bezeau", domain: "portal.abezeau.test", adminEmail: "admin@abezeau.test", seedProfile: "accounting", pinnedVersion: "0.2.0",
   maxUsers: 25, modules: ["example-hello"],
-  // Deliberately not Nexo's purple/blue: this is how a different firm's theme looks. For a real firm the client
+  // Deliberately not Hexa's purple/blue: this is how a different firm's theme looks. For a real firm the client
   // chooses these; here they follow abezeau.com (burgundy and warm sand) and its white logo, for testing only.
   branding: { appName: "A Bezeau", primaryColor: "#942e2d", accentColor: "#c8a47e", logoUrl: "https://abezeau.com/wp-content/uploads/sites/103/2026/02/Components.png" },
 });
@@ -67,7 +67,7 @@ await api("/api/clients", {
 // Use the real generated bundle to get this client's credentials (exercises the bundle generator too).
 const zipRes = await fetch(`http://127.0.0.1:${CONSOLE_PORT}/api/clients/demo/bundle`, { headers: { authorization: auth } });
 const files = unzipSync(new Uint8Array(await zipRes.arrayBuffer()));
-const envText = strFromU8(files["nexo-demo/.env"]);
+const envText = strFromU8(files["hexa-demo/.env"]);
 const get = (k) => envText.match(new RegExp(`^${k}=(.*)$`, "m"))?.[1];
 
 // Local stand-in for Mailjet, Microsoft and Intuit, so the integrations can be tried without any account.

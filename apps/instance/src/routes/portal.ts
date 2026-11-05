@@ -1,6 +1,6 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { roundCents, todayISO } from "@nexo/shared/billing";
+import { roundCents, todayISO } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { hashPassword, randomToken, sha256, temporaryPassword } from "../auth/crypto.ts";

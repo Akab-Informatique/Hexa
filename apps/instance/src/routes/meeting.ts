@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { addDays, fridayOf, mondayOf, quebecHolidays, todayISO } from "@nexo/shared/billing";
+import { addDays, fridayOf, mondayOf, quebecHolidays, todayISO } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";

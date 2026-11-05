@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { addRecurrence, todayISO, addDays, fridayOf, mondayOf } from "@nexo/shared/billing";
+import { addRecurrence, todayISO, addDays, fridayOf, mondayOf } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";

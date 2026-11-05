@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Copy, KeyRound, Plus } from "lucide-react";
-import type { ModuleDef } from "@nexo/shared/permissions";
+import type { ModuleDef } from "@hexa/shared/permissions";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Field, Modal, PageHeader } from "../components/ui";

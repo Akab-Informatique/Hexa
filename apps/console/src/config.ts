@@ -10,16 +10,16 @@ export const config = {
   port: Number(e.PORT ?? 8080),
   databaseUrl:
     e.DATABASE_URL ??
-    `postgres://${e.POSTGRES_USER ?? "nexo"}:${encodeURIComponent(e.POSTGRES_PASSWORD ?? "")}` +
-      `@${e.POSTGRES_HOST ?? "localhost"}:${e.POSTGRES_PORT ?? "5432"}/${e.POSTGRES_DB ?? "nexo_console"}`,
+    `postgres://${e.POSTGRES_USER ?? "hexa"}:${encodeURIComponent(e.POSTGRES_PASSWORD ?? "")}` +
+      `@${e.POSTGRES_HOST ?? "localhost"}:${e.POSTGRES_PORT ?? "5432"}/${e.POSTGRES_DB ?? "hexa_console"}`,
   adminUser: e.ADMIN_USER ?? "admin",
   adminPassword: () => required("ADMIN_PASSWORD"),
   /** 32+ chars. Encrypts license keys at rest. Losing it means rotating every client's key. */
   secret: () => required("CONSOLE_SECRET"),
   /** Public URL clients use to reach this console (goes into every bundle). */
   publicUrl: (e.PUBLIC_URL ?? "http://localhost:8080").replace(/\/$/, ""),
-  instanceImage: e.INSTANCE_IMAGE ?? "ghcr.io/akab-informatique/nexo-instance",
-  updaterImage: e.UPDATER_IMAGE ?? "ghcr.io/akab-informatique/nexo-updater",
+  instanceImage: e.INSTANCE_IMAGE ?? "ghcr.io/akab-informatique/hexa-instance",
+  updaterImage: e.UPDATER_IMAGE ?? "ghcr.io/akab-informatique/hexa-updater",
   /** Read-only GHCR pull credentials handed to each client (optional but needed for private images). */
   ghcrUser: e.GHCR_PULL_USER ?? "",
   ghcrToken: e.GHCR_PULL_TOKEN ?? "",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { unzipSync, strFromU8 } from "fflate";
-import { compareVersions, VERSION_RE } from "@nexo/shared";
+import { compareVersions, VERSION_RE } from "@hexa/shared";
 import { getEnv, setEnv } from "../apps/updater/src/envfile.ts";
 import { decrypt, encrypt } from "../apps/console/src/crypto.ts";
 import { buildBundle, newSecrets } from "../apps/console/src/bundle.ts";
@@ -42,25 +42,25 @@ describe("bundle generator", () => {
     const zip = unzipSync(
       buildBundle(
         { id: "acme", name: "Acme's Portal", domain: "portal.acme.com", pinnedVersion: "1.0.0", appPort: 3100, licenseKey: "KEY123", branding: { appName: "Acme's Portal" }, adminEmail: "boss@acme.com", initialAdminPassword: "pw-pw-pw-pw-pw-pw", appSecret: "s".repeat(48) },
-        { templatesDir: "deploy/client-bundle", consoleUrl: "https://console.example.com", instanceImage: "ghcr.io/x/nexo-instance", updaterImage: "ghcr.io/x/nexo-updater", ghcrUser: "u", ghcrToken: "t", secrets: newSecrets() },
+        { templatesDir: "deploy/client-bundle", consoleUrl: "https://console.example.com", instanceImage: "ghcr.io/x/hexa-instance", updaterImage: "ghcr.io/x/hexa-updater", ghcrUser: "u", ghcrToken: "t", secrets: newSecrets() },
       ),
     );
     expect(Object.keys(zip).sort()).toEqual([
-      "nexo-acme/.env", "nexo-acme/README.md", "nexo-acme/docker-compose.yml",
-      "nexo-acme/install.sh", "nexo-acme/nginx/portal.acme.com.conf",
+      "hexa-acme/.env", "hexa-acme/README.md", "hexa-acme/docker-compose.yml",
+      "hexa-acme/install.sh", "hexa-acme/nginx/portal.acme.com.conf",
     ]);
-    const env = strFromU8(zip["nexo-acme/.env"]!);
+    const env = strFromU8(zip["hexa-acme/.env"]!);
     expect(env).toContain("LICENSE_KEY=KEY123");
     expect(env).toContain("APP_VERSION=1.0.0");
-    expect(env).toContain("COMPOSE_PROJECT_NAME=nexo_acme");
+    expect(env).toContain("COMPOSE_PROJECT_NAME=hexa_acme");
     expect(env).toContain("INITIAL_ADMIN_EMAIL=boss@acme.com");
     expect(env).toContain("Acme\u0027s Portal"); // apostrophe escaped inside single-quoted value
     for (const body of Object.values(zip)) expect(strFromU8(body)).not.toMatch(/\{\{\w+\}\}/);
-    expect(strFromU8(zip["nexo-acme/nginx/portal.acme.com.conf"]!)).toContain("127.0.0.1:3100");
+    expect(strFromU8(zip["hexa-acme/nginx/portal.acme.com.conf"]!)).toContain("127.0.0.1:3100");
   });
 });
 
-import { effectivePermissions, isKnownPermission, permissionsFor, ungrantable, MODULES } from "@nexo/shared/permissions";
+import { effectivePermissions, isKnownPermission, permissionsFor, ungrantable, MODULES } from "@hexa/shared/permissions";
 import { hashPassword, verifyPassword, seal, unseal } from "../apps/instance/src/auth/crypto.ts";
 
 describe("permissions", () => {
@@ -99,7 +99,7 @@ describe("instance crypto", () => {
   });
 });
 
-import { computeInvoice, roundCents, addRecurrence, mondayOf } from "@nexo/shared/billing";
+import { computeInvoice, roundCents, addRecurrence, mondayOf } from "@hexa/shared/billing";
 
 describe("billing and dates", () => {
   it("rounds half-up per line so totals match QuickBooks", () => {

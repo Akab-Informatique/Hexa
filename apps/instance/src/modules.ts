@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Hono } from "hono";
-import type { NexoModule } from "@nexo/shared";
-import { migrate } from "@nexo/shared/migrate";
+import type { HexaModule } from "@hexa/shared";
+import { migrate } from "@hexa/shared/migrate";
 import { pool } from "./db.ts";
 import { config } from "./config.ts";
 import * as license from "./license.ts";
@@ -12,7 +12,7 @@ export const loadedModules: string[] = [];
 
 /**
  * Loads only the modules the console enabled for this client. A module is a folder in
- * `modules/<name>/` with an index.ts that default-exports a NexoModule. Client-specific
+ * `modules/<name>/` with an index.ts that default-exports a HexaModule. Client-specific
  * work lives here, never in the core.
  */
 export async function loadModules(app: Hono<any>): Promise<void> {
@@ -26,7 +26,7 @@ export async function loadModules(app: Hono<any>): Promise<void> {
       console.warn(`[modules] "${name}" enabled for this client but not installed in this image`);
       continue;
     }
-    const mod = ((await import(pathToFileURL(entry).href)) as { default: NexoModule }).default;
+    const mod = ((await import(pathToFileURL(entry).href)) as { default: HexaModule }).default;
     if (mod.migrationsDir) await migrate(pool, path.resolve(dir, mod.migrationsDir), `module:${name}`);
     const sub = new Hono();
     await mod.register({ app: sub, db: pool, flags, log: (m) => console.log(`[module:${name}] ${m}`) });

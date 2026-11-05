@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { compareVersions, VERSION_RE, type UpdaterStatus } from "@nexo/shared";
+import { compareVersions, VERSION_RE, type UpdaterStatus } from "@hexa/shared";
 import { config } from "./config.ts";
 import * as license from "./license.ts";
 import { loadedModules } from "./modules.ts";
@@ -138,6 +138,6 @@ export function buildApp(): Hono<Env> {
   // ---- Single-page app: static assets, with index.html fallback for client-side routes ----
   const index = path.resolve(config.webDir, "index.html");
   app.use("/*", serveStatic({ root: config.webDir }));
-  app.get("*", (c) => (fs.existsSync(index) ? c.html(fs.readFileSync(index, "utf8")) : c.text("Web app not built (run: npm run build -w @nexo/web)", 503)));
+  app.get("*", (c) => (fs.existsSync(index) ? c.html(fs.readFileSync(index, "utf8")) : c.text("Web app not built (run: npm run build -w @hexa/web)", 503)));
   return app;
 }

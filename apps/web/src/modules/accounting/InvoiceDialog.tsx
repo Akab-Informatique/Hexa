@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BellRing, Eye, Mail, Pencil, Plus, Printer, Send, Trash2 } from "lucide-react";
-import { computeInvoice } from "@nexo/shared/billing";
+import { computeInvoice } from "@hexa/shared/billing";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useBranding } from "../../lib/theme";

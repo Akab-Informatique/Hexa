@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { VERSION_RE } from "@nexo/shared";
+import { VERSION_RE } from "@hexa/shared";
 import { applyUpdate, getStatus } from "./update.ts";
 
 const TOKEN = process.env.UPDATER_TOKEN ?? "";

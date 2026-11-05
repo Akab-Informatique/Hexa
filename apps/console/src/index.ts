@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import pg from "pg";
-import { migrate } from "@nexo/shared/migrate";
+import { migrate } from "@hexa/shared/migrate";
 import { config } from "./config.ts";
 import { buildApp } from "./app.ts";
 

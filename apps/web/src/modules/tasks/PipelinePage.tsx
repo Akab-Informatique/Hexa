@@ -17,8 +17,8 @@ interface DayPlan {
   week: { id: string; title: string | null; private: boolean; priority: string; dueDate: string | null; clientName: string | null }[]; nowMinutes: number | null;
 }
 const COLUMNS = ["todo", "doing", "blocked", "done"] as const;
-const SPLIT_KEY = "nexo.pipeline.split";
-const HOUR_KEY = "nexo.pipeline.hourPx";
+const SPLIT_KEY = "hexa.pipeline.split";
+const HOUR_KEY = "hexa.pipeline.hourPx";
 const mins = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
 
 /** Pipeline: "My day" (what is on the plate and how it fits the working day) and a status board. */

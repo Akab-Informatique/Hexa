@@ -1,5 +1,5 @@
 {
-  "name": "@nexo/module-example-hello",
+  "name": "@hexa/module-example-hello",
   "version": "0.1.0",
   "private": true,
   "type": "module"

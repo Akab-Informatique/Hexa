@@ -54,7 +54,7 @@ export function buildBundle(client: BundleClient, opts: BundleOptions): Uint8Arr
     UPDATER_IMAGE: opts.updaterImage,
     CONSOLE_URL: opts.consoleUrl,
     LICENSE_KEY: client.licenseKey,
-    COMPOSE_PROJECT_NAME: `nexo_${slug}`,
+    COMPOSE_PROJECT_NAME: `hexa_${slug}`,
     POSTGRES_PASSWORD: opts.secrets.postgresPassword,
     UPDATER_TOKEN: opts.secrets.updaterToken,
     INSTANCE_ADMIN_TOKEN: opts.secrets.adminToken,
@@ -69,7 +69,7 @@ export function buildBundle(client: BundleClient, opts: BundleOptions): Uint8Arr
   };
   const read = (name: string) => fs.readFileSync(path.join(opts.templatesDir, name), "utf8");
   const files: Record<string, Uint8Array> = {};
-  const add = (target: string, template: string) => (files[`nexo-${client.id}/${target}`] = strToU8(render(read(template), vars)));
+  const add = (target: string, template: string) => (files[`hexa-${client.id}/${target}`] = strToU8(render(read(template), vars)));
   add("docker-compose.yml", "docker-compose.yml");
   add(".env", "env.template");
   add(`nginx/${client.domain}.conf`, "nginx.conf.template");

@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { UpdaterStatus } from "@nexo/shared";
+import type { UpdaterStatus } from "@hexa/shared";
 import { getEnv, setEnv } from "./envfile.ts";
 
 const run = promisify(execFile);
@@ -36,8 +36,8 @@ async function registryLogin(): Promise<void> {
 async function backup(version: string): Promise<string> {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const env = fs.readFileSync(ENV_FILE, "utf8");
-  const user = getEnv(env, "POSTGRES_USER") ?? "nexo";
-  const db = getEnv(env, "POSTGRES_DB") ?? "nexo";
+  const user = getEnv(env, "POSTGRES_USER") ?? "hexa";
+  const db = getEnv(env, "POSTGRES_DB") ?? "hexa";
   const file = path.join(BACKUP_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}_v${version}.dump`);
   await new Promise<void>((resolve, reject) => {
     const out = fs.createWriteStream(file);
@@ -54,8 +54,8 @@ async function backup(version: string): Promise<string> {
 
 async function restore(file: string): Promise<void> {
   const env = fs.readFileSync(ENV_FILE, "utf8");
-  const user = getEnv(env, "POSTGRES_USER") ?? "nexo";
-  const db = getEnv(env, "POSTGRES_DB") ?? "nexo";
+  const user = getEnv(env, "POSTGRES_USER") ?? "hexa";
+  const db = getEnv(env, "POSTGRES_DB") ?? "hexa";
   await new Promise<void>((resolve, reject) => {
     const p = spawn("docker", ["compose", "--project-directory", COMPOSE_DIR, "exec", "-T", "db", "pg_restore", "-U", user, "-d", db, "--clean", "--if-exists", "--no-owner"], { cwd: COMPOSE_DIR });
     fs.createReadStream(file).pipe(p.stdin);

@@ -1,6 +1,6 @@
 # Builds the instance and console images:
-#   docker build -f deploy/docker/Dockerfile --build-arg APP=instance -t nexo-instance .
-#   docker build -f deploy/docker/Dockerfile --build-arg APP=console  -t nexo-console  .
+#   docker build -f deploy/docker/Dockerfile --build-arg APP=instance -t hexa-instance .
+#   docker build -f deploy/docker/Dockerfile --build-arg APP=console  -t hexa-console  .
 
 # ---- web build (React app served by the instance) ----
 FROM node:22-bookworm-slim AS web
@@ -8,8 +8,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages ./packages
 COPY apps/web ./apps/web
-RUN npm ci --workspace @nexo/web --workspace @nexo/shared --include-workspace-root \
- && npm run build -w @nexo/web
+RUN npm ci --workspace @hexa/web --workspace @hexa/shared --include-workspace-root \
+ && npm run build -w @hexa/web
 
 # ---- runtime ----
 FROM node:22-bookworm-slim
@@ -25,7 +25,7 @@ COPY apps/updater/package.json ./apps/updater/package.json
 COPY apps/web/package.json ./apps/web/package.json
 COPY modules ./modules
 COPY deploy/client-bundle ./deploy/client-bundle
-RUN npm ci --omit=dev --workspace @nexo/instance --workspace @nexo/console --workspace @nexo/shared --workspace @nexo/module-example-hello --include-workspace-root \
+RUN npm ci --omit=dev --workspace @hexa/instance --workspace @hexa/console --workspace @hexa/shared --workspace @hexa/module-example-hello --include-workspace-root \
  && chown -R node:node /app
 COPY --from=web --chown=node:node /app/apps/web/dist ./apps/web/dist
 

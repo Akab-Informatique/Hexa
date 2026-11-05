@@ -8,7 +8,7 @@ import { useBranding } from "../lib/theme";
 import { visibleNav } from "../modules/registry";
 import { BrandMark, LanguageToggle } from "../components/ui";
 
-const OPEN_KEY = "nexo.nav.open";
+const OPEN_KEY = "hexa.nav.open";
 const readOpen = (): string[] | null => { try { return JSON.parse(localStorage.getItem(OPEN_KEY) ?? "null"); } catch { return null; } };
 
 export default function AppShell() {

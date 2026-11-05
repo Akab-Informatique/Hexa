@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { isKnownPermission, MODULES, permissionsFor, ungrantable } from "@nexo/shared/permissions";
+import { isKnownPermission, MODULES, permissionsFor, ungrantable } from "@hexa/shared/permissions";
 import { pool } from "../db.ts";
 import { audit, rightsOf } from "../auth/access.ts";
 import { hashPassword, temporaryPassword } from "../auth/crypto.ts";

@@ -11,7 +11,7 @@ import { Modal, PageHeader } from "../../components/ui";
 interface Item { id: string; clientId: string; clientName: string; contractId: string | null; contractName: string | null; source: string; description: string; quantity: number; unitPrice: number; status: string; excludedReason: string; workDate: string | null; createdByName: string | null }
 type Summary = Record<"pending" | "approved" | "excluded" | "invoiced", { count: number; total: number }>;
 type Period = "day" | "week" | "month" | "custom";
-const OPEN_KEY = "nexo.approvals.opened";
+const OPEN_KEY = "hexa.approvals.opened";
 const readOpen = (): string[] => { try { return JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? "[]"); } catch { return []; } };
 const eom = (s: string) => { const d = new Date(`${s.slice(0, 7)}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return d.toISOString().slice(0, 10); };
 

@@ -132,7 +132,7 @@ const dl = await fetch(BASE + `/api/docs/file?drive=${clientsLib}&path=${encodeU
 ok("download within access", dl.status === 200 && (await dl.text()).includes("Bilan"));
 const dl2 = await fetch(BASE + `/api/docs/file?drive=${clientsLib}&path=${encodeURIComponent("Boulangerie Dupont/2025/Déclaration TPS-TVQ.txt")}`, { headers: { cookie: uc } });
 ok("download outside access refused", dl2.status === 403);
-const up = (c0, p0, n) => fetch(BASE + `/api/docs/file?drive=${clientsLib}&path=${encodeURIComponent(p0)}&name=${encodeURIComponent(n)}`, { method: "PUT", headers: { cookie: c0, "content-type": "application/octet-stream", "x-nexo-upload": "1" }, body: "hello" });
+const up = (c0, p0, n) => fetch(BASE + `/api/docs/file?drive=${clientsLib}&path=${encodeURIComponent(p0)}&name=${encodeURIComponent(n)}`, { method: "PUT", headers: { cookie: c0, "content-type": "application/octet-stream", "x-hexa-upload": "1" }, body: "hello" });
 ok("read-only access cannot upload", (await up(uc, "Acme Corp/2025", "x.txt")).status === 403);
 ok("path traversal refused", (await call("GET", `/api/docs/browse?drive=${clientsLib}&path=Acme%20Corp%2F..%2FBoulangerie`, undefined, uc)).status === 400);
 ok("edit access on a sub-folder", (await call("POST", "/api/docs/access", { drive: clientsLib, path: "Acme Corp/2025", principalType: "user", principalId: dUser.body.id, level: "edit" })).status === 200);
@@ -483,7 +483,7 @@ await igPut("mailjet", { apiKey: "mock-key", secretKey: "wrong", senderEmail: "f
 ok("wrong Mailjet keys are reported, not hidden", (await post("/api/admin/integrations/mailjet/test", {})).body?.error === "mailjet_refused");
 await igPut("mailjet", { apiKey: "mock-key", secretKey: "mock-secret", senderEmail: "firme@acme.test", senderName: "Acme" });
 const tm = await post("/api/admin/integrations/mailjet/test", { to: "dest@example.com" });
-ok("the test email goes out with the right credentials", tm.status === 200 && (await mockMails()).some((m) => m.subject.startsWith("Test Nexo") && m.to[0].Email === "dest@example.com" && m.from.Email === "firme@acme.test"));
+ok("the test email goes out with the right credentials", tm.status === 200 && (await mockMails()).some((m) => m.subject.startsWith("Test Hexa") && m.to[0].Email === "dest@example.com" && m.from.Email === "firme@acme.test"));
 const bm = await post("/api/command/board", { title: "SMOKE avis aux clients", body: "Bonjour a tous", audience: "selected", clientIds: [cid], emailCopy: true });
 ok("a board message is emailed to the clients it targets", bm.body.email.status === "sent" && bm.body.email.sent === 1 && (await mockMails()).some((m) => m.subject === "SMOKE avis aux clients" && m.to[0].Email === "jane@example.com"));
 ok("…and its status shows as sent", (await call("GET", "/api/command/board")).body.find((m) => m.id === bm.body.id)?.emailStatus === "sent");

@@ -2,9 +2,9 @@ import { z } from "zod";
 
 // ---------- Branding (white label) ----------
 export const BrandingSchema = z.object({
-  appName: z.string().default("Nexo"),
+  appName: z.string().default("Hexa"),
   logoUrl: z.string().optional(),
-  // Nexo default: near-black canvas with purple and blue light. Tenants override both.
+  // Hexa default: near-black canvas with purple and blue light. Tenants override both.
   primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#7c3aed"),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"),
   supportEmail: z.string().optional(),
@@ -64,7 +64,7 @@ export interface ModuleContext {
   flags: Record<string, boolean>;
   log: (msg: string) => void;
 }
-export interface NexoModule {
+export interface HexaModule {
   name: string;
   /** Optional folder of .sql files applied before register(). */
   migrationsDir?: string;

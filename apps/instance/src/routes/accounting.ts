@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { computeInvoice, DEFAULT_RATES, addDays, todayISO, type TaxRates } from "@nexo/shared/billing";
+import { computeInvoice, DEFAULT_RATES, addDays, todayISO, type TaxRates } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";

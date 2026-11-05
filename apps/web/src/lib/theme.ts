@@ -10,7 +10,7 @@ export interface Branding {
   supportEmail?: string;
 }
 
-const DEFAULT: Branding = { appName: "Nexo", primaryColor: "#7c3aed", accentColor: "#2563eb" };
+const DEFAULT: Branding = { appName: "Hexa", primaryColor: "#7c3aed", accentColor: "#2563eb" };
 
 /** The tenant's branding drives two CSS variables; the stylesheet derives every glow and tint from them. */
 export function applyBranding(b: Branding) {

@@ -6,13 +6,13 @@ services:
     image: postgres:16-bookworm
     restart: unless-stopped
     environment:
-      POSTGRES_DB: nexo_console
-      POSTGRES_USER: nexo
+      POSTGRES_DB: hexa_console
+      POSTGRES_USER: hexa
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - console_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U nexo -d nexo_console"]
+      test: ["CMD-SHELL", "pg_isready -U hexa -d hexa_console"]
       interval: 5s
       retries: 30
 

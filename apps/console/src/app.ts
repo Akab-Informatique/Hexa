@@ -9,7 +9,7 @@ import {
   VERSION_RE,
   compareVersions,
   type LicenseCheckResponse,
-} from "@nexo/shared";
+} from "@hexa/shared";
 import { config } from "./config.ts";
 import { decrypt, derive, encrypt, randomToken, safeEqual } from "./crypto.ts";
 import { buildBundle, newSecrets } from "./bundle.ts";
@@ -186,7 +186,7 @@ export function buildApp(pool: pg.Pool): Hono {
       },
     );
     return new Response(Buffer.from(zip), {
-      headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="nexo-${r.id}.zip"` },
+      headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="hexa-${r.id}.zip"` },
     });
   });
 

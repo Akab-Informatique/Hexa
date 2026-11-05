@@ -1,5 +1,5 @@
 # The updater needs the docker CLI + compose plugin, so it uses the official docker CLI image.
-#   docker build -f deploy/docker/Dockerfile.updater -t nexo-updater .
+#   docker build -f deploy/docker/Dockerfile.updater -t hexa-updater .
 FROM docker:27-cli
 RUN apk add --no-cache nodejs npm
 ENV NODE_ENV=production
@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages ./packages
 COPY apps/updater ./apps/updater
-RUN npm ci --omit=dev --workspace @nexo/updater --workspace @nexo/shared --include-workspace-root
+RUN npm ci --omit=dev --workspace @hexa/updater --workspace @hexa/shared --include-workspace-root
 EXPOSE 4000
 ENTRYPOINT []
 CMD ["node", "--import", "tsx", "apps/updater/src/index.ts"]

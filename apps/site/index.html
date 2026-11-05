@@ -4,101 +4,362 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
-  <meta name="description" content="Nexo CRM: la plateforme de gestion pour les cabinets comptables. Bientôt disponible." />
-  <title>Nexo CRM</title>
+  <meta name="theme-color" content="#05040a" />
+  <meta name="description" content="Hexa: le CRM pensé pour les cabinets comptables. Clients, tâches, facturation, documents et portail client dans un seul espace à votre image. Bientôt disponible." />
+  <title>Hexa CRM</title>
   <style>
-    :root { --bg:#07060d; --fg:#ecebf5; --muted:#9b99b5; --brand:#7c3aed; --brand-2:#2563eb; --line:rgb(255 255 255 / .12); --glow:color-mix(in oklab,var(--brand) 60%,transparent); --glow-2:color-mix(in oklab,var(--brand-2) 55%,transparent); }
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    :root {
+      --bg:#05040a; --fg:#eeedf8; --muted:#a09db8; --line:rgb(255 255 255 / .12);
+      --p1:#7c3aed; --p2:#a78bfa; --b1:#2563eb; --b2:#38bdf8;
+      --brand:var(--p1); --brand-2:var(--b1);
+      --glow:color-mix(in oklab,var(--p1) 65%,transparent); --glow-2:color-mix(in oklab,var(--b2) 55%,transparent);
+      --metal:linear-gradient(100deg,#ffffff 0%,#d6caff 14%,#8b6bff 32%,#38bdf8 50%,#eaf4ff 64%,#a98bff 80%,#ffffff 100%);
+      --scroll:0;
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
     body { margin:0; background:var(--bg); color:var(--fg); font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; overflow-x:hidden; }
     a { color:inherit; }
-    .canvas { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
-    .canvas::before,.canvas::after { content:""; position:absolute; width:62vmax; height:62vmax; border-radius:50%; filter:blur(95px); opacity:.55; }
-    .canvas::before { background:radial-gradient(circle,var(--glow),transparent 65%); top:-24vmax; left:-14vmax; animation:drift 26s ease-in-out infinite alternate; }
-    .canvas::after { background:radial-gradient(circle,var(--glow-2),transparent 65%); bottom:-28vmax; right:-16vmax; animation:drift 32s ease-in-out infinite alternate-reverse; }
-    @keyframes drift { to { transform:translate3d(6vmax,4vmax,0) scale(1.08); } }
-    @media (prefers-reduced-motion:reduce){ .canvas::before,.canvas::after{animation:none} html{scroll-behavior:auto} }
-    .wrap { position:relative; z-index:1; max-width:1080px; margin:0 auto; padding:0 20px; }
-    .glass { position:relative; background:linear-gradient(135deg,rgb(255 255 255/.09),rgb(255 255 255/.03)); backdrop-filter:blur(22px) saturate(165%); -webkit-backdrop-filter:blur(22px) saturate(165%); border:1px solid var(--line); border-radius:20px; box-shadow:inset 0 1px 0 rgb(255 255 255/.2),0 24px 50px -24px rgb(0 0 0/.7); }
-    .glass::before { content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; background:linear-gradient(115deg,color-mix(in oklab,var(--brand) 26%,transparent),transparent 38%,transparent 70%,color-mix(in oklab,var(--brand-2) 18%,transparent)); mix-blend-mode:screen; opacity:.8; }
+    h1,h2,h3 { letter-spacing:-.03em; }
+
+    /* ---------- Background: storm glow, seamless hexagons, lightning flashes ---------- */
+    .bg { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+    .bg .glow1,.bg .glow2 { position:absolute; width:70vmax; height:70vmax; border-radius:50%; filter:blur(110px); opacity:.5; }
+    .bg .glow1 { background:radial-gradient(circle,var(--glow),transparent 65%); top:-30vmax; left:-20vmax; animation:drift 28s ease-in-out infinite alternate; }
+    .bg .glow2 { background:radial-gradient(circle,var(--glow-2),transparent 65%); bottom:-34vmax; right:-22vmax; animation:drift 34s ease-in-out infinite alternate-reverse; }
+    @keyframes drift { to { transform:translate3d(7vmax,5vmax,0) scale(1.1); } }
+    .hexes { position:absolute; inset:-60px; opacity:.55;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='98' viewBox='0 0 28 49'%3E%3Cpath fill='none' stroke='%23a78bfa' stroke-opacity='.22' stroke-width='.6' d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM14 0v9.25M1 31.75L0 32.3M27 31.75l1 .55M14 39.25V49'/%3E%3C/svg%3E");
+      background-size:56px 98px; background-position:0 calc(var(--scroll) * -0.18px);
+      -webkit-mask-image:radial-gradient(ellipse 90% 80% at 50% 38%,#000 20%,transparent 85%); mask-image:radial-gradient(ellipse 90% 80% at 50% 38%,#000 20%,transparent 85%); }
+    .hexes.b { background-size:112px 196px; opacity:.4; background-position:30px calc(var(--scroll) * -0.34px); filter:drop-shadow(0 0 3px rgba(56,189,248,.5)); }
+    .hexlit { position:absolute; width:84px; height:96px; clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%); background:linear-gradient(135deg,rgba(167,139,250,.35),rgba(56,189,248,.12)); animation:hexpulse 7s ease-in-out infinite; opacity:0; }
+    @keyframes hexpulse { 0%,100% { opacity:0; transform:scale(.8); } 50% { opacity:.9; transform:scale(1); } }
+    .flash { position:absolute; inset:0; background:radial-gradient(60% 50% at 70% 10%,rgba(150,170,255,.35),transparent 70%); opacity:0; animation:flash 11s infinite; }
+    @keyframes flash { 0%,93%,100% { opacity:0; } 94% { opacity:.9; } 95% { opacity:.1; } 96% { opacity:.7; } 98% { opacity:0; } }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; } html { scroll-behavior:auto; } .reveal { opacity:1 !important; transform:none !important; } }
+
+    .wrap { position:relative; z-index:1; max-width:1180px; margin:0 auto; padding:0 22px; }
+    .progress { position:fixed; top:0; left:0; height:3px; width:calc(var(--p, 0) * 100%); z-index:50; background:linear-gradient(90deg,var(--p1),var(--b2),#fff); box-shadow:0 0 14px var(--glow-2); }
+
+    /* ---------- Metal and glass ---------- */
+    .metal { background:var(--metal); background-size:260% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:sheen 7s linear infinite; }
+    @keyframes sheen { to { background-position:-260% 0; } }
+    .glass { position:relative; background:linear-gradient(135deg,rgb(255 255 255/.08),rgb(255 255 255/.025)); backdrop-filter:blur(20px) saturate(165%); -webkit-backdrop-filter:blur(20px) saturate(165%); border:1px solid rgb(255 255 255/.14); border-radius:22px; box-shadow:0 18px 50px -22px rgb(0 0 0/.9), inset 0 1px 0 rgb(255 255 255/.18); }
+    .glass::before { content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; background:linear-gradient(115deg,color-mix(in oklab,var(--p1) 24%,transparent),transparent 38%,transparent 70%,color-mix(in oklab,var(--b2) 16%,transparent)); }
     .glass > * { position:relative; }
-    header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:20px 0; }
-    .logo { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:-.02em; font-size:20px; }
-    .logo i { width:34px; height:34px; border-radius:11px; display:grid; place-items:center; color:#fff; font-style:normal; background:linear-gradient(135deg,var(--brand),var(--brand-2)); box-shadow:0 8px 24px -8px var(--glow); }
-    .btn { display:inline-flex; align-items:center; gap:8px; padding:10px 18px; border-radius:12px; border:1px solid var(--line); background:rgb(255 255 255/.08); color:var(--fg); font:inherit; font-size:14px; font-weight:500; cursor:pointer; text-decoration:none; transition:background .15s,transform .12s; }
-    .btn:hover { background:rgb(255 255 255/.15); } .btn:active { transform:translateY(1px); }
-    .btn.primary { border-color:transparent; color:#fff; background:linear-gradient(135deg,var(--brand),var(--brand-2)); box-shadow:0 10px 28px -10px var(--glow),inset 0 1px 0 rgb(255 255 255/.3); }
+    .btn { position:relative; overflow:hidden; display:inline-flex; align-items:center; gap:8px; padding:11px 20px; border-radius:13px; border:1px solid var(--line); background:rgb(255 255 255/.07); color:var(--fg); font:inherit; font-size:14px; font-weight:600; cursor:pointer; text-decoration:none; transition:transform .15s,filter .15s,background .15s; }
+    .btn:hover { background:rgb(255 255 255/.14); } .btn:active { transform:translateY(1px); }
+    .btn.primary { border-color:rgb(255 255 255/.25); color:#fff; background:linear-gradient(135deg,#b9a2ff 0%,#6d3df0 42%,#2a59f0 100%); box-shadow:0 12px 30px -10px var(--glow), inset 0 1px 0 rgb(255 255 255/.55), inset 0 -2px 6px rgb(10 0 60/.45); }
+    .btn.primary::after { content:""; position:absolute; top:0; left:-60%; width:40%; height:100%; background:linear-gradient(100deg,transparent,rgb(255 255 255/.5),transparent); transform:skewX(-20deg); animation:sweep 4.5s ease-in-out infinite; }
+    @keyframes sweep { 0%,55% { left:-60%; } 100% { left:140%; } }
     .btn.primary:hover { filter:brightness(1.12); }
+    .btn.big { padding:14px 26px; font-size:16px; border-radius:15px; }
+
+    header { position:sticky; top:0; z-index:40; transition:background .25s,backdrop-filter .25s,border-color .25s; border-bottom:1px solid transparent; }
+    header.solid { background:rgb(5 4 10/.72); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); border-bottom-color:var(--line); }
+    header .in { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 0; }
+    .logo { display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:-.02em; font-size:21px; text-decoration:none; }
+    .logo svg { width:34px; height:38px; filter:drop-shadow(0 6px 14px var(--glow)); }
     .lang { display:inline-flex; padding:3px; border:1px solid var(--line); border-radius:11px; background:rgb(255 255 255/.05); }
-    .lang button { all:unset; cursor:pointer; padding:4px 10px; border-radius:8px; font-size:12px; font-weight:600; text-transform:uppercase; color:var(--muted); }
-    .lang button[aria-pressed=true] { color:#fff; background:linear-gradient(135deg,var(--brand),var(--brand-2)); }
+    .lang button { all:unset; cursor:pointer; padding:4px 10px; border-radius:8px; font-size:12px; font-weight:700; text-transform:uppercase; color:var(--muted); }
+    .lang button[aria-pressed=true] { color:#fff; background:linear-gradient(135deg,#8b5cf6,#2563eb); }
     .nav { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .hero { padding:72px 0 56px; text-align:center; }
-    .pill { display:inline-block; padding:5px 14px; border-radius:99px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; border:1px solid var(--line); background:rgb(255 255 255/.06); color:#cfc8ff; margin-bottom:22px; }
-    h1 { font-size:clamp(38px,7vw,68px); line-height:1.04; letter-spacing:-.035em; margin:0 0 18px; }
-    h1 span { background:linear-gradient(120deg,#c4b5fd,var(--brand) 40%,#60a5fa); -webkit-background-clip:text; background-clip:text; color:transparent; }
-    .lead { max-width:640px; margin:0 auto 30px; font-size:18px; line-height:1.55; color:var(--muted); }
-    .cta { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
-    .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); padding:24px 0 64px; }
-    .card { padding:22px; } .card h3 { margin:12px 0 6px; font-size:17px; } .card p { margin:0; color:var(--muted); font-size:14px; line-height:1.55; }
-    .ico { width:40px; height:40px; border-radius:12px; display:grid; place-items:center; font-size:19px; background:linear-gradient(135deg,color-mix(in oklab,var(--brand) 45%,transparent),color-mix(in oklab,var(--brand-2) 35%,transparent)); border:1px solid var(--line); }
-    .band { padding:30px; text-align:center; margin-bottom:56px; } .band h2 { margin:0 0 8px; font-size:24px; letter-spacing:-.02em; } .band p { margin:0 0 20px; color:var(--muted); }
-    footer { padding:28px 0 40px; text-align:center; font-size:13px; color:var(--muted); }
+    .nav a.l { font-size:14px; color:var(--muted); text-decoration:none; padding:6px 8px; } .nav a.l:hover { color:#fff; }
+    @media (max-width:760px){ .nav a.l { display:none; } }
+
+    /* ---------- Hero ---------- */
+    .hero { overflow-x:clip; display:grid; grid-template-columns:1.1fr .9fr; gap:30px; align-items:center; padding:48px 0 80px; min-height:calc(100vh - 70px); }
+    @media (max-width:900px){ .hero { grid-template-columns:1fr; text-align:center; padding-top:28px; } .hero .cta { justify-content:center; } .scene { margin:0 auto; } }
+    .pill { display:inline-flex; align-items:center; gap:8px; padding:6px 14px; border-radius:99px; font-size:12px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; border:1px solid rgb(167 139 250/.4); background:rgb(124 58 237/.14); color:#d9ceff; margin-bottom:20px; }
+    .pill i { width:8px; height:8px; border-radius:50%; background:var(--b2); box-shadow:0 0 10px var(--b2); animation:blink 1.6s infinite; }
+    @keyframes blink { 50% { opacity:.25; } }
+    h1 { font-size:clamp(40px,6.4vw,76px); line-height:1.02; margin:0 0 20px; }
+    .lead { max-width:560px; font-size:19px; line-height:1.55; color:var(--muted); margin:0 0 30px; }
+    @media (max-width:900px){ .lead { margin-left:auto; margin-right:auto; } }
+    .cta { display:flex; gap:12px; flex-wrap:wrap; }
+    .trust { margin-top:26px; display:flex; gap:18px; flex-wrap:wrap; font-size:13px; color:var(--muted); } .trust span::before { content:"\2713 "; color:var(--b2); font-weight:800; }
+    @media (max-width:900px){ .trust { justify-content:center; } }
+
+    /* ---------- Clay scene (soft 3D objects) ---------- */
+    .scene { position:relative; width:min(460px,92vw); height:440px; }
+    .bolt { position:absolute; left:0; top:-30px; width:100%; height:calc(100% + 60px); overflow:visible; animation:bolt 6.5s infinite; opacity:0; }
+    @keyframes bolt { 0%,86%,100% { opacity:0; } 87% { opacity:1; } 88% { opacity:.2; } 89% { opacity:1; } 92% { opacity:0; } }
+    .clay { position:absolute; border-radius:30px; box-shadow: inset -9px -12px 22px rgb(30 0 110/.55), inset 9px 11px 20px rgb(255 255 255/.4), 0 26px 40px -14px rgb(60 20 200/.6), 0 10px 0 -2px rgb(0 0 0/.25); }
+    .clay.purple { background:linear-gradient(145deg,#a98bff,#5b34e8); }
+    .clay.blue { background:linear-gradient(145deg,#6fc4ff,#2858e6); box-shadow: inset -9px -12px 22px rgb(0 20 110/.55), inset 9px 11px 20px rgb(255 255 255/.45), 0 26px 40px -14px rgb(20 90 220/.6), 0 10px 0 -2px rgb(0 0 0/.25); }
+    .clay.steel { background:linear-gradient(145deg,#f4f1ff,#b6b0d6 55%,#8d86b8); box-shadow: inset -9px -12px 22px rgb(60 50 120/.45), inset 9px 11px 20px rgb(255 255 255/.8), 0 26px 40px -14px rgb(90 70 200/.5), 0 10px 0 -2px rgb(0 0 0/.25); color:#2a2257; }
+    .clay.dark { background:linear-gradient(145deg,#3a3560,#17142c); box-shadow: inset -8px -10px 18px rgb(0 0 0/.6), inset 8px 9px 16px rgb(255 255 255/.14), 0 26px 40px -14px rgb(0 0 0/.8); }
+    .c-invoice { width:250px; height:310px; left:92px; top:38px; padding:26px 24px; animation:floaty 7s ease-in-out infinite; }
+    .c-invoice b { display:block; font-size:12px; letter-spacing:.14em; text-transform:uppercase; opacity:.7; }
+    .c-invoice .num { font-size:30px; font-weight:800; margin:6px 0 16px; }
+    .c-invoice .ln { height:12px; border-radius:99px; margin:11px 0; background:linear-gradient(90deg,#c7bdf2,#e5dfff); box-shadow:inset 2px 2px 4px rgb(60 40 140/.3), inset -2px -2px 4px rgb(255 255 255/.8); }
+    .c-invoice .ln.s { width:62%; } .c-invoice .ln.m { width:82%; }
+    .c-paid { right:30px; top:26px; padding:11px 20px; border-radius:99px; font-weight:800; font-size:15px; color:#fff; animation:pop 5s ease-in-out infinite; }
+    .c-chart { left:16px; bottom:34px; width:170px; height:150px; padding:18px 18px 0; display:flex; align-items:flex-end; gap:12px; animation:floaty 8s ease-in-out -2s infinite; }
+    .c-chart i { flex:1; border-radius:10px 10px 4px 4px; background:linear-gradient(180deg,#9ee7ff,#3aa0ff); box-shadow:inset 3px 3px 6px rgb(255 255 255/.6), inset -3px -3px 6px rgb(0 40 140/.45); transform-origin:bottom; animation:grow 5s ease-in-out infinite; }
+    .c-chart i:nth-child(1){height:42%} .c-chart i:nth-child(2){height:62%;animation-delay:.25s} .c-chart i:nth-child(3){height:48%;animation-delay:.5s} .c-chart i:nth-child(4){height:86%;animation-delay:.75s}
+    .c-coin { right:20px; bottom:92px; width:104px; height:104px; border-radius:50%; display:grid; place-items:center; font-size:46px; font-weight:800; animation:bob 5.5s ease-in-out infinite; }
+    .c-check { left:42px; top:34px; width:84px; height:84px; border-radius:50%; display:grid; place-items:center; animation:pop 6s ease-in-out -1.5s infinite; }
+    .c-check svg { width:42px; height:42px; stroke:#fff; stroke-width:4; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+    .c-hex { position:absolute; right:150px; bottom:6px; width:92px; height:104px; border-radius:0; clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%); display:grid; place-items:center; font-weight:800; font-size:30px; color:#fff; animation:bob 7s ease-in-out -3s infinite; box-shadow:none; background:linear-gradient(145deg,#c5b1ff,#6a3df0 55%,#2a59f0); }
+    @keyframes floaty { 50% { transform:translateY(-14px) rotate(-1deg); } }
+    @keyframes bob { 50% { transform:translateY(-16px); } }
+    @keyframes pop { 0%,100% { transform:scale(1); } 45% { transform:scale(1.12) rotate(-4deg); } }
+    @keyframes grow { 0%,100% { transform:scaleY(.82); } 50% { transform:scaleY(1.06); } }
+
+    /* ---------- Sections ---------- */
+    section { position:relative; }
+    .eyebrow { font-size:12px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; color:var(--b2); margin:0 0 12px; }
+    h2 { font-size:clamp(30px,4.6vw,52px); line-height:1.06; margin:0 0 16px; }
+    .sub { color:var(--muted); font-size:18px; line-height:1.55; max-width:640px; margin:0 0 34px; }
+    .center { text-align:center; } .center .sub { margin-left:auto; margin-right:auto; }
+    .reveal { opacity:0; transform:translateY(34px) scale(.98); transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1); }
+    .reveal.in { opacity:1; transform:none; }
+
+    /* pros */
+    .pros { padding:40px 0 90px; }
+    .pgrid { display:grid; gap:18px; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); }
+    .pro { padding:26px; transition:transform .25s; } .pro:hover { transform:translateY(-6px); }
+    .pro h3 { margin:16px 0 8px; font-size:20px; } .pro p { margin:0; color:var(--muted); line-height:1.55; font-size:15px; }
+    .cbadge { position:relative; width:62px; height:62px; border-radius:20px; display:grid; place-items:center; }
+    .cbadge svg { width:30px; height:30px; stroke:#fff; stroke-width:2.2; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+    .pro:hover .cbadge { animation:pop 1s ease; }
+
+    /* tour: a CRM that scrolls with the page */
+    .tour { padding:30px 0 90px; }
+    .tour-grid { display:grid; grid-template-columns:.8fr 1.2fr; gap:46px; align-items:start; }
+    .steps { padding:10vh 0 30vh; }
+    .step { min-height:62vh; display:flex; flex-direction:column; justify-content:center; opacity:.28; transition:opacity .4s,transform .4s; transform:translateX(-8px); }
+    .step.on { opacity:1; transform:none; }
+    .step .n { font-size:13px; font-weight:800; letter-spacing:.14em; color:var(--b2); }
+    .step h3 { font-size:clamp(24px,3vw,34px); margin:8px 0 12px; line-height:1.1; }
+    .step p { color:var(--muted); font-size:17px; line-height:1.6; margin:0 0 14px; }
+    .step ul { margin:0; padding:0; list-style:none; display:grid; gap:7px; } .step li { font-size:15px; color:#d8d5ee; } .step li::before { content:"\2713"; color:var(--b2); font-weight:800; margin-right:9px; }
+    .sticky { position:sticky; top:96px; }
+    .app { overflow:hidden; border-radius:22px; display:grid; grid-template-columns:168px 1fr; min-height:480px; box-shadow:0 40px 90px -30px rgb(0 0 0/.95), 0 0 80px -30px var(--glow); }
+    .app aside { padding:16px 12px; border-right:1px solid var(--line); background:rgb(0 0 0/.25); display:flex; flex-direction:column; gap:3px; }
+    .app .brandrow { display:flex; align-items:center; gap:8px; font-weight:800; margin:2px 6px 14px; font-size:15px; }
+    .app .brandrow svg { width:22px; height:25px; }
+    .app .mi { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:10px; font-size:13px; color:var(--muted); transition:background .3s,color .3s; }
+    .app .mi i { width:8px; height:8px; border-radius:3px; background:currentColor; opacity:.7; }
+    .app .mi.on { color:#fff; background:linear-gradient(135deg,color-mix(in oklab,var(--p1) 70%,transparent),color-mix(in oklab,var(--b1) 55%,transparent)); box-shadow:inset 0 1px 0 rgb(255 255 255/.25); }
+    .app main { position:relative; padding:18px; overflow:hidden; }
+    .top { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+    .top b { font-size:16px; } .top span { font-size:11px; padding:4px 10px; border-radius:99px; background:rgb(255 255 255/.08); color:var(--muted); }
+    .pane { position:absolute; inset:58px 18px 18px; opacity:0; transform:translateY(16px) scale(.985); transition:opacity .45s,transform .45s; pointer-events:none; }
+    .pane.on { opacity:1; transform:none; }
+    .row { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; background:rgb(255 255 255/.05); margin-bottom:8px; font-size:13px; }
+    .row .av { width:28px; height:28px; border-radius:9px; display:grid; place-items:center; font-weight:800; font-size:12px; color:#fff; background:linear-gradient(135deg,var(--p1),var(--b1)); }
+    .row .g { flex:1; } .row small { color:var(--muted); display:block; font-size:11px; }
+    .tag { font-size:11px; padding:3px 9px; border-radius:99px; background:rgb(56 189 248/.15); color:#8fd8ff; } .tag.ok { background:rgb(74 222 128/.15); color:#7ee8a6; } .tag.w { background:rgb(250 204 21/.15); color:#fcd86a; }
+    .kan { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; } .kan > div { background:rgb(255 255 255/.04); border-radius:12px; padding:10px; min-height:250px; } .kan h4 { margin:0 0 10px; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+    .card { padding:10px; border-radius:10px; margin-bottom:8px; font-size:12px; background:linear-gradient(135deg,rgb(255 255 255/.1),rgb(255 255 255/.04)); border:1px solid rgb(255 255 255/.1); }
+    .card.mv { animation:slide 4s ease-in-out infinite; } @keyframes slide { 0%,35% { transform:translateX(0); } 55%,100% { transform:translateX(12px); } }
+    .widgets { display:grid; grid-template-columns:1fr 1fr; gap:10px; } .w { padding:14px; border-radius:14px; background:rgb(255 255 255/.05); min-height:104px; } .w small { color:var(--muted); font-size:11px; } .w .v { font-size:24px; font-weight:800; margin-top:4px; }
+    .bars { display:flex; align-items:flex-end; gap:6px; height:58px; margin-top:8px; } .bars i { flex:1; border-radius:5px 5px 2px 2px; background:linear-gradient(180deg,var(--b2),var(--p1)); transform-origin:bottom; animation:grow 4s ease-in-out infinite; } .bars i:nth-child(odd){animation-delay:.4s}
+    .ring { width:64px; height:64px; border-radius:50%; background:conic-gradient(var(--b2) 0 72%, rgb(255 255 255/.1) 0); display:grid; place-items:center; margin-top:6px; } .ring::after { content:"72%"; width:48px; height:48px; border-radius:50%; background:#0d0b1a; display:grid; place-items:center; font-size:12px; font-weight:800; }
+    .tot { margin-top:12px; padding:14px; border-radius:14px; background:linear-gradient(135deg,color-mix(in oklab,var(--p1) 45%,transparent),color-mix(in oklab,var(--b1) 35%,transparent)); display:flex; justify-content:space-between; align-items:center; font-size:13px; } .tot b { font-size:22px; }
+    .folder { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:11px; margin-bottom:6px; font-size:13px; background:rgb(255 255 255/.05); } .folder.sub { margin-left:22px; } .folder svg { width:17px; height:17px; stroke:var(--b2); fill:none; stroke-width:2; }
+    @media (max-width:900px){
+      .tour-grid { grid-template-columns:1fr; gap:0; } .sticky { top:62px; z-index:3; } .app { min-height:340px; grid-template-columns:1fr; } .app aside { display:none; } .pane { inset:54px 14px 14px; } .app main { height:340px; }
+      .steps { padding:4vh 0 18vh; } .step { min-height:46vh; background:linear-gradient(180deg,transparent,rgb(5 4 10/.9) 30%); padding:0; }
+    }
+
+    /* white label */
+    .wl { padding:40px 0 90px; }
+    .wl-grid { display:grid; grid-template-columns:1fr 1fr; gap:34px; align-items:center; } @media (max-width:900px){ .wl-grid { grid-template-columns:1fr; } }
+    .swatches { display:flex; gap:10px; flex-wrap:wrap; margin:18px 0 0; }
+    .sw { all:unset; cursor:pointer; padding:9px 14px; border-radius:12px; border:1px solid var(--line); font-size:13px; font-weight:700; display:flex; align-items:center; gap:9px; background:rgb(255 255 255/.05); } .sw i { width:16px; height:16px; border-radius:50%; background:linear-gradient(135deg,var(--a),var(--c)); } .sw[aria-pressed=true] { border-color:#fff; background:rgb(255 255 255/.14); }
+    .demo { --t1:#7c3aed; --t2:#2563eb; padding:22px; border-radius:24px; background:linear-gradient(135deg,rgb(255 255 255/.07),rgb(255 255 255/.02)); border:1px solid var(--line); box-shadow:0 30px 70px -30px rgb(0 0 0/.9), 0 0 70px -30px var(--t1); transition:box-shadow .5s; }
+    .demo .h { display:flex; align-items:center; gap:10px; font-weight:800; font-size:18px; margin-bottom:16px; } .demo .h i { width:34px; height:34px; border-radius:11px; background:linear-gradient(135deg,var(--t1),var(--t2)); transition:background .5s; }
+    .demo .bar { height:12px; border-radius:99px; margin:10px 0; background:rgb(255 255 255/.1); } .demo .bar.f { width:68%; background:linear-gradient(90deg,var(--t1),var(--t2)); transition:background .5s; }
+    .demo .b { margin-top:16px; display:inline-block; padding:11px 22px; border-radius:12px; font-weight:700; color:#fff; background:linear-gradient(135deg,var(--t1),var(--t2)); transition:background .5s; }
+
+    /* final call */
+    .final { padding:30px 0 70px; }
+    .band { padding:56px 26px; text-align:center; overflow:hidden; }
+    .band h2 { margin-bottom:10px; } .band .sub { margin-left:auto; margin-right:auto; }
+    .band .cta { justify-content:center; }
+    footer { padding:26px 0 44px; text-align:center; font-size:13px; color:var(--muted); position:relative; z-index:1; }
+
     dialog { border:0; padding:0; background:transparent; color:var(--fg); max-width:min(440px,92vw); width:100%; }
-    dialog::backdrop { background:rgb(0 0 0/.6); backdrop-filter:blur(5px); }
-    .dlg { padding:26px; } .dlg h2 { margin:0 0 6px; font-size:20px; } .dlg p { margin:0 0 18px; color:var(--muted); font-size:14px; }
-    .row { display:flex; gap:8px; align-items:stretch; }
+    dialog::backdrop { background:rgb(0 0 0/.65); backdrop-filter:blur(6px); }
+    .dlg { padding:26px; } .dlg h2 { margin:0 0 6px; font-size:22px; } .dlg p { margin:0 0 18px; color:var(--muted); font-size:14px; }
+    .drow { display:flex; gap:8px; align-items:stretch; }
     input { flex:1; min-width:0; padding:11px 13px; border-radius:12px; border:1px solid var(--line); background:rgb(0 0 0/.3); color:var(--fg); font:inherit; font-size:15px; outline:none; }
-    input:focus { border-color:color-mix(in oklab,var(--brand) 80%,white); box-shadow:0 0 0 3px color-mix(in oklab,var(--brand) 30%,transparent); }
+    input:focus { border-color:color-mix(in oklab,var(--p1) 80%,white); box-shadow:0 0 0 3px color-mix(in oklab,var(--p1) 30%,transparent); }
     .msg { min-height:20px; margin:12px 0 0; font-size:13px; color:#f87171; } .msg.ok { color:#4ade80; }
     .sep { display:flex; align-items:center; gap:10px; margin:18px 0 12px; color:var(--muted); font-size:12px; } .sep::before,.sep::after { content:""; height:1px; flex:1; background:var(--line); }
   </style>
 </head>
 <body>
-  <div class="canvas"></div>
-  <div class="wrap">
-    <header>
-      <div class="logo"><i>N</i> Nexo</div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="hg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c9b6ff"/><stop offset=".5" stop-color="#7c3aed"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
+      <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset=".5" stop-color="#9ec5ff"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+      <symbol id="hex" viewBox="0 0 34 38"><path d="M17 1.5l14.5 8.4v18.2L17 36.5 2.5 28.1V9.9z" fill="url(#hg)" stroke="rgba(255,255,255,.55)" stroke-width="1.2"/><path d="M12 12v14M22 12v14M12 19h10" stroke="#fff" stroke-width="2.6" stroke-linecap="round" fill="none"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M2.5 20c.6-3.6 3.3-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.8a3.2 3.2 0 010 6M18 14.8c2 .6 3.2 2.3 3.5 5"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M7.5 12.5l3 3 6-6.5"/></symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></symbol>
+      <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 014.5 5H10l2 2.5h7.5A1.5 1.5 0 0121 9v9.5a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18.5z"/></symbol>
+      <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 100 18c1.4 0 2-1 1.6-2.2-.5-1.2.3-2.3 1.6-2.3H18a3 3 0 003-3C21 8 17 3 12 3z"/><circle cx="8" cy="11" r="1.1"/><circle cx="12" cy="7.5" r="1.1"/><circle cx="16" cy="10" r="1.1"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="progress" id="progress"></div>
+  <div class="bg" aria-hidden="true">
+    <div class="glow1"></div><div class="glow2"></div>
+    <div class="hexes"></div><div class="hexes b"></div>
+    <div class="hexlit" style="left:12%;top:22%;animation-delay:0s"></div><div class="hexlit" style="left:78%;top:14%;animation-delay:2.2s"></div>
+    <div class="hexlit" style="left:64%;top:62%;animation-delay:4s"></div><div class="hexlit" style="left:6%;top:74%;animation-delay:1.2s"></div><div class="hexlit" style="left:40%;top:88%;animation-delay:5.4s"></div>
+    <div class="flash"></div>
+  </div>
+
+  <header id="top">
+    <div class="wrap in">
+      <a class="logo" href="#"><svg><use href="#hex"/></svg><span class="metal">Hexa</span></a>
       <div class="nav">
+        <a class="l" href="#pros" data-i18n="navWhy">Pourquoi Hexa</a>
+        <a class="l" href="#tour" data-i18n="navTour">Visite</a>
+        <a class="l" href="#brand" data-i18n="navBrand">À votre image</a>
         <div class="lang" role="group" aria-label="Language"><button data-lang="fr">fr</button><button data-lang="en">en</button></div>
         <button class="btn primary" id="open-login" data-i18n="login">Connexion</button>
       </div>
-    </header>
+    </div>
+  </header>
 
+  <main class="wrap">
     <section class="hero">
-      <span class="pill" data-i18n="soon">Bientôt disponible</span>
-      <h1><span>Nexo CRM</span><br /><span style="background:none;color:var(--fg);-webkit-text-fill-color:var(--fg)" data-i18n="h1">pour les cabinets comptables</span></h1>
-      <p class="lead" data-i18n="lead">Clients, tâches, équipe, facturation et documents réunis dans un seul espace moderne, à l'image de votre cabinet.</p>
-      <div class="cta">
-        <button class="btn primary" id="open-login-2" data-i18n="login">Connexion</button>
-        <a class="btn" href="#features" data-i18n="discover">Découvrir</a>
+      <div>
+        <span class="pill"><i></i><span data-i18n="soon">Bientôt disponible</span></span>
+        <h1><span class="metal">Hexa</span><br /><span data-i18n="h1">le CRM pensé pour les cabinets comptables</span></h1>
+        <p class="lead" data-i18n="lead">Clients, tâches, équipe, facturation, documents et portail client dans un seul espace, à l'image de votre cabinet. Fini les outils qui ne se parlent pas.</p>
+        <div class="cta">
+          <button class="btn primary big" id="open-login-2" data-i18n="login">Connexion</button>
+          <a class="btn big" href="#tour" data-i18n="discover">Voir comment ça marche</a>
+        </div>
+        <div class="trust"><span data-i18n="t1">Français et anglais</span><span data-i18n="t2">TPS / TVQ intégrées</span><span data-i18n="t3">Un environnement dédié par cabinet</span></div>
+      </div>
+
+      <div class="scene" aria-hidden="true">
+        <svg class="bolt" viewBox="0 0 460 440"><defs><linearGradient id="bl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8f0ff"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><path d="M330 -20 L270 120 L318 126 L236 262 L292 270 L204 440" fill="none" stroke="url(#bl)" stroke-width="5" stroke-linejoin="round" style="filter:drop-shadow(0 0 10px #8fb4ff) drop-shadow(0 0 22px #7c5cff)"/></svg>
+        <div class="clay steel c-invoice"><b data-i18n="cInv">Facture</b><div class="num">F-1042</div><div class="ln"></div><div class="ln m"></div><div class="ln s"></div><div class="ln m"></div></div>
+        <div class="clay purple c-paid"><span data-i18n="cPaid">Payée ✓</span></div>
+        <div class="clay blue c-chart"><i></i><i></i><i></i><i></i></div>
+        <div class="clay dark c-coin" style="color:#9ee7ff">$</div>
+        <div class="clay purple c-check"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+        <div class="c-hex">H</div>
       </div>
     </section>
 
-    <section class="grid" id="features">
-      <article class="glass card"><div class="ico">👥</div><h3 data-i18n="f1t">Clients et contrats</h3><p data-i18n="f1d">Fiches clients complètes: contacts, contrats, tâches assignées et accès portail pour vos clients.</p></article>
-      <article class="glass card"><div class="ico">✅</div><h3 data-i18n="f2t">Tâches et pipeline</h3><p data-i18n="f2d">Organisez le travail de la journée, les échéances et les dossiers récurrents de toute l'équipe.</p></article>
-      <article class="glass card"><div class="ico">📊</div><h3 data-i18n="f3t">Tableaux de bord d'équipe</h3><p data-i18n="f3d">Tableaux personnalisables, partagés ou verrouillés, et une rencontre d'équipe hebdomadaire intégrée.</p></article>
-      <article class="glass card"><div class="ico">🧾</div><h3 data-i18n="f4t">Facturation et QuickBooks</h3><p data-i18n="f4d">Approuvez le travail à facturer, émettez vos factures et gardez QuickBooks synchronisé.</p></article>
-      <article class="glass card"><div class="ico">📬</div><h3 data-i18n="f5t">Microsoft 365 et SharePoint</h3><p data-i18n="f5d">Calendrier, courriels et documentation reliés à vos outils Microsoft.</p></article>
-      <article class="glass card"><div class="ico">🎨</div><h3 data-i18n="f6t">À votre image</h3><p data-i18n="f6d">Votre logo, vos couleurs, votre adresse. Un environnement dédié pour chaque cabinet.</p></article>
+    <section class="pros" id="pros">
+      <div class="center reveal"><p class="eyebrow" data-i18n="proE">Pourquoi Hexa</p><h2 data-i18n="proT">Moins d'administratif. Plus de temps pour vos clients.</h2><p class="sub" data-i18n="proS">Un CRM construit autour du travail réel d'un cabinet comptable, pas un outil générique adapté à la hâte.</p></div>
+      <div class="pgrid">
+        <article class="glass pro reveal"><div class="cbadge clay purple" style="position:relative"><svg><use href="#i-users"/></svg></div><h3 data-i18n="p1t">Une fiche, tout le dossier</h3><p data-i18n="p1d">Contacts, contrats, tâches, factures et documents d'un client au même endroit. Plus de recherche entre cinq outils.</p></article>
+        <article class="glass pro reveal"><div class="cbadge clay blue" style="position:relative"><svg><use href="#i-receipt"/></svg></div><h3 data-i18n="p2t">Facturez ce qui est fait</h3><p data-i18n="p2d">Du temps saisi à la facture payée: approbation, taxes, rappels automatiques et synchronisation QuickBooks.</p></article>
+        <article class="glass pro reveal"><div class="cbadge clay steel" style="position:relative"><svg style="stroke:#2a2257"><use href="#i-check"/></svg></div><h3 data-i18n="p3t">Rien n'est oublié</h3><p data-i18n="p3d">Échéances, tâches récurrentes, dépendances et rencontre d'équipe hebdomadaire: chacun sait quoi faire aujourd'hui.</p></article>
+        <article class="glass pro reveal"><div class="cbadge clay dark" style="position:relative"><svg><use href="#i-folder"/></svg></div><h3 data-i18n="p4t">Vos clients se servent seuls</h3><p data-i18n="p4d">Un portail à votre image: factures, relevé de compte, contrats, documents et messages. Moins d'appels, plus de transparence.</p></article>
+        <article class="glass pro reveal"><div class="cbadge clay purple" style="position:relative"><svg><use href="#i-palette"/></svg></div><h3 data-i18n="p5t">100 % à votre image</h3><p data-i18n="p5d">Votre logo, vos couleurs, votre adresse. Vos clients voient votre cabinet, pas un logiciel.</p></article>
+        <article class="glass pro reveal"><div class="cbadge clay blue" style="position:relative"><svg><use href="#i-lock"/></svg></div><h3 data-i18n="p6t">Chacun voit ce qu'il doit voir</h3><p data-i18n="p6d">Droits par groupe et par personne, accès par dossier SharePoint, connexion sécurisée avec double authentification.</p></article>
+      </div>
     </section>
 
-    <section class="glass band">
-      <h2 data-i18n="bandT">Déjà client Nexo?</h2>
-      <p data-i18n="bandD">Trouvez l'adresse de votre cabinet pour vous connecter.</p>
-      <button class="btn primary" id="open-login-3" data-i18n="login">Connexion</button>
+    <section class="tour" id="tour">
+      <div class="center reveal"><p class="eyebrow" data-i18n="tourE">La visite</p><h2 data-i18n="tourT">Faites défiler. Hexa se déroule comme votre journée.</h2></div>
+      <div class="tour-grid">
+        <div class="steps" id="steps">
+          <article class="step" data-pane="0"><span class="n">01</span><h3 data-i18n="s1t">Chaque client, une seule fiche</h3><p data-i18n="s1d">Contacts, contrats, tâches, factures et documents réunis, avec l'historique du dossier.</p><ul><li data-i18n="s1a">Contacts principal et de facturation</li><li data-i18n="s1b">Contrats récurrents, à l'heure ou banque d'heures</li></ul></article>
+          <article class="step" data-pane="1"><span class="n">02</span><h3 data-i18n="s2t">Le travail du jour, sans oubli</h3><p data-i18n="s2d">Un tableau par étapes, des tâches récurrentes et des échéances qui se préparent d'elles-mêmes.</p><ul><li data-i18n="s2a">Glisser-déposer, listes de contrôle, dépendances</li><li data-i18n="s2b">Ma journée, vue par semaine</li></ul></article>
+          <article class="step" data-pane="2"><span class="n">03</span><h3 data-i18n="s3t">Votre équipe, d'un coup d'œil</h3><p data-i18n="s3d">Des tableaux de bord que chacun personnalise, et une rencontre d'équipe hebdomadaire intégrée.</p><ul><li data-i18n="s3a">Widgets partagés ou verrouillés</li><li data-i18n="s3b">Ordre du jour et points de la rencontre</li></ul></article>
+          <article class="step" data-pane="3"><span class="n">04</span><h3 data-i18n="s4t">Du temps travaillé à la facture payée</h3><p data-i18n="s4d">Approuvez le travail à facturer, émettez des factures avec TPS et TVQ, relancez automatiquement.</p><ul><li data-i18n="s4a">Paiements partiels et relevé de compte</li><li data-i18n="s4b">Rappels par courriel et synchronisation QuickBooks</li></ul></article>
+          <article class="step" data-pane="4"><span class="n">05</span><h3 data-i18n="s5t">Vos documents, vos droits</h3><p data-i18n="s5d">Votre SharePoint, directement dans l'application, avec des droits gérés dossier par dossier.</p><ul><li data-i18n="s5a">Lecture ou modification par personne ou groupe</li><li data-i18n="s5b">Rien n'est exposé en dehors des règles</li></ul></article>
+          <article class="step" data-pane="5"><span class="n">06</span><h3 data-i18n="s6t">Vos clients se servent eux-mêmes</h3><p data-i18n="s6d">Le portail client montre leur solde, leurs factures, leurs contrats, leurs documents et vos messages.</p><ul><li data-i18n="s6a">Invitation par courriel, lien à usage unique</li><li data-i18n="s6b">Chaque client ne voit que ses données</li></ul></article>
+        </div>
+
+        <div class="sticky">
+          <div class="glass app" id="app">
+            <aside>
+              <div class="brandrow"><svg><use href="#hex"/></svg><span class="metal">Hexa</span></div>
+              <div class="mi" data-m="0"><i></i><span data-i18n="mClients">Clients</span></div>
+              <div class="mi" data-m="1"><i></i><span data-i18n="mTasks">Tâches</span></div>
+              <div class="mi" data-m="2"><i></i><span data-i18n="mTeam">Équipe</span></div>
+              <div class="mi" data-m="3"><i></i><span data-i18n="mBilling">Facturation</span></div>
+              <div class="mi" data-m="4"><i></i><span data-i18n="mDocs">Documents</span></div>
+              <div class="mi" data-m="5"><i></i><span data-i18n="mPortal">Portail client</span></div>
+            </aside>
+            <main>
+              <div class="top"><b id="ptitle">Clients</b><span id="pbadge">Hexa</span></div>
+              <div class="pane" data-p="0">
+                <div class="row"><div class="av">B</div><div class="g">Boulangerie Dupont<small>3 contacts · 2 contrats</small></div><span class="tag ok">actif</span></div>
+                <div class="row"><div class="av">C</div><div class="g">Clinique Santé Plus<small>5 contacts · 1 contrat</small></div><span class="tag ok">actif</span></div>
+                <div class="row"><div class="av">C</div><div class="g">Construction Lavoie inc.<small>2 contacts · 3 contrats</small></div><span class="tag w">à suivre</span></div>
+                <div class="row"><div class="av">T</div><div class="g">Transport Gagnon<small>4 contacts · 1 contrat</small></div><span class="tag ok">actif</span></div>
+              </div>
+              <div class="pane" data-p="1">
+                <div class="kan"><div><h4 data-i18n="kTodo">À faire</h4><div class="card">TPS/TVQ — T. Gagnon</div><div class="card">Bilan 2025 — C. Lavoie</div></div><div><h4 data-i18n="kDoing">En cours</h4><div class="card mv">Paie — Clinique S+</div><div class="card">T2 — Boulangerie</div></div><div><h4 data-i18n="kDone">Terminé</h4><div class="card">Rapprochement</div></div></div>
+              </div>
+              <div class="pane" data-p="2">
+                <div class="widgets"><div class="w"><small data-i18n="wHours">Heures facturables</small><div class="v">312 h</div><div class="bars"><i style="height:40%"></i><i style="height:66%"></i><i style="height:52%"></i><i style="height:84%"></i><i style="height:70%"></i><i style="height:96%"></i></div></div><div class="w"><small data-i18n="wDone">Tâches terminées</small><div class="ring"></div></div><div class="w"><small data-i18n="wLate">Factures en retard</small><div class="v" style="color:#fcd86a">4</div></div><div class="w"><small data-i18n="wMeet">Prochaine rencontre</small><div class="v" style="font-size:18px">Lundi 9 h</div></div></div>
+              </div>
+              <div class="pane" data-p="3">
+                <div class="row"><div class="g">F-1042 · Boulangerie Dupont<small>TPS 5 % · TVQ 9,975 %</small></div><b>1 149,75 $</b><span class="tag ok" data-i18n="vPaid">Payée</span></div>
+                <div class="row"><div class="g">F-1043 · Clinique Santé Plus<small>Échéance dans 12 j</small></div><b>2 299,50 $</b><span class="tag" data-i18n="vSent">Envoyée</span></div>
+                <div class="row"><div class="g">F-1039 · Construction Lavoie<small>Rappel automatique envoyé</small></div><b>879,00 $</b><span class="tag w" data-i18n="vLate">En retard</span></div>
+                <div class="tot"><span data-i18n="vBal">Solde à recevoir</span><b>3 178,50 $</b></div>
+              </div>
+              <div class="pane" data-p="4">
+                <div class="folder"><svg><use href="#i-folder"/></svg>Dossiers clients</div>
+                <div class="folder sub"><svg><use href="#i-folder"/></svg>Boulangerie Dupont <span class="tag ok" style="margin-left:auto" data-i18n="dEdit">Modification</span></div>
+                <div class="folder sub"><svg><use href="#i-folder"/></svg>2025 <span class="tag" style="margin-left:auto" data-i18n="dView">Lecture</span></div>
+                <div class="folder sub"><svg><use href="#i-folder"/></svg>Clinique Santé Plus <span class="tag w" style="margin-left:auto" data-i18n="dNone">Aucun accès</span></div>
+              </div>
+              <div class="pane" data-p="5">
+                <div class="widgets"><div class="w"><small data-i18n="cBal">Solde à payer</small><div class="v">1 149,75 $</div></div><div class="w"><small data-i18n="cOver">Factures en retard</small><div class="v" style="color:#7ee8a6">0</div></div></div>
+                <div class="row" style="margin-top:10px"><div class="g"><b data-i18n="cMsg">Rappel : date limite TPS/TVQ</b><small data-i18n="cMsgD">Merci de nous transmettre vos documents avant la fin de la semaine.</small></div></div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <footer>© <span id="year"></span> Nexo · <a href="#" id="console-link" data-i18n="consoleLogin">Connexion à la console</a></footer>
-  </div>
+    <section class="wl" id="brand">
+      <div class="wl-grid">
+        <div class="reveal">
+          <p class="eyebrow" data-i18n="wlE">À votre image</p><h2 data-i18n="wlT">Vos clients voient votre cabinet. Pas un logiciel.</h2>
+          <p class="sub" data-i18n="wlS">Votre nom, votre logo, vos couleurs et votre adresse web. Chaque cabinet a son propre environnement, ses propres données et son propre thème. Essayez-en un:</p>
+          <div class="swatches" id="swatches">
+            <button class="sw" data-a="#7c3aed" data-c="#2563eb" aria-pressed="true"><i style="--a:#7c3aed;--c:#2563eb"></i>Hexa</button>
+            <button class="sw" data-a="#942e2d" data-c="#c8a47e" aria-pressed="false"><i style="--a:#942e2d;--c:#c8a47e"></i>Bordeaux &amp; sable</button>
+            <button class="sw" data-a="#0d9488" data-c="#f59e0b" aria-pressed="false"><i style="--a:#0d9488;--c:#f59e0b"></i>Turquoise &amp; ambre</button>
+          </div>
+        </div>
+        <div class="demo reveal" id="demo"><div class="h"><i></i><span id="demoName">Votre cabinet</span></div><div class="bar f"></div><div class="bar" style="width:84%"></div><div class="bar" style="width:52%"></div><span class="b" data-i18n="wlBtn">Se connecter</span></div>
+      </div>
+    </section>
+
+    <section class="final">
+      <div class="glass band reveal">
+        <p class="eyebrow" data-i18n="soon">Bientôt disponible</p>
+        <h2 data-i18n="bandT">Hexa arrive. Soyez prêt.</h2>
+        <p class="sub" data-i18n="bandD">Déjà client Hexa? Trouvez l'adresse de votre cabinet pour vous connecter.</p>
+        <div class="cta"><button class="btn primary big" id="open-login-3" data-i18n="login">Connexion</button><a class="btn big" id="notify" href="#" hidden data-i18n="notify">Me prévenir du lancement</a></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>© <span id="year"></span> Hexa · <a href="#" id="console-link" data-i18n="consoleLogin">Connexion à la console</a></footer>
 
   <dialog id="dlg">
     <form method="dialog" class="glass dlg" id="find">
       <h2 data-i18n="dlgT">Trouvez votre cabinet</h2>
       <p data-i18n="dlgD">Entrez l'identifiant de votre cabinet. Vous serez redirigé vers votre page de connexion.</p>
-      <div class="row">
-        <input id="slug" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ex. acme" aria-label="Firm identifier" />
+      <div class="drow">
+        <input id="slug" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ex. demo" aria-label="Firm identifier" />
         <button class="btn primary" id="go" type="submit" data-i18n="continue">Continuer</button>
       </div>
       <div class="msg" id="msg" role="alert"></div>
@@ -111,32 +372,117 @@
   <script src="config.js"></script>
   <script>
     const T = {
-      fr: { login:"Connexion", soon:"Bientôt disponible", h1:"pour les cabinets comptables", lead:"Clients, tâches, équipe, facturation et documents réunis dans un seul espace moderne, à l'image de votre cabinet.", discover:"Découvrir",
-        f1t:"Clients et contrats", f1d:"Fiches clients complètes: contacts, contrats, tâches assignées et accès portail pour vos clients.", f2t:"Tâches et pipeline", f2d:"Organisez le travail de la journée, les échéances et les dossiers récurrents de toute l'équipe.",
-        f3t:"Tableaux de bord d'équipe", f3d:"Tableaux personnalisables, partagés ou verrouillés, et une rencontre d'équipe hebdomadaire intégrée.", f4t:"Facturation et QuickBooks", f4d:"Approuvez le travail à facturer, émettez vos factures et gardez QuickBooks synchronisé.",
-        f5t:"Microsoft 365 et SharePoint", f5d:"Calendrier, courriels et documentation reliés à vos outils Microsoft.", f6t:"À votre image", f6d:"Votre logo, vos couleurs, votre adresse. Un environnement dédié pour chaque cabinet.",
-        bandT:"Déjà client Nexo?", bandD:"Trouvez l'adresse de votre cabinet pour vous connecter.", consoleLogin:"Connexion à la console", dlgT:"Trouvez votre cabinet", dlgD:"Entrez l'identifiant de votre cabinet. Vous serez redirigé vers votre page de connexion.",
-        continue:"Continuer", or:"ou", close:"Fermer", notFound:"Cabinet introuvable. Vérifiez l'identifiant.", error:"Service indisponible. Réessayez plus tard.", redirect:"Redirection vers" },
-      en: { login:"Sign in", soon:"Coming soon", h1:"for accounting firms", lead:"Clients, tasks, team, billing and documents in one modern workspace, styled after your firm.", discover:"Discover",
-        f1t:"Clients and contracts", f1d:"Complete client profiles: contacts, contracts, assigned tasks and portal access for your clients.", f2t:"Tasks and pipeline", f2d:"Organize the day's work, deadlines and recurring files for the whole team.",
-        f3t:"Team dashboards", f3d:"Customizable, shared or locked dashboards, and a built-in weekly team meeting.", f4t:"Billing and QuickBooks", f4d:"Approve work to bill, issue your invoices and keep QuickBooks in sync.",
-        f5t:"Microsoft 365 and SharePoint", f5d:"Calendar, mail and documentation connected to your Microsoft tools.", f6t:"Made in your image", f6d:"Your logo, your colors, your address. A dedicated environment for every firm.",
-        bandT:"Already a Nexo customer?", bandD:"Find your firm's address to sign in.", consoleLogin:"Console sign-in", dlgT:"Find your firm", dlgD:"Enter your firm's identifier. You will be redirected to your sign-in page.",
-        continue:"Continue", or:"or", close:"Close", notFound:"Firm not found. Check the identifier.", error:"Service unavailable. Try again later.", redirect:"Redirecting to" },
+      fr: {
+        navWhy:"Pourquoi Hexa", navTour:"Visite", navBrand:"À votre image", login:"Connexion", soon:"Bientôt disponible",
+        h1:"le CRM pensé pour les cabinets comptables", lead:"Clients, tâches, équipe, facturation, documents et portail client dans un seul espace, à l'image de votre cabinet. Fini les outils qui ne se parlent pas.",
+        discover:"Voir comment ça marche", t1:"Français et anglais", t2:"TPS / TVQ intégrées", t3:"Un environnement dédié par cabinet", cInv:"Facture", cPaid:"Payée ✓",
+        proE:"Pourquoi Hexa", proT:"Moins d'administratif. Plus de temps pour vos clients.", proS:"Un CRM construit autour du travail réel d'un cabinet comptable, pas un outil générique adapté à la hâte.",
+        p1t:"Une fiche, tout le dossier", p1d:"Contacts, contrats, tâches, factures et documents d'un client au même endroit. Plus de recherche entre cinq outils.",
+        p2t:"Facturez ce qui est fait", p2d:"Du temps saisi à la facture payée: approbation, taxes, rappels automatiques et synchronisation QuickBooks.",
+        p3t:"Rien n'est oublié", p3d:"Échéances, tâches récurrentes, dépendances et rencontre d'équipe hebdomadaire: chacun sait quoi faire aujourd'hui.",
+        p4t:"Vos clients se servent seuls", p4d:"Un portail à votre image: factures, relevé de compte, contrats, documents et messages. Moins d'appels, plus de transparence.",
+        p5t:"100 % à votre image", p5d:"Votre logo, vos couleurs, votre adresse. Vos clients voient votre cabinet, pas un logiciel.",
+        p6t:"Chacun voit ce qu'il doit voir", p6d:"Droits par groupe et par personne, accès par dossier SharePoint, connexion sécurisée avec double authentification.",
+        tourE:"La visite", tourT:"Faites défiler. Hexa se déroule comme votre journée.",
+        s1t:"Chaque client, une seule fiche", s1d:"Contacts, contrats, tâches, factures et documents réunis, avec l'historique du dossier.", s1a:"Contacts principal et de facturation", s1b:"Contrats récurrents, à l'heure ou banque d'heures",
+        s2t:"Le travail du jour, sans oubli", s2d:"Un tableau par étapes, des tâches récurrentes et des échéances qui se préparent d'elles-mêmes.", s2a:"Glisser-déposer, listes de contrôle, dépendances", s2b:"Ma journée, vue par semaine",
+        s3t:"Votre équipe, d'un coup d'œil", s3d:"Des tableaux de bord que chacun personnalise, et une rencontre d'équipe hebdomadaire intégrée.", s3a:"Widgets partagés ou verrouillés", s3b:"Ordre du jour et points de la rencontre",
+        s4t:"Du temps travaillé à la facture payée", s4d:"Approuvez le travail à facturer, émettez des factures avec TPS et TVQ, relancez automatiquement.", s4a:"Paiements partiels et relevé de compte", s4b:"Rappels par courriel et synchronisation QuickBooks",
+        s5t:"Vos documents, vos droits", s5d:"Votre SharePoint, directement dans l'application, avec des droits gérés dossier par dossier.", s5a:"Lecture ou modification par personne ou groupe", s5b:"Rien n'est exposé en dehors des règles",
+        s6t:"Vos clients se servent eux-mêmes", s6d:"Le portail client montre leur solde, leurs factures, leurs contrats, leurs documents et vos messages.", s6a:"Invitation par courriel, lien à usage unique", s6b:"Chaque client ne voit que ses données",
+        mClients:"Clients", mTasks:"Tâches", mTeam:"Équipe", mBilling:"Facturation", mDocs:"Documents", mPortal:"Portail client",
+        kTodo:"À faire", kDoing:"En cours", kDone:"Terminé", wHours:"Heures facturables", wDone:"Tâches terminées", wLate:"Factures en retard", wMeet:"Prochaine rencontre",
+        vPaid:"Payée", vSent:"Envoyée", vLate:"En retard", vBal:"Solde à recevoir", dEdit:"Modification", dView:"Lecture", dNone:"Aucun accès",
+        cBal:"Solde à payer", cOver:"Factures en retard", cMsg:"Rappel : date limite TPS/TVQ", cMsgD:"Merci de nous transmettre vos documents avant la fin de la semaine.",
+        wlE:"À votre image", wlT:"Vos clients voient votre cabinet. Pas un logiciel.", wlS:"Votre nom, votre logo, vos couleurs et votre adresse web. Chaque cabinet a son propre environnement, ses propres données et son propre thème. Essayez-en un:", wlBtn:"Se connecter",
+        bandT:"Hexa arrive. Soyez prêt.", bandD:"Déjà client Hexa? Trouvez l'adresse de votre cabinet pour vous connecter.", notify:"Me prévenir du lancement",
+        consoleLogin:"Connexion à la console", dlgT:"Trouvez votre cabinet", dlgD:"Entrez l'identifiant de votre cabinet. Vous serez redirigé vers votre page de connexion.",
+        continue:"Continuer", or:"ou", close:"Fermer", notFound:"Cabinet introuvable. Vérifiez l'identifiant.", error:"Service indisponible. Réessayez plus tard.", redirect:"Redirection vers", yourFirm:"Votre cabinet" },
+      en: {
+        navWhy:"Why Hexa", navTour:"Tour", navBrand:"Your brand", login:"Sign in", soon:"Coming soon",
+        h1:"the CRM built for accounting firms", lead:"Clients, tasks, team, billing, documents and a client portal in one workspace, styled after your firm. No more tools that don't talk to each other.",
+        discover:"See how it works", t1:"English and French", t2:"GST / QST built in", t3:"A dedicated environment per firm", cInv:"Invoice", cPaid:"Paid ✓",
+        proE:"Why Hexa", proT:"Less admin. More time for your clients.", proS:"A CRM built around the real work of an accounting firm, not a generic tool adapted in a hurry.",
+        p1t:"One file, the whole case", p1d:"A client's contacts, contracts, tasks, invoices and documents in one place. No more hunting across five tools.",
+        p2t:"Bill what was done", p2d:"From time entered to invoice paid: approval, taxes, automatic reminders and QuickBooks sync.",
+        p3t:"Nothing is forgotten", p3d:"Deadlines, recurring tasks, dependencies and a weekly team meeting: everyone knows what to do today.",
+        p4t:"Clients help themselves", p4d:"A portal in your brand: invoices, account statement, contracts, documents and messages. Fewer calls, more transparency.",
+        p5t:"100% your brand", p5d:"Your logo, your colors, your address. Clients see your firm, not a piece of software.",
+        p6t:"Everyone sees what they should", p6d:"Rights by group and by person, SharePoint access by folder, secure sign-in with two-factor authentication.",
+        tourE:"The tour", tourT:"Scroll. Hexa unfolds like your day.",
+        s1t:"Every client, one file", s1d:"Contacts, contracts, tasks, invoices and documents together, with the history of the file.", s1a:"Main and billing contacts", s1b:"Recurring, hourly or hours-bank contracts",
+        s2t:"Today's work, nothing forgotten", s2d:"A board by stage, recurring tasks and deadlines that prepare themselves.", s2a:"Drag and drop, checklists, dependencies", s2b:"My day, seen by week",
+        s3t:"Your team at a glance", s3d:"Dashboards everyone customizes, and a weekly team meeting built in.", s3a:"Shared or locked widgets", s3b:"Agenda and meeting points",
+        s4t:"From time worked to invoice paid", s4d:"Approve work to bill, issue invoices with GST and QST, follow up automatically.", s4a:"Partial payments and account statements", s4b:"Email reminders and QuickBooks sync",
+        s5t:"Your documents, your rules", s5d:"Your SharePoint, right inside the app, with rights managed folder by folder.", s5a:"View or edit by person or group", s5b:"Nothing is exposed outside the rules",
+        s6t:"Clients help themselves", s6d:"The client portal shows their balance, invoices, contracts, documents and your messages.", s6a:"Email invitation, single-use link", s6b:"Each client only sees their own data",
+        mClients:"Clients", mTasks:"Tasks", mTeam:"Team", mBilling:"Billing", mDocs:"Documents", mPortal:"Client portal",
+        kTodo:"To do", kDoing:"In progress", kDone:"Done", wHours:"Billable hours", wDone:"Tasks done", wLate:"Overdue invoices", wMeet:"Next meeting",
+        vPaid:"Paid", vSent:"Sent", vLate:"Overdue", vBal:"Balance receivable", dEdit:"Edit", dView:"View", dNone:"No access",
+        cBal:"Balance due", cOver:"Overdue invoices", cMsg:"Reminder: GST/QST deadline", cMsgD:"Please send us your documents before the end of the week.",
+        wlE:"Your brand", wlT:"Clients see your firm. Not a piece of software.", wlS:"Your name, your logo, your colors and your web address. Each firm has its own environment, its own data and its own theme. Try one:", wlBtn:"Sign in",
+        bandT:"Hexa is coming. Be ready.", bandD:"Already a Hexa customer? Find your firm's address to sign in.", notify:"Tell me when it launches",
+        consoleLogin:"Console sign-in", dlgT:"Find your firm", dlgD:"Enter your firm's identifier. You will be redirected to your sign-in page.",
+        continue:"Continue", or:"or", close:"Close", notFound:"Firm not found. Check the identifier.", error:"Service unavailable. Try again later.", redirect:"Redirecting to", yourFirm:"Your firm" },
     };
+    const PANES = { fr: ["Clients","Tâches","Équipe","Facturation","Documents","Portail client"], en: ["Clients","Tasks","Team","Billing","Documents","Client portal"] };
     let lang = (navigator.language || "fr").startsWith("en") ? "en" : "fr";
-    try { const s = localStorage.getItem("nexo.site.lang"); if (s === "fr" || s === "en") lang = s; } catch {}
+    try { const s = localStorage.getItem("hexa.site.lang"); if (s === "fr" || s === "en") lang = s; } catch {}
     const $ = (s) => document.querySelector(s);
+    const $$ = (s) => [...document.querySelectorAll(s)];
+    let pane = 0;
     function render() {
       document.documentElement.lang = lang;
-      document.querySelectorAll("[data-i18n]").forEach((e) => (e.textContent = T[lang][e.dataset.i18n]));
-      document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+      $$("[data-i18n]").forEach((e) => { const v = T[lang][e.dataset.i18n]; if (v !== undefined) e.textContent = v; });
+      $$("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+      $("#ptitle").textContent = PANES[lang][pane];
+      const on = $("#swatches [aria-pressed=true]");
+      $("#demoName").textContent = on && on.dataset.a === "#942e2d" ? "A Bezeau" : on && on.dataset.a === "#0d9488" ? "Cabinet Océan" : T[lang].yourFirm;
     }
-    document.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => { lang = b.dataset.lang; try { localStorage.setItem("nexo.site.lang", lang); } catch {} render(); }));
+    $$("[data-lang]").forEach((b) => b.addEventListener("click", () => { lang = b.dataset.lang; try { localStorage.setItem("hexa.site.lang", lang); } catch {} render(); }));
     $("#year").textContent = new Date().getFullYear();
 
-    const consoleUrl = ((window.NEXO && window.NEXO.consoleUrl) || "").replace(/\/$/, "");
+    // Scroll: progress bar, header glass, hexagon parallax
+    const root = document.documentElement, head = $("#top");
+    let tick = false;
+    function onScroll() {
+      if (tick) return; tick = true;
+      requestAnimationFrame(() => {
+        const y = window.scrollY, max = Math.max(1, root.scrollHeight - innerHeight);
+        root.style.setProperty("--scroll", y); root.style.setProperty("--p", Math.min(1, y / max));
+        head.classList.toggle("solid", y > 12); tick = false;
+      });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+
+    // Reveal on scroll
+    const rev = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); rev.unobserve(e.target); } }), { threshold: .15 });
+    $$(".reveal").forEach((el, i) => { el.style.transitionDelay = (i % 3) * 90 + "ms"; rev.observe(el); });
+
+    // The tour: the step in the middle of the screen drives the CRM window, like clicking through the real app
+    function setPane(i) {
+      pane = i;
+      $$(".pane").forEach((p) => p.classList.toggle("on", Number(p.dataset.p) === i));
+      $$(".mi").forEach((m) => m.classList.toggle("on", Number(m.dataset.m) === i));
+      $$(".step").forEach((s) => s.classList.toggle("on", Number(s.dataset.pane) === i));
+      $("#ptitle").textContent = PANES[lang][i];
+    }
+    const stepIO = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) setPane(Number(e.target.dataset.pane)); }), { rootMargin: "-42% 0px -42% 0px" });
+    $$(".step").forEach((s) => stepIO.observe(s));
+    $$(".mi").forEach((m) => m.addEventListener("click", () => { const s = $(`.step[data-pane="${m.dataset.m}"]`); if (s) s.scrollIntoView({ behavior: "smooth", block: "center" }); }));
+    setPane(0);
+
+    // White-label demo
+    $$("#swatches .sw").forEach((b) => b.addEventListener("click", () => {
+      $$("#swatches .sw").forEach((x) => x.setAttribute("aria-pressed", "false")); b.setAttribute("aria-pressed", "true");
+      $("#demo").style.setProperty("--t1", b.dataset.a); $("#demo").style.setProperty("--t2", b.dataset.c); render();
+    }));
+    render();
+
+    const cfg = window.HEXA || {};
+    const consoleUrl = (cfg.consoleUrl || "").replace(/\/$/, "");
     $("#console-link").href = $("#console-link-2").href = consoleUrl || "#";
+    if (cfg.contactEmail && /^[^@\s]+@[^@\s]+$/.test(cfg.contactEmail)) { const n = $("#notify"); n.hidden = false; n.href = "mailto:" + cfg.contactEmail + "?subject=" + encodeURIComponent("Hexa"); }
     const dlg = $("#dlg");
     ["#open-login", "#open-login-2", "#open-login-3"].forEach((s) => $(s).addEventListener("click", () => { $("#msg").textContent = ""; dlg.showModal(); $("#slug").focus(); }));
     $("#close").addEventListener("click", () => dlg.close());
@@ -158,7 +504,6 @@
         location.href = url.href;
       } catch { msg.textContent = T[lang].error; }
     });
-    render();
   </script>
 </body>
 </html>

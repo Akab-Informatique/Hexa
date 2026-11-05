@@ -45,7 +45,7 @@ export default function ConnectPage({ kind }: { kind: "calendar" | "mail" }) {
     {can("admin.integrations.view") && <Link to="/admin/integrations/o365" className="btn btn-primary no-underline"><Plug size={15} />{l("Configurer Microsoft 365", "Configure Microsoft 365")}</Link>}</>);
   else if (!s.connected || s.needsReauth) body = gate(<>
     <h2 className="text-lg font-semibold">{s.needsReauth ? l("Reconnexion requise", "Sign in again") : l("Connectez votre compte Microsoft 365", "Connect your Microsoft 365 account")}</h2>
-    <p className="max-w-lg text-sm text-muted">{l("Vous verrez votre propre calendrier et votre propre boîte de réception, en lecture seule. Personne d'autre n'y a accès par Nexo. Vous pouvez vous déconnecter en tout temps.", "You will see your own calendar and inbox, read only. Nobody else can reach them through Nexo. You can disconnect at any time.")}</p>
+    <p className="max-w-lg text-sm text-muted">{l("Vous verrez votre propre calendrier et votre propre boîte de réception, en lecture seule. Personne d'autre n'y a accès par Hexa. Vous pouvez vous déconnecter en tout temps.", "You will see your own calendar and inbox, read only. Nobody else can reach them through Hexa. You can disconnect at any time.")}</p>
     <button className="btn btn-primary" onClick={() => void connect()}><Link2 size={15} />{l("Se connecter avec Microsoft", "Sign in with Microsoft")}</button></>);
   else body = kind === "calendar" ? <CalendarView /> : <InboxView />;
 

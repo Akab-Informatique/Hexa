@@ -1,4 +1,4 @@
-import { BrandingSchema, type Branding } from "@nexo/shared";
+import { BrandingSchema, type Branding } from "@hexa/shared";
 
 const e = process.env;
 
@@ -15,8 +15,8 @@ export const config = {
   version: e.APP_VERSION ?? "0.0.0-dev",
   databaseUrl:
     e.DATABASE_URL ??
-    `postgres://${e.POSTGRES_USER ?? "nexo"}:${encodeURIComponent(e.POSTGRES_PASSWORD ?? "")}` +
-      `@${e.POSTGRES_HOST ?? "localhost"}:${e.POSTGRES_PORT ?? "5432"}/${e.POSTGRES_DB ?? "nexo"}`,
+    `postgres://${e.POSTGRES_USER ?? "hexa"}:${encodeURIComponent(e.POSTGRES_PASSWORD ?? "")}` +
+      `@${e.POSTGRES_HOST ?? "localhost"}:${e.POSTGRES_PORT ?? "5432"}/${e.POSTGRES_DB ?? "hexa"}`,
   /** Identity + license. When CONSOLE_URL is unset the instance runs unlicensed (local dev only). */
   clientId: e.CLIENT_ID ?? "",
   licenseKey: e.LICENSE_KEY ?? "",

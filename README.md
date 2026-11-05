@@ -1,4 +1,4 @@
-# Nexo
+# Hexa
 
 White-label app sold per client. **One install per client** (own server, own database), managed from **one admin console**.
 
@@ -21,13 +21,13 @@ Planning/       Read-only reference material. Never modified.
 1. In the console you create a client (domain, branding, modules, max users, pinned version) and download its **bundle** (zip).
 2. The client unzips it on their server and runs `sh install.sh`; their own Nginx proxies to `127.0.0.1:<port>`.
 3. Every hour the instance calls `POST <console>/api/license/check` (license key + version + health). The console answers with validity, plan, `maxUsers`, enabled modules, flags, branding and the **pinned version**. The same call feeds the fleet view.
-4. When you change a client's pinned version, their app shows **Update available**. The button calls the updater, which backs up Postgres, pulls `nexo-instance:<version>` from GHCR, restarts, health-checks, and rolls back (image + DB dump) if anything fails.
+4. When you change a client's pinned version, their app shows **Update available**. The button calls the updater, which backs up Postgres, pulls `hexa-instance:<version>` from GHCR, restarts, health-checks, and rolls back (image + DB dump) if anything fails.
 5. Clients that can't reach the console keep working for `LICENSE_GRACE_HOURS` (default 72); an explicit "suspended/expired" locks immediately.
 
 ## Client-specific changes
 1. **Config / flags / branding** in the console (preferred).
 2. **A module** in `modules/<name>/` (see `modules/example-hello`), enabled per client.
-3. **Last resort:** a client image `FROM nexo-instance:<version>` + `COPY modules/<name>`. Never fork the core.
+3. **Last resort:** a client image `FROM hexa-instance:<version>` + `COPY modules/<name>`. Never fork the core.
 
 ## Releasing
 Push a tag `vX.Y.Z`. `.github/workflows/release.yml` builds and pushes the images to GHCR and registers the release in the console

@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import type { z } from "zod";
-import { hasPermission } from "@nexo/shared/permissions";
+import { hasPermission } from "@hexa/shared/permissions";
 import type { AuthCtx, Env } from "../auth/session.ts";
 
 /** snake_case DB row -> camelCase JSON. */

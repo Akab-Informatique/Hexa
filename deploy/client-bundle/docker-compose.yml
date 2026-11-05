@@ -1,4 +1,4 @@
-# Nexo instance for {{CLIENT_NAME}}.
+# Hexa instance for {{CLIENT_NAME}}.
 # Start with:  sh install.sh      (or: docker compose up -d)
 # Data lives in named volumes. NEVER run `docker compose down -v`.
 # No host bind mounts on purpose: the updater runs `docker compose` from inside a container.

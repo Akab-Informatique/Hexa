@@ -82,7 +82,7 @@ integrationRoutes.post("/mailjet/test", requirePermission("admin.integrations.ma
   const to = d.to ?? auth(c).user.email;
   if (!validEmail(to)) return c.json({ error: "invalid_address" }, 400);
   try {
-    const r = await sendMail({ to: [{ email: to }], subject: "Test Nexo / Mailjet", html: "<p>Ceci est un message de test. Si vous le lisez, l'envoi de courriels fonctionne.</p><p>This is a test message. If you can read it, email sending works.</p>", text: "Test Nexo / Mailjet: email sending works." });
+    const r = await sendMail({ to: [{ email: to }], subject: "Test Hexa / Mailjet", html: "<p>Ceci est un message de test. Si vous le lisez, l'envoi de courriels fonctionne.</p><p>This is a test message. If you can read it, email sending works.</p>", text: "Test Hexa / Mailjet: email sending works." });
     if (!r.sent) return c.json({ error: "mail_failed", detail: r.failed[0]?.error }, 502);
     return c.json({ ok: true, to });
   } catch (e) {

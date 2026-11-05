@@ -77,7 +77,7 @@ function Files({ libs, drive, path, go, canAccess }: { libs: Lib[]; drive: strin
   const lib = libs.find((x) => x.id === drive);
 
   const upload = (f: File) => run(async () => {
-    const res = await fetch(`/api/docs/file?drive=${encodeURIComponent(drive)}&path=${encodeURIComponent(path)}&name=${encodeURIComponent(f.name)}`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/octet-stream", "x-nexo-upload": "1" }, body: f });
+    const res = await fetch(`/api/docs/file?drive=${encodeURIComponent(drive)}&path=${encodeURIComponent(path)}&name=${encodeURIComponent(f.name)}`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/octet-stream", "x-hexa-upload": "1" }, body: f });
     if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
   });
 

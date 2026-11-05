@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { aging, computeInvoice, dueAfterSent, roundCents, todayISO } from "@nexo/shared/billing";
+import { aging, computeInvoice, dueAfterSent, roundCents, todayISO } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";

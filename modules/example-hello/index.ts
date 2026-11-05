@@ -1,10 +1,10 @@
-import type { NexoModule } from "@nexo/shared";
+import type { HexaModule } from "@hexa/shared";
 
 /**
  * Template for a client-specific module. Enable it per client in the console by adding
  * "example-hello" to that client's modules. Copy this folder to start a real one.
  */
-const mod: NexoModule = {
+const mod: HexaModule = {
   name: "example-hello",
   // migrationsDir: "migrations",   // optional: ordered .sql files, tracked per module
   register({ app, flags, log }) {

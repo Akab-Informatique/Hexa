@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
-  Nexo look: near-black canvas lit by purple and blue, frosted "glass" panels with a reflection
+  Hexa look: near-black canvas lit by purple and blue, frosted "glass" panels with a reflection
   tinted by the tenant's brand colors. --brand / --brand-2 are set at runtime from the tenant's
   branding (see lib/theme.ts); everything below is derived from them, so a new brand re-skins all.
 */

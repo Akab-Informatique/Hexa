@@ -1,8 +1,8 @@
-# Parity roadmap: Nexo vs the reference portal
+# Parity roadmap: Hexa vs the reference portal
 
-Result of a module-by-module review of `Planning/Client-Portal` (read-only reference) against what Nexo has today.
-Nexo is an accounting-firm CRM: **tasks only (no tickets)**, so ticket-, RMM- and MSP-specific features are out of scope.
-Goal: the same screens, rules and behaviour as the reference for everything that applies, with Nexo's own look and
+Result of a module-by-module review of `Planning/Client-Portal` (read-only reference) against what Hexa has today.
+Hexa is an accounting-firm CRM: **tasks only (no tickets)**, so ticket-, RMM- and MSP-specific features are out of scope.
+Goal: the same screens, rules and behaviour as the reference for everything that applies, with Hexa's own look and
 multi-tenant differences (per-tenant branding, modules, flags, demo data).
 
 Status key: **missing** = nothing today, **thin** = exists but far simpler than the reference.
@@ -78,5 +78,5 @@ Status key: **missing** = nothing today, **thin** = exists but far simpler than 
 - Not done: client-side tickets/quotes/devices, forgot-password for clients (staff re-send the link), pay-online.
 
 ## Notes
-- Rights: the reference splits billing rights (`crm.billing`) from general contract edits; Nexo should add the same split.
+- Rights: the reference splits billing rights (`crm.billing`) from general contract edits; Hexa should add the same split.
 - Multi-tenant differences stay in config: branding, modules, flags, seed profile (`none | accounting | bookkeeping | tax`), per-tenant SharePoint access.

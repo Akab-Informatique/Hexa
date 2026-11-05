@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { addDays, mondayOf, todayISO } from "@nexo/shared/billing";
-import { accruablePaidMinutes, centsOf, holidayBasisMinutes, holidayPayCents, paidMinutes, VACATION_ACCRUAL, workdayMinutes, type PayEntry, type TimeKind } from "@nexo/shared/workday";
+import { addDays, mondayOf, todayISO } from "@hexa/shared/billing";
+import { accruablePaidMinutes, centsOf, holidayBasisMinutes, holidayPayCents, paidMinutes, VACATION_ACCRUAL, workdayMinutes, type PayEntry, type TimeKind } from "@hexa/shared/workday";
 import { pool, getSetting } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";

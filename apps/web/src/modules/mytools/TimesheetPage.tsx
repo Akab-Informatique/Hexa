@@ -6,7 +6,7 @@ import { useAuth } from "../../lib/auth";
 import { addDays, fmtDate, money, mondayOf, todayISO, useL, useLocale } from "../../lib/l";
 import { Chip, confirmDo, Empty, errMsg, Stat, Tabs, useClients, type DirUser } from "../../components/kit";
 import { Modal, PageHeader } from "../../components/ui";
-import { workdayMinutes } from "@nexo/shared/workday";
+import { workdayMinutes } from "@hexa/shared/workday";
 
 interface TType { key: string; kind: string; labelFr: string; labelEn: string }
 interface Entry { id: string; workDate: string; typeKey: string; kind: string; minutes: number; startTime: string | null; endTime: string | null; lunchMinutes: number; bankMinutes: number; clientId: string | null; clientName: string | null; description: string; billable: boolean; billableMinutes: number | null }

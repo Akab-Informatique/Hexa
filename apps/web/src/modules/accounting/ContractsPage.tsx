@@ -12,7 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 interface Row { id: string; name: string; kind: string; status: string; clientId: string; clientName: string; startsOn: string; endsOn: string | null; monthlyCents: number; serviceCount: number; hourlyRate: number | null; amount: number; billingPeriod: string; supportDefault: boolean }
 
-const OPEN_KEY = "nexo.contracts.opened";
+const OPEN_KEY = "hexa.contracts.opened";
 const readOpen = (): string[] => { try { return JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? "[]"); } catch { return []; } };
 
 /** Every contract, grouped by client (folded by default, remembered for the session), with the monthly total of each client. */

@@ -28,7 +28,7 @@ jobs:
           file: deploy/docker/Dockerfile
           build-args: APP=instance
           push: true
-          tags: ghcr.io/akab-informatique/nexo-instance:${{ steps.v.outputs.version }}
+          tags: ghcr.io/akab-informatique/hexa-instance:${{ steps.v.outputs.version }}
       - name: console
         uses: docker/build-push-action@v6
         with:
@@ -36,7 +36,7 @@ jobs:
           file: deploy/docker/Dockerfile
           build-args: APP=console
           push: true
-          tags: ghcr.io/akab-informatique/nexo-console:${{ steps.v.outputs.version }}
+          tags: ghcr.io/akab-informatique/hexa-console:${{ steps.v.outputs.version }}
       - name: updater
         uses: docker/build-push-action@v6
         with:
@@ -44,8 +44,8 @@ jobs:
           file: deploy/docker/Dockerfile.updater
           push: true
           tags: |
-            ghcr.io/akab-informatique/nexo-updater:${{ steps.v.outputs.version }}
-            ghcr.io/akab-informatique/nexo-updater:stable
+            ghcr.io/akab-informatique/hexa-updater:${{ steps.v.outputs.version }}
+            ghcr.io/akab-informatique/hexa-updater:stable
       - name: register release in console
         env:
           CONSOLE_URL: ${{ secrets.CONSOLE_URL }}

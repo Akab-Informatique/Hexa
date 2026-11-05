@@ -1,4 +1,4 @@
-import { LicenseCheckResponseSchema, type LicenseCheckResponse } from "@nexo/shared";
+import { LicenseCheckResponseSchema, type LicenseCheckResponse } from "@hexa/shared";
 import { config } from "./config.ts";
 import { getSetting, setSetting } from "./db.ts";
 

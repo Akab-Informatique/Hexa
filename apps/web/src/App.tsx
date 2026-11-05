@@ -62,7 +62,7 @@ function Signed({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...k: str
   const { t } = useTranslation();
   // The saved per-user language applies once after sign-in, unless the user already picked one on this device.
   useEffect(() => {
-    try { if (userLocale && !localStorage.getItem("nexo.lang")) setLanguage(userLocale); } catch { /* ignore */ }
+    try { if (userLocale && !localStorage.getItem("hexa.lang")) setLanguage(userLocale); } catch { /* ignore */ }
   }, [userLocale]);
 
   const denied = <div className="glass p-8 text-center text-sm text-muted">{t("errors.forbidden")}</div>;
@@ -95,7 +95,7 @@ function Signed({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...k: str
 function ClientSigned({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...k: string[]) => boolean }) {
   const { t } = useTranslation();
   useEffect(() => {
-    try { if (userLocale && !localStorage.getItem("nexo.lang")) setLanguage(userLocale); } catch { /* ignore */ }
+    try { if (userLocale && !localStorage.getItem("hexa.lang")) setLanguage(userLocale); } catch { /* ignore */ }
   }, [userLocale]);
   const denied = <div className="glass p-8 text-center text-sm text-muted">{t("errors.forbidden")}</div>;
   return (

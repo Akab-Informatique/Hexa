@@ -1,4 +1,4 @@
-import { effectivePermissions, MODULES, permissionsFor, type Audience } from "@nexo/shared/permissions";
+import { effectivePermissions, MODULES, permissionsFor, type Audience } from "@hexa/shared/permissions";
 import { pool } from "../db.ts";
 
 export async function rightsOf(user: { id: string; kind: Audience; is_master: boolean }): Promise<string[]> {

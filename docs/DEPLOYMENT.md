@@ -1,4 +1,4 @@
-# Nexo: deployment guide
+# Hexa: deployment guide
 
 Three things get deployed, in this order:
 
@@ -6,18 +6,18 @@ Three things get deployed, in this order:
 |---|------|-------|---------|
 | 1 | **Console**: your admin tool that creates clients ("tenants"), hands out install bundles, tracks versions | **your** server | Docker (app + its own Postgres) |
 | 2 | **Marketing page** ("coming soon" + login buttons) | **your** server | static files in Nginx |
-| 3 | **A tenant** (one firm's Nexo): app + Postgres + updater | the firm's server, or a shared host | Docker, from a bundle the console generates |
+| 3 | **A tenant** (one firm's Hexa): app + Postgres + updater | the firm's server, or a shared host | Docker, from a bundle the console generates |
 
 You already run Nginx, so everything below sits behind it. Nothing here has been run end to end on real
 servers yet: do step 1 to 3 on a test domain first and keep this file open for the checks.
 
-> Replace the example names: `console.akab.ca` (console), `nexo.akab.ca` (marketing page), `acme.example.com` (a tenant).
+> Replace the example names: `console.akab.ca` (console), `hexa.akab.ca` (marketing page), `acme.example.com` (a tenant).
 
 ---
 
 ## 0. Once, before anything: images and secrets
 
-Nexo ships as Docker images built by GitHub Actions (`.github/workflows/release.yml`) and stored in GitHub Container Registry (GHCR).
+Hexa ships as Docker images built by GitHub Actions (`.github/workflows/release.yml`) and stored in GitHub Container Registry (GHCR).
 
 1. **GitHub token for tenants to pull private images**: GitHub, Settings, Developer settings, Personal access tokens (classic),
    scope `read:packages` only. Keep it. It goes in the console `.env` as `GHCR_PULL_TOKEN` and is written into each bundle.
@@ -30,7 +30,7 @@ Nexo ships as Docker images built by GitHub Actions (`.github/workflows/release.
    git tag v0.1.0
    git push origin v0.1.0
    ```
-   CI builds and pushes `nexo-instance`, `nexo-console`, `nexo-updater` at that version, then tries to register the release in the
+   CI builds and pushes `hexa-instance`, `hexa-console`, `hexa-updater` at that version, then tries to register the release in the
    console. That last step fails until the console is up (step 1): that is fine, you can register the version by hand later (step 1.6).
 
 ---
@@ -41,7 +41,7 @@ On your server (Docker + Docker Compose v2 installed):
 
 1. **Get the code**
    ```bash
-   git clone https://github.com/Akab-Informatique/Nexo.git /opt/nexo && cd /opt/nexo
+   git clone https://github.com/Akab-Informatique/Hexa.git /opt/hexa && cd /opt/hexa
    ```
 2. **Configure**
    ```bash
@@ -90,7 +90,7 @@ On your server (Docker + Docker Compose v2 installed):
         -H "content-type: application/json" -d '{"version":"0.1.0","channel":"stable"}'
    ```
 
-Backups: dump the console database nightly (`docker compose exec db pg_dump -U nexo nexo_console > console.sql`) and keep `CONSOLE_SECRET` somewhere safe.
+Backups: dump the console database nightly (`docker compose exec db pg_dump -U hexa hexa_console > console.sql`) and keep `CONSOLE_SECRET` somewhere safe.
 
 ---
 
@@ -100,27 +100,27 @@ It is a folder of static files: `apps/site` (`index.html` + `config.js`). No bui
 
 1. **Copy it to the server**
    ```bash
-   mkdir -p /var/www/nexo-site && cp -r /opt/nexo/apps/site/* /var/www/nexo-site/
+   mkdir -p /var/www/hexa-site && cp -r /opt/hexa/apps/site/* /var/www/hexa-site/
    ```
-2. **Point it at your console**: edit `/var/www/nexo-site/config.js`
+2. **Point it at your console**: edit `/var/www/hexa-site/config.js`
    ```js
-   window.NEXO = { consoleUrl: "https://console.akab.ca" };
+   window.HEXA = { consoleUrl: "https://console.akab.ca" };
    ```
    This file is read in the browser, so no rebuild is needed when it changes.
 3. **Nginx + HTTPS**
    ```nginx
    server {
        listen 80;
-       server_name nexo.akab.ca;
-       root /var/www/nexo-site;
+       server_name hexa.akab.ca;
+       root /var/www/hexa-site;
        index index.html;
        location / { try_files $uri /index.html; }
    }
    ```
    ```bash
-   nginx -t && nginx -s reload && certbot --nginx -d nexo.akab.ca
+   nginx -t && nginx -s reload && certbot --nginx -d hexa.akab.ca
    ```
-4. **Check**: open `https://nexo.akab.ca`. "Connexion" opens the "Find your firm" box: typing a client id (e.g. `acme`) asks the console
+4. **Check**: open `https://hexa.akab.ca`. "Connexion" opens the "Find your firm" box: typing a client id (e.g. `acme`) asks the console
    (`/api/tenants/lookup`, public, only returns the firm's name and address) and redirects to that firm's own address. The console link goes to your console.
 
 To update the page later: edit the files in `apps/site`, copy them over again.
@@ -134,20 +134,20 @@ To update the page later: edit the files in `apps/site`, copy them over again.
 1. Open `https://console.akab.ca` and add a client:
    - **Id**: short lowercase slug (`acme`). It is the "firm id" the marketing page asks for. Cannot change later.
    - **Name**: shown as the app name until the firm sets its own
-   - **Domain**: `acme.example.com` (the firm's address, or a subdomain of yours such as `acme.nexo.akab.ca`)
+   - **Domain**: `acme.example.com` (the firm's address, or a subdomain of yours such as `acme.hexa.akab.ca`)
    - **First admin email**: who receives the first master account
    - **Plan, max users, modules**: what the firm bought. Max users is delivered but not yet enforced by the app. (Feature flags and an expiry date exist in the console API but not yet in this form.)
    - **Pinned version**: the release the firm should run (updates are pushed by changing this)
-   - **Branding**: primary color and logo URL in the form (the name is the app name). The accent color is set through the API for now (`PATCH /api/clients/<id>` with `branding`). Nexo's own default is purple + blue on black; a firm that sets other colors gets its own lighting.
+   - **Branding**: primary color and logo URL in the form (the name is the app name). The accent color is set through the API for now (`PATCH /api/clients/<id>` with `branding`). Hexa's own default is purple + blue on black; a firm that sets other colors gets its own lighting.
    - **App port**: a free port on the target host (default per client). Use a different one for each tenant if several share a server.
 2. **Download the bundle** (zip). It contains the `.env` with the license key, a generated database password, the first admin password, the app secret,
    the compose file, `install.sh`, an Nginx site file and a README for the firm.
 
 ### 3b. On the tenant's server
 
-1. Server needs Linux + Docker + Docker Compose v2 + Nginx. Unzip the bundle (e.g. `/opt/nexo/acme`). Keep `.env` private.
+1. Server needs Linux + Docker + Docker Compose v2 + Nginx. Unzip the bundle (e.g. `/opt/hexa/acme`). Keep `.env` private.
 2. ```bash
-   cd /opt/nexo/acme && sh install.sh
+   cd /opt/hexa/acme && sh install.sh
    ```
    It logs in to GHCR with the token from the bundle, pulls the images and starts three containers: app, Postgres, updater.
    Check: `curl http://127.0.0.1:<APP_PORT>/api/health`.

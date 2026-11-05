@@ -4,7 +4,7 @@ export const en: Dict = {
   common: {
     save: "Save", cancel: "Cancel", close: "Close", create: "Create", back: "Back", copy: "Copy", copied: "Copied",
     loading: "Loading…", error: "Something went wrong", active: "Active", inactive: "Inactive", yes: "Yes", no: "No",
-    name: "Name", email: "Email", status: "Status", actions: "Actions", search: "Search", soon: "Soon", poweredBy: "Powered by Nexo",
+    name: "Name", email: "Email", status: "Status", actions: "Actions", search: "Search", soon: "Soon", poweredBy: "Powered by Hexa",
     language: "Language", logout: "Sign out", admin: "Administration", home: "Home",
   },
   login: {
@@ -55,7 +55,7 @@ export const en: Dict = {
     quickbooksHelp: "Sync of customers, invoices and vendors. Requires an Intuit app (client ID and secret) and the redirect address.",
     sharepointHelp: "The Documentation page browses this SharePoint site through the Microsoft Graph API, using the Microsoft 365 app (it needs the Sites.ReadWrite.All application permission). Who sees which folder is set in the portal, on Documentation.",
     tenantBranding: "Branding", tenantModules: "Enabled modules", tenantLicense: "License", primary: "Primary color", accent: "Accent color", appName: "Application name",
-    brandingManaged: "Branding is managed from the Nexo console. Contact your provider to change it.", noModules: "No client module enabled",
+    brandingManaged: "Branding is managed from the Hexa console. Contact your provider to change it.", noModules: "No client module enabled",
     auditAt: "Date", auditUser: "User", auditAction: "Action", auditTarget: "Target",
   },
   errors: { forbidden: "You do not have access to this page.", exists: "This email is already in use.", escalation: "You cannot grant rights you do not hold." },

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
-import type { ModuleDef } from "@nexo/shared/permissions";
+import type { ModuleDef } from "@hexa/shared/permissions";
 
 type Effect = "allow" | "deny";
 

@@ -3,7 +3,7 @@ export const fr = {
   common: {
     save: "Enregistrer", cancel: "Annuler", close: "Fermer", create: "Créer", back: "Retour", copy: "Copier", copied: "Copié",
     loading: "Chargement…", error: "Une erreur est survenue", active: "Actif", inactive: "Inactif", yes: "Oui", no: "Non",
-    name: "Nom", email: "Courriel", status: "Statut", actions: "Actions", search: "Rechercher", soon: "Bientôt", poweredBy: "Propulsé par Nexo",
+    name: "Nom", email: "Courriel", status: "Statut", actions: "Actions", search: "Rechercher", soon: "Bientôt", poweredBy: "Propulsé par Hexa",
     language: "Langue", logout: "Se déconnecter", admin: "Administration", home: "Accueil",
   },
   login: {
@@ -54,7 +54,7 @@ export const fr = {
     quickbooksHelp: "Synchronisation des clients, factures et fournisseurs. Nécessite une application Intuit (identifiant et secret) et l'adresse de redirection.",
     sharepointHelp: "La page Documentation parcourt ce site SharePoint par l'API Microsoft Graph, avec l'application Microsoft 365 (permission d'application Sites.ReadWrite.All requise). Qui voit quel dossier se règle dans le portail, sous Documentation.",
     tenantBranding: "Image de marque", tenantModules: "Modules activés", tenantLicense: "Licence", primary: "Couleur principale", accent: "Couleur d'accent", appName: "Nom de l'application",
-    brandingManaged: "L'image de marque est gérée depuis la console Nexo. Contactez votre fournisseur pour la modifier.", noModules: "Aucun module client activé",
+    brandingManaged: "L'image de marque est gérée depuis la console Hexa. Contactez votre fournisseur pour la modifier.", noModules: "Aucun module client activé",
     auditAt: "Date", auditUser: "Utilisateur", auditAction: "Action", auditTarget: "Cible",
   },
   errors: { forbidden: "Vous n'avez pas accès à cette page.", exists: "Ce courriel est déjà utilisé.", escalation: "Vous ne pouvez pas accorder des droits que vous n'avez pas." },

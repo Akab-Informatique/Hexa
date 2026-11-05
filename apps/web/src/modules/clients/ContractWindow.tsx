@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
-import { chargesFor } from "@nexo/shared/contractCharges";
+import { chargesFor } from "@hexa/shared/contractCharges";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fmtDate, money, todayISO, useL, useLocale } from "../../lib/l";

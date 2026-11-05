@@ -1,12 +1,12 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { hasPermission, type Audience } from "@nexo/shared/permissions";
+import { hasPermission, type Audience } from "@hexa/shared/permissions";
 import { config } from "../config.ts";
 import { pool } from "../db.ts";
 import { randomToken, sha256 } from "./crypto.ts";
 import { rightsOf } from "./access.ts";
 
-const COOKIE = "nexo_session";
+const COOKIE = "hexa_session";
 const ABSOLUTE_MS = 12 * 3_600_000;
 const IDLE_MS = 4 * 3_600_000;
 
@@ -92,7 +92,7 @@ export const sameOriginWrites: MiddlewareHandler = async (c, next) => {
       return c.json({ error: "cross-origin request refused" }, 403);
     }
     // File uploads are raw bytes; the custom header cannot be sent cross-site without a CORS preflight, so it is as safe as JSON.
-    const upload = c.req.header("x-nexo-upload") === "1" && (c.req.header("content-type") ?? "").startsWith("application/octet-stream");
+    const upload = c.req.header("x-hexa-upload") === "1" && (c.req.header("content-type") ?? "").startsWith("application/octet-stream");
     if (!upload && c.req.header("content-length") !== "0" && c.req.raw.body && !(c.req.header("content-type") ?? "").includes("json")) {
       return c.json({ error: "json required" }, 415);
     }

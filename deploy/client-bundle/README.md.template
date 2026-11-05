@@ -2,7 +2,7 @@
 
 Requirements: a Linux server with Docker + Docker Compose v2, and Nginx.
 
-1. Unzip this folder on the server (for example `/opt/nexo/{{CLIENT_ID}}`).
+1. Unzip this folder on the server (for example `/opt/hexa/{{CLIENT_ID}}`).
 2. `sh install.sh`: pulls the images and starts the app, database and updater.
 3. Copy `nginx/{{DOMAIN}}.conf` into your Nginx config, point DNS for `{{DOMAIN}}` at the server,
    issue a TLS certificate (`certbot --nginx -d {{DOMAIN}}`), then reload Nginx.
