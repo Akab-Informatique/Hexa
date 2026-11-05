@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import { useBranding } from "../lib/theme";
 import { visibleNav } from "../modules/registry";
 import { BrandMark, LanguageToggle } from "../components/ui";
+import { TimerBar } from "../modules/tasks/timer";
 
 const OPEN_KEY = "hexa.nav.open";
 const readOpen = (): string[] | null => { try { return JSON.parse(localStorage.getItem(OPEN_KEY) ?? "null"); } catch { return null; } };
@@ -100,6 +101,7 @@ export default function AppShell() {
         </div>
         <div className="mx-auto max-w-6xl p-4 lg:p-8"><Outlet /></div>
       </main>
+      <TimerBar />
     </div>
   );
 }

@@ -16,7 +16,7 @@ interface DayPlan {
   settings: { workStart: string; workEnd: string }; items: Item[]; waiting: { id: string; title: string | null }[]; blocks: Block[]; overflow: Item[];
   week: { id: string; title: string | null; private: boolean; priority: string; dueDate: string | null; clientName: string | null }[]; nowMinutes: number | null;
 }
-const COLUMNS = ["todo", "doing", "blocked", "done"] as const;
+const COLUMNS = ["todo", "taken", "doing", "blocked", "done"] as const;
 const SPLIT_KEY = "hexa.pipeline.split";
 const HOUR_KEY = "hexa.pipeline.hourPx";
 const mins = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
@@ -169,7 +169,7 @@ function Board({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <>
       <div className="mb-3 flex justify-end"><Tabs tabs={[{ key: "me", label: l("Mes tâches", "My tasks") }, { key: "all", label: l("Équipe", "Team") }]} value={scope} onChange={setScope} /></div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         {COLUMNS.map((s) => {
           const rows = (board.data ?? []).filter((t) => t.status === s);
           return (

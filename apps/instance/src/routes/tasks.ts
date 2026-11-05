@@ -19,7 +19,7 @@ const VISIBLE = `(t.visibility = 'team' or t.created_by = $1 or t.assignee_id = 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable();
 const TaskInput = z.object({
   title: z.string().min(1).max(300), description: z.string().max(20000).optional(),
-  status: z.enum(["todo", "doing", "blocked", "done"]).optional(), priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+  status: z.enum(["todo", "taken", "doing", "blocked", "done"]).optional(), priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   assigneeId: z.string().uuid().nullable().optional(), clientId: z.string().uuid().nullable().optional(),
   startDate: Day.optional(), dueDate: Day.optional(), estimateMinutes: z.number().int().min(0).max(100000).nullable().optional(),
   visibility: z.enum(["team", "private", "selected"]).optional(), parentId: z.string().uuid().nullable().optional(),
@@ -54,7 +54,7 @@ taskRoutes.get("/", requirePermission(...VIEW), async (c) => {
   else if (assignee === "none") where.push("t.assignee_id is null");
   else if (assignee && isUuid(assignee)) where.push(`t.assignee_id = ${arg(assignee)}`);
   if (q.status === "open") where.push("t.status <> 'done'");
-  else if (q.status && ["todo", "doing", "blocked", "done"].includes(q.status)) where.push(`t.status = ${arg(q.status)}`);
+  else if (q.status && ["todo", "taken", "doing", "blocked", "done"].includes(q.status)) where.push(`t.status = ${arg(q.status)}`);
   if (q.client && isUuid(q.client)) where.push(`t.client_id = ${arg(q.client)}`);
   if (q.priority && ["low", "normal", "high", "urgent"].includes(q.priority)) where.push(`t.priority = ${arg(q.priority)}`);
   if (q.parent === "none") where.push("t.parent_id is null");
@@ -165,6 +165,14 @@ taskRoutes.patch("/:id", requirePermission(...EDIT), async (c) => {
   if (d.viewerIds) {
     await pool.query("delete from task_viewers where task_id = $1", [id]);
     for (const v of d.viewerIds) await pool.query("insert into task_viewers values ($1, $2) on conflict do nothing", [id, v]);
+  }
+
+  // Completing a task ends any timer still running on it; the time waits to be logged (nothing is lost, nothing is billed unasked).
+  if (closing) {
+    await pool.query(
+      `with gone as (delete from task_timers where task_id = $1 returning user_id, started_at)
+       insert into task_time_segments (task_id, user_id, started_at, minutes)
+       select $1, user_id, started_at, greatest(1, ceil(extract(epoch from now() - started_at) / 60))::int from gone`, [id]);
   }
 
   // Recurring task: completing it creates the next occurrence (checklist reset, same assignee).

@@ -18,6 +18,7 @@ import { commandRoutes } from "./routes/command.ts";
 import { accountingRoutes } from "./routes/accounting.ts";
 import { hrRoutes } from "./routes/hr.ts";
 import { portalAdminRoutes, portalRoutes } from "./routes/portal.ts";
+import { taskTimerRoutes } from "./routes/taskTimer.ts";
 import { docsRoutes } from "./routes/docs.ts";
 import { timeRoutes } from "./routes/time.ts";
 import { expenseRoutes } from "./routes/expenses.ts";
@@ -84,6 +85,7 @@ export function buildApp(): Hono<Env> {
   app.route("/api/clients", clientRoutes);
   app.route("/api/pipeline", pipelineRoutes);
   app.route("/api/microsoft", microsoftRoutes);
+  app.route("/api/tasks", taskTimerRoutes);
   app.route("/api/tasks", taskRoutes);
   app.route("/api/team/meeting", meetingRoutes);
   app.route("/api/team", teamRoutes);

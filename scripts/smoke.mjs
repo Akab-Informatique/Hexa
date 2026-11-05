@@ -675,5 +675,50 @@ ok("an ordinary staff user cannot manage portal access", await (async () => {
   return (await call("POST", `/api/clients/${poB}/portal/${poKB}`, {}, l2.cookie)).status === 403;
 })());
 
+// ---- Task timer, statuses and priorities ----
+const tmClient = (await post("/api/clients", { name: "SMOKE Timer Client" })).body.id;
+const tmA = (await post("/api/tasks", { title: "SMOKE timer A", clientId: tmClient, priority: "high" })).body.id;
+const tmB = (await post("/api/tasks", { title: "SMOKE timer B", clientId: tmClient })).body.id;
+const tmNo = (await post("/api/tasks", { title: "SMOKE timer no client" })).body.id;
+ok("the five statuses are accepted", await (async () => { for (const st of ["todo", "taken", "doing", "blocked", "done"]) { if ((await call("PATCH", `/api/tasks/${tmNo}`, { status: st })).status !== 200) return false; } return (await call("GET", `/api/tasks/${tmNo}`)).body.status === "done"; })());
+ok("an unknown status is refused", (await call("PATCH", `/api/tasks/${tmNo}`, { status: "waiting" })).status === 400);
+ok("priority is kept", (await call("GET", `/api/tasks/${tmA}`)).body.priority === "high");
+ok("no timer to start with", (await call("GET", "/api/tasks/timer")).body.running === null);
+const tmStart = await post("/api/tasks/timer/start", { taskId: tmA });
+ok("starting the timer works and takes a new task over", tmStart.status === 201 && tmStart.body.running.taskId === tmA && (await call("GET", `/api/tasks/${tmA}`)).body.status === "doing");
+ok("starting it again on the same task changes nothing", (await post("/api/tasks/timer/start", { taskId: tmA })).body.already === true);
+ok("a second timer is refused while one runs", (await post("/api/tasks/timer/start", { taskId: tmB })).body?.error === "timer_running");
+ok("the timer reports itself", (await call("GET", "/api/tasks/timer")).body.running.title === "SMOKE timer A");
+await new Promise((r) => setTimeout(r, 1200));
+const tmStop = (await post("/api/tasks/timer/stop", {})).body;
+ok("stopping gives a pending stretch of at least a minute", tmStop.segmentId && tmStop.minutes >= 1 && tmStop.clientId === tmClient);
+ok("the timer is gone and the stretch waits", (await call("GET", "/api/tasks/timer")).body.running === null && (await call("GET", `/api/tasks/${tmA}/segments`)).body.length === 1);
+ok("logging needs a description", (await post(`/api/tasks/segments/${tmStop.segmentId}/log`, { description: "  " })).status === 400);
+const tmLog = await post(`/api/tasks/segments/${tmStop.segmentId}/log`, { description: "Revue des relevés bancaires", minutes: 15 });
+const tmWeek = (await call("GET", "/api/time/week")).body;
+const tmEntry = tmWeek.entries.find((e) => e.id === tmLog.body.entryId);
+ok("the stretch becomes a billable time entry on the task and client", tmLog.status === 201 && tmEntry && tmEntry.minutes === 15 && tmEntry.taskId === tmA && tmEntry.clientId === tmClient && tmEntry.billable === true && tmEntry.description === "Revue des relevés bancaires" && tmEntry.typeKey === "work", JSON.stringify(tmEntry));
+ok("it cannot be logged twice", (await post(`/api/tasks/segments/${tmStop.segmentId}/log`, { description: "again" })).status === 404 && (await call("GET", `/api/tasks/${tmA}/segments`)).body.length === 0);
+
+// Later, and dropped
+await post("/api/tasks/timer/start", { taskId: tmB });
+const tmStop2 = (await post("/api/tasks/timer/stop", {})).body;
+ok("time can wait until later", (await call("GET", "/api/tasks/timer")).body.pendingCount >= 1 && (await call("GET", "/api/tasks/segments/pending")).body.some((p) => p.id === tmStop2.segmentId && p.title === "SMOKE timer B"));
+ok("a stretch can be dropped", (await call("DELETE", `/api/tasks/segments/${tmStop2.segmentId}`)).status === 200 && (await call("GET", `/api/tasks/${tmB}/segments`)).body.length === 0);
+
+// Closing a task
+await post("/api/tasks/timer/start", { taskId: tmB });
+ok("completing a task ends its running timer and keeps the time pending", (await call("PATCH", `/api/tasks/${tmB}`, { status: "done" })).status === 200 && (await call("GET", "/api/tasks/timer")).body.running === null && (await call("GET", `/api/tasks/${tmB}/segments`)).body.length === 1);
+ok("closing without time drops what is pending", (await post(`/api/tasks/${tmB}/segments/discard`, {})).body.discarded === 1 && (await call("GET", `/api/tasks/${tmB}/segments`)).body.length === 0);
+const tmC = (await post("/api/tasks", { title: "SMOKE timer no client C" })).body.id;
+await post("/api/tasks/timer/start", { taskId: tmC });
+const tmStopC = (await post("/api/tasks/timer/stop", {})).body;
+const tmLogC = await post(`/api/tasks/segments/${tmStopC.segmentId}/log`, { description: "Interne", minutes: 5, billable: true });
+const tmEntryC = (await call("GET", "/api/time/week")).body.entries.find((e) => e.id === tmLogC.body.entryId);
+ok("time on a task with no client is never billable", tmLogC.status === 201 && tmEntryC.billable === false && tmEntryC.clientId === null);
+await post("/api/tasks/timer/start", { taskId: tmC });
+ok("a timer thrown away leaves nothing", (await post("/api/tasks/timer/cancel", {})).status === 200 && (await call("GET", "/api/tasks/timer")).body.running === null && (await call("GET", `/api/tasks/${tmC}/segments`)).body.length === 0);
+ok("a client user has no timer", [401, 403].includes((await call("GET", "/api/tasks/timer", undefined, poCc)).status) && [401, 403].includes((await post("/api/tasks/timer/start", { taskId: tmA }, poCc)).status));
+
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");
 process.exit(failures ? 1 : 0);

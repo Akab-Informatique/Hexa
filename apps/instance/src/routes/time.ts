@@ -15,7 +15,7 @@ import { auth, body, camelRows, can } from "./util.ts";
 export const timeRoutes = new Hono<Env>();
 timeRoutes.use("*", requirePermission("mytools.timesheet.use", "mytools.timesheet.approve", "mytools.timesheet.manage"));
 
-class Fail extends Error { constructor(public status: number, public code: string) { super(code); } }
+export class Fail extends Error { constructor(public status: number, public code: string) { super(code); } }
 timeRoutes.onError((e, c) => {
   if (e instanceof Fail) return c.json({ error: e.code }, e.status as 400);
   throw e;
@@ -176,7 +176,7 @@ export async function balancesOf(userId: string) {
 }
 
 // ------------------------------------------------------------------ Writes
-const EntryInput = z.object({
+export const EntryInput = z.object({
   userId: z.string().uuid().optional(), workDate: Day, typeKey: z.string().min(1).max(40),
   minutes: z.number().int().min(1).max(1440).optional(), start: Clock.optional(), end: Clock.optional(), bankMinutes: z.number().int().min(0).max(1440).optional(),
   clientId: z.string().uuid().nullable().optional(), taskId: z.string().uuid().nullable().optional(), description: z.string().max(1000).optional(),
@@ -232,8 +232,8 @@ async function afterChange(userId: string, start: string, by: string) {
   void by;
 }
 
-timeRoutes.post("/entries", async (c) => {
-  const d = await body(c, EntryInput);
+/** Adds one entry to a timesheet (also used by the task timer). */
+export async function addEntry(c: Ctx, d: z.infer<typeof EntryInput>): Promise<{ id: string; negative: string[] }> {
   const userId = target(c, d.userId);
   const start = mondayOf(d.workDate);
   await assertEditable(c, userId, start);
@@ -248,8 +248,10 @@ timeRoutes.post("/entries", async (c) => {
   catch (e) { await pool.query("delete from timesheet_entries where id = $1", [id]); throw e; }
   await afterChange(userId, start, auth(c).user.id);
   if (userId !== auth(c).user.id) await audit("timesheet.entry_added_for", { userId: auth(c).user.id, target: userId });
-  return c.json({ id, negative }, 201);
-});
+  return { id, negative };
+}
+
+timeRoutes.post("/entries", async (c) => c.json(await addEntry(c, await body(c, EntryInput)), 201));
 
 timeRoutes.patch("/entries/:id", async (c) => {
   const cur = (await pool.query("select e.*, t.kind from timesheet_entries e join time_types t on t.key = e.type_key where e.id = $1", [c.req.param("id")])).rows[0];

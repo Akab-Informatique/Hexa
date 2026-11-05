@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Clock, Plus, Square, Trash2 } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fmtDate, useL, useLocale } from "../../lib/l";
 import { Chip, errMsg, FormFields, useUsers, type FieldDef } from "../../components/kit";
 import { Modal } from "../../components/ui";
 import type { TaskRow } from "./TasksPage";
+import { autoStartPref, clock, LogTimeDialog, minLabel, setAutoStartPref, useElapsed, useTimerActions, useTimerState, type Stopped } from "./timer";
 
 interface Full extends TaskRow {
   description: string; startDate: string | null; estimateMinutes: number | null; visibility: string; waitsForId: string | null; waitsForTitle: string | null;
@@ -33,6 +34,28 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
   const [newNote, setNewNote] = useState("");
   const [viewerIds, setViewerIds] = useState<string[] | null>(null);
 
+  // The timer: starts by itself when a task is opened (unless switched off), keeps running when this window is closed.
+  const timer = useTimerState();
+  const acts = useTimerActions();
+  const [auto, setAuto] = useState(autoStartPref);
+  const [log, setLog] = useState<Stopped | null>(null);
+  const [closing, setClosing] = useState(false);
+  const closeOk = useRef(false);
+  const tried = useRef(false);
+  const segs = useQuery({ queryKey: ["task-segments", taskId], queryFn: () => api<{ id: string; minutes: number; startedAt: string }[]>(`/api/tasks/${taskId}/segments`), enabled: Boolean(taskId) && timer.enabled });
+  const runHere = Boolean(taskId) && timer.state?.running?.taskId === taskId;
+  const runElsewhere = Boolean(timer.state?.running) && !runHere;
+  const elapsed = useElapsed(runHere ? timer.state?.running?.startedAt : undefined, timer.skew);
+  const pendingHere = segs.data ?? [];
+  useEffect(() => {
+    if (tried.current || !taskId || !detail.data || !timer.loaded || !timer.enabled || !auto) return;
+    tried.current = true;
+    const x = detail.data;
+    const mine = can("tasks.manage", "command.pipeline.manage") || x.createdBy === me.user?.id || x.assigneeId === me.user?.id;
+    if (!mine || x.status === "done" || timer.state?.running) return;
+    void acts.start(taskId).catch(() => undefined);
+  }, [detail.data, timer.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const t = detail.data;
   if (taskId && !t) return null;
   const form = values ?? (t
@@ -45,7 +68,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
   const fields: FieldDef[] = [
     { name: "title", label: ["Titre", "Title"], required: true, span: 2 },
     { name: "description", label: ["Description", "Description"], type: "textarea" },
-    { name: "status", label: ["Statut", "Status"], type: "select", required: true, options: [{ value: "todo", label: ["À faire", "To do"] }, { value: "doing", label: ["En cours", "Doing"] }, { value: "blocked", label: ["Bloquée", "Blocked"] }, { value: "done", label: ["Terminée", "Done"] }] },
+    { name: "status", label: ["Statut", "Status"], type: "select", required: true, options: [{ value: "todo", label: ["Nouvelle", "New"] }, { value: "taken", label: ["Prise en charge", "Taken over"] }, { value: "doing", label: ["En cours", "In progress"] }, { value: "blocked", label: ["En attente du client", "Waiting for customer"] }, { value: "done", label: ["Terminée", "Completed"] }] },
     { name: "priority", label: ["Priorité", "Priority"], type: "select", required: true, options: [{ value: "low", label: ["Basse", "Low"] }, { value: "normal", label: ["Normale", "Normal"] }, { value: "high", label: ["Haute", "High"] }, { value: "urgent", label: ["Urgente", "Urgent"] }] },
     { name: "assigneeId", label: ["Assignée à", "Assigned to"], type: "user" }, { name: "clientId", label: ["Client", "Client"], type: "client" },
     { name: "kind", label: ["Type de tâche", "Kind of task"], type: "select", required: true, options: [{ value: "normal", label: ["Normale", "Normal"] }, { value: "continuous", label: ["Continue (rappel tous les n jours)", "Continuous (reminder every n days)"] }, { value: "daily", label: ["Quotidienne (recommence chaque jour)", "Daily (starts over each day)"] }] },
@@ -64,8 +87,10 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
   ];
 
   const save = async () => {
-    setBusy(true); setError("");
     const v = form as Record<string, unknown>;
+    // Completing a task with time not yet entered: ask what to do with it.
+    if (taskId && t && v.status === "done" && t.status !== "done" && timer.enabled && (runHere || pendingHere.length > 0) && !closeOk.current) { setClosing(true); return; }
+    setBusy(true); setError("");
     const body = {
       title: v.title, description: v.description ?? "", status: v.status, priority: v.priority, visibility: v.visibility,
       kind: v.kind ?? "normal", startTime: v.startTime || null, dueTime: v.dueTime || null, remindEveryDays: v.kind === "continuous" && v.remindEveryDays ? Number(v.remindEveryDays) : null,
@@ -86,6 +111,40 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
   return (
     <Modal title={taskId ? l("Tâche", "Task") : l("Nouvelle tâche", "New task")} onClose={onClose} wide>
       {t?.isWaiting && <p className="mb-3 text-sm text-warn">⏳ {l("En attente de", "Waiting for")}: {t.waitsForTitle}</p>}
+      {taskId && timer.enabled && t && (
+        <div className="glass-flat mb-4 flex flex-wrap items-center gap-3 p-3 text-sm">
+          <Clock size={16} className="text-muted" />
+          {runHere ? (
+            <>
+              <span className="font-mono text-lg tabular-nums">{clock(elapsed)}</span>
+              <span className="text-xs text-muted">{l("Le chrono continue si vous réduisez ou fermez la fenêtre.", "The timer keeps running if you minimize or close this window.")}</span>
+              <span className="flex-1" />
+              <button className="btn" onClick={onClose}>{l("Réduire", "Minimize")}</button>
+              <button className="btn btn-danger" onClick={() => void act(async () => { setLog(await acts.stop()); })}><Square size={13} fill="currentColor" />{l("Arrêter", "Stop")}</button>
+            </>
+          ) : runElsewhere ? (
+            <>
+              <span className="text-muted">{l("Chrono en cours sur", "Timer running on")} <b>{timer.state!.running!.title}</b></span><span className="flex-1" />
+              {editable && <button className="btn" onClick={() => void act(async () => { await acts.stop(); await acts.start(taskId!); })}>{l("Basculer ici", "Switch here")}</button>}
+            </>
+          ) : (
+            <>
+              <span className="text-muted">{l("Chrono arrêté", "Timer stopped")}</span><span className="flex-1" />
+              {editable && t.status !== "done" && <button className="btn btn-primary" onClick={() => void act(async () => { await acts.start(taskId!); })}>{l("Démarrer le chrono", "Start the timer")}</button>}
+            </>
+          )}
+          <label className="flex w-full items-center gap-2 text-xs text-muted"><input type="checkbox" className="h-3.5 w-3.5 accent-[var(--brand)]" checked={auto} onChange={(e) => { setAuto(e.target.checked); setAutoStartPref(e.target.checked); }} />{l("Démarrer le chrono à l'ouverture d'une tâche", "Start the timer when I open a task")}</label>
+        </div>
+      )}
+      {pendingHere.length > 0 && (
+        <div className="glass-flat mb-4 p-3 text-sm">
+          <div className="mb-2 font-medium">{l("Temps à saisir", "Time to log")}</div>
+          {pendingHere.map((sg) => (
+            <div key={sg.id} className="mb-1 flex items-center gap-2"><span>{minLabel(sg.minutes)} · {fmtDate(sg.startedAt, loc)}</span><span className="flex-1" />
+              <button className="btn !py-1 text-xs" onClick={() => setLog({ segmentId: sg.id, minutes: sg.minutes, title: t!.title, clientId: t!.clientId, clientName: t!.clientName })}>{l("Saisir", "Log")}</button>
+              <button className="btn btn-danger !py-1 text-xs" onClick={() => void act(async () => { await api(`/api/tasks/segments/${sg.id}`, { method: "DELETE" }); await acts.refresh(); })}>{l("Ignorer", "Drop")}</button></div>))}
+        </div>
+      )}
       <fieldset disabled={!editable} className="min-w-0 border-0 p-0">
         <FormFields fields={fields} values={form} onChange={setValues} />
         {form.visibility === "selected" && (
@@ -138,6 +197,18 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
         {t && editable ? <button className="btn btn-danger" onClick={() => { if (window.confirm(l("Supprimer cette tâche ?", "Delete this task?"))) void api(`/api/tasks/${taskId}`, { method: "DELETE" }).then(async () => { await refresh(); onClose(); }); }}><Trash2 size={15} />{l("Supprimer", "Delete")}</button> : <span />}
         <div className="flex gap-2"><button className="btn" onClick={onClose}>{l("Fermer", "Close")}</button>{editable && <button className="btn btn-primary" disabled={busy || !String(form.title ?? "").trim()} onClick={() => void save()}>{l("Enregistrer", "Save")}</button>}</div>
       </div>
+      {log && <LogTimeDialog seg={log} onClose={() => { setLog(null); void acts.refresh(); }} />}
+      {closing && (
+        <Modal title={l("Du temps n'est pas saisi", "Some time is not logged")} onClose={() => setClosing(false)}>
+          <p className="mb-4 text-sm text-muted">{runHere ? l("Le chrono tourne encore sur cette tâche. ", "The timer is still running on this task. ") : ""}{pendingHere.length > 0 ? l(`Il reste ${minLabel(pendingHere.reduce((a, x) => a + x.minutes, 0))} à saisir.`, `${minLabel(pendingHere.reduce((a, x) => a + x.minutes, 0))} left to log.`) : ""}</p>
+          <div className="flex flex-col gap-2">
+            <button className="btn btn-primary" onClick={() => void act(async () => { setClosing(false); if (runHere) setLog(await acts.stop()); else if (pendingHere[0]) setLog({ segmentId: pendingHere[0].id, minutes: pendingHere[0].minutes, title: t!.title, clientId: t!.clientId, clientName: t!.clientName }); })}>{l("Saisir le temps maintenant", "Log the time now")}</button>
+            <button className="btn" onClick={() => void act(async () => { if (runHere) await acts.stop(); closeOk.current = true; setClosing(false); await save(); })}>{l("Terminer et saisir le temps plus tard", "Complete and log the time later")}</button>
+            <button className="btn btn-danger" onClick={() => void act(async () => { if (runHere) await acts.cancel(); await api(`/api/tasks/${taskId}/segments/discard`, { body: {} }); await acts.refresh(); closeOk.current = true; setClosing(false); await save(); })}>{l("Terminer sans saisir de temps", "Complete without logging time")}</button>
+            <button className="btn" onClick={() => setClosing(false)}>{l("Annuler", "Cancel")}</button>
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }

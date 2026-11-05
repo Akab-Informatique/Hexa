@@ -10,12 +10,12 @@ import { PageHeader } from "../../components/ui";
 import TaskDialog from "./TaskDialog";
 
 export interface TaskRow {
-  id: string; title: string; status: "todo" | "doing" | "blocked" | "done"; priority: "low" | "normal" | "high" | "urgent"; assigneeId: string | null; assigneeName: string | null;
+  id: string; title: string; status: "todo" | "taken" | "doing" | "blocked" | "done"; priority: "low" | "normal" | "high" | "urgent"; assigneeId: string | null; assigneeName: string | null;
   clientId: string | null; clientName: string | null; dueDate: string | null; checklistTotal: number; checklistDone: number; subtaskTotal: number; isWaiting: boolean; visibility: string; recurrence: unknown;
 }
 
 export const priorityTone = (p: string) => (p === "urgent" ? "danger" : p === "high" ? "warn" : "off") as "danger" | "warn" | "off";
-export const statusLabel = (l: ReturnType<typeof useL>, s: string) => ({ todo: l("À faire", "To do"), doing: l("En cours", "Doing"), blocked: l("Bloquée", "Blocked"), done: l("Terminée", "Done") }[s] ?? s);
+export const statusLabel = (l: ReturnType<typeof useL>, s: string) => ({ todo: l("Nouvelle", "New"), taken: l("Prise en charge", "Taken over"), doing: l("En cours", "In progress"), blocked: l("En attente du client", "Waiting for customer"), done: l("Terminée", "Completed") }[s] ?? s);
 export const priorityLabel = (l: ReturnType<typeof useL>, p: string) => ({ low: l("Basse", "Low"), normal: l("Normale", "Normal"), high: l("Haute", "High"), urgent: l("Urgente", "Urgent") }[p] ?? p);
 
 /** The big view of all tasks: filters on top, one row per task, click to open the editor. */
@@ -49,7 +49,7 @@ export default function TasksPage() {
       <Toolbar>
         <div className="relative min-w-[200px] flex-1"><Search size={15} className="pointer-events-none absolute left-3 top-3 text-muted" /><input className="input !pl-9" placeholder={l("Rechercher…", "Search…")} value={f.q} onChange={(e) => set("q", e.target.value)} /></div>
         <select className="input !w-auto" value={f.status} onChange={(e) => set("status", e.target.value)} aria-label="status">
-          <option value="open">{l("Ouvertes", "Open")}</option><option value="all">{l("Toutes", "All")}</option><option value="todo">{l("À faire", "To do")}</option><option value="doing">{l("En cours", "Doing")}</option><option value="blocked">{l("Bloquées", "Blocked")}</option><option value="done">{l("Terminées", "Done")}</option></select>
+          <option value="open">{l("Ouvertes", "Open")}</option><option value="all">{l("Toutes", "All")}</option><option value="todo">{l("Nouvelles", "New")}</option><option value="taken">{l("Prises en charge", "Taken over")}</option><option value="doing">{l("En cours", "In progress")}</option><option value="blocked">{l("En attente du client", "Waiting for customer")}</option><option value="done">{l("Terminées", "Done")}</option></select>
         <select className="input !w-auto" value={f.assignee} onChange={(e) => set("assignee", e.target.value)} aria-label="assignee"><option value="">{l("Tous", "Everyone")}</option><option value="me">{l("Moi", "Me")}</option><option value="none">{l("Non assignées", "Unassigned")}</option>{users.data?.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
         <select className="input !w-auto" value={f.client} onChange={(e) => set("client", e.target.value)} aria-label="client"><option value="">{l("Tous les clients", "All clients")}</option>{clients.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
         <select className="input !w-auto" value={f.priority} onChange={(e) => set("priority", e.target.value)} aria-label="priority"><option value="">{l("Priorité", "Priority")}</option><option value="urgent">{l("Urgente", "Urgent")}</option><option value="high">{l("Haute", "High")}</option><option value="normal">{l("Normale", "Normal")}</option><option value="low">{l("Basse", "Low")}</option></select>
