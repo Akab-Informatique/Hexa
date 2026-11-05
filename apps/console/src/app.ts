@@ -33,6 +33,8 @@ const ClientInput = z.object({
   expiresAt: z.string().datetime().nullable().default(null),
   appPort: z.number().int().min(1024).max(65535).default(3000),
   notes: z.string().default(""),
+  /** Demo data the instance seeds on its first start (for demo tenants only). */
+  seedProfile: z.enum(["none", "accounting", "bookkeeping", "tax"]).default("none"),
 });
 const ClientPatch = ClientInput.omit({ id: true }).partial().extend({ active: z.boolean().optional() });
 
@@ -41,7 +43,7 @@ const publicClient = (r: Row) => ({
   id: r.id, name: r.name, domain: r.domain, adminEmail: r.admin_email, plan: r.plan, maxUsers: r.max_users, modules: r.modules,
   flags: r.flags, branding: r.branding, pinnedVersion: r.pinned_version, channel: r.channel,
   active: r.active, expiresAt: r.expires_at, appPort: r.app_port, notes: r.notes, createdAt: r.created_at,
-  lastSeenAt: r.last_seen_at, lastVersion: r.last_version, lastHealth: r.last_health, lastUserCount: r.last_user_count,
+  lastSeenAt: r.last_seen_at, lastVersion: r.last_version, lastHealth: r.last_health, lastUserCount: r.last_user_count, seedProfile: r.seed_profile,
 });
 
 export function buildApp(pool: pg.Pool): Hono {
@@ -126,10 +128,10 @@ export function buildApp(pool: pg.Pool): Hono {
     try {
       await pool.query(
         `insert into clients (id,name,domain,plan,max_users,modules,flags,branding,pinned_version,channel,
-           license_key_enc,secrets_enc,expires_at,app_port,notes,admin_email)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+           license_key_enc,secrets_enc,expires_at,app_port,notes,admin_email,seed_profile)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
         [d.id, d.name, d.domain, d.plan, d.maxUsers, d.modules, d.flags, d.branding, d.pinnedVersion, d.channel,
-         encrypt(randomToken(32), secret), encrypt(JSON.stringify(newSecrets()), secret), d.expiresAt, d.appPort, d.notes, d.adminEmail],
+         encrypt(randomToken(32), secret), encrypt(JSON.stringify(newSecrets()), secret), d.expiresAt, d.appPort, d.notes, d.adminEmail, d.seedProfile],
       );
     } catch (err) {
       if ((err as { code?: string }).code === "23505") return c.json({ error: "client id already exists" }, 409);
@@ -145,7 +147,7 @@ export function buildApp(pool: pg.Pool): Hono {
     const map: Record<string, string> = {
       name: "name", domain: "domain", adminEmail: "admin_email", plan: "plan", maxUsers: "max_users", modules: "modules", flags: "flags",
       branding: "branding", pinnedVersion: "pinned_version", channel: "channel", expiresAt: "expires_at",
-      appPort: "app_port", notes: "notes", active: "active",
+      appPort: "app_port", notes: "notes", active: "active", seedProfile: "seed_profile",
     };
     const sets: string[] = [];
     const values: unknown[] = [c.req.param("id")];
@@ -175,7 +177,7 @@ export function buildApp(pool: pg.Pool): Hono {
       {
         id: r.id, name: r.name, domain: r.domain, pinnedVersion: r.pinned_version, appPort: r.app_port,
         licenseKey: decrypt(r.license_key_enc, secret), branding: { appName: r.name, ...r.branding },
-        adminEmail: r.admin_email, initialAdminPassword: derive(secret, "admin", r.id, 20), appSecret: derive(secret, "app", r.id, 48),
+        adminEmail: r.admin_email, seedProfile: r.seed_profile, initialAdminPassword: derive(secret, "admin", r.id, 20), appSecret: derive(secret, "app", r.id, 48),
       },
       {
         templatesDir: config.bundleTemplatesDir, consoleUrl: config.publicUrl, instanceImage: config.instanceImage,

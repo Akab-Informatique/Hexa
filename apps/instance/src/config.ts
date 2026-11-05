@@ -37,6 +37,8 @@ export const config = {
   /** First-run master administrator (created only when there are no users yet). */
   initialAdminEmail: e.INITIAL_ADMIN_EMAIL ?? "",
   initialAdminPassword: e.INITIAL_ADMIN_PASSWORD ?? "",
+  /** Demo data seeded once on a brand-new install: none | accounting | bookkeeping | tax. */
+  seedProfile: e.SEED_PROFILE ?? "none",
   webDir: e.WEB_DIR ?? "apps/web/dist",
   /** Extra browser origins allowed to call the API (the Vite dev server only). */
   devOrigins: (e.DEV_ORIGINS ?? "").split(",").filter(Boolean),

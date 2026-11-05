@@ -14,6 +14,8 @@ export interface BundleClient {
   /** First master administrator of the instance (must change the password at first login). */
   adminEmail: string;
   initialAdminPassword: string;
+  /** Demo data profile seeded on the first start ("none" = empty). */
+  seedProfile?: string;
   /** Encrypts the instance's TOTP secrets and integration credentials. */
   appSecret: string;
 }
@@ -59,6 +61,7 @@ export function buildBundle(client: BundleClient, opts: BundleOptions): Uint8Arr
     INITIAL_ADMIN_EMAIL: client.adminEmail,
     INITIAL_ADMIN_PASSWORD: client.initialAdminPassword,
     APP_SECRET: client.appSecret,
+    SEED_PROFILE: client.seedProfile ?? "none",
     GHCR_USER: opts.ghcrUser,
     GHCR_TOKEN: opts.ghcrToken,
     // Single quotes wrap this value in .env, so escape any inside the JSON.

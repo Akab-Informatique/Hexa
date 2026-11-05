@@ -1,6 +1,7 @@
 import { config } from "./config.ts";
 import { pool } from "./db.ts";
 import { audit, seedSystemGroups } from "./auth/access.ts";
+import { seedDemo } from "./seed/demo.ts";
 import { hashPassword, MIN_PASSWORD } from "./auth/crypto.ts";
 
 /** Seeds system groups, and on a brand-new install creates the first master administrator. */
@@ -20,6 +21,7 @@ export async function bootstrap(): Promise<void> {
   );
   const group = await pool.query("select id from groups where slug = 'administrators'");
   await pool.query("insert into user_groups values ($1, $2)", [r.rows[0].id, group.rows[0].id]);
+  if (config.seedProfile && config.seedProfile !== "none") await seedDemo(config.seedProfile, r.rows[0].id);
   await audit("bootstrap.admin_created", { target: email });
   console.log(`[bootstrap] created master administrator ${email} (must change password at first login)`);
 }
