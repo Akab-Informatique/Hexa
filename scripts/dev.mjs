@@ -57,10 +57,11 @@ await waitFor(`http://127.0.0.1:${CONSOLE_PORT}/api/ping`, "console");
 await api("/api/releases", { version: "0.1.0", notes: "First release" });
 await api("/api/releases", { version: "0.2.0", notes: "Demo update" });
 await api("/api/clients", {
-  id: "demo", name: "Acme Corp", domain: "portal.acme.test", adminEmail: "admin@acme.test", seedProfile: "accounting", pinnedVersion: "0.2.0",
+  id: "demo", name: "A Bezeau", domain: "portal.abezeau.test", adminEmail: "admin@abezeau.test", seedProfile: "accounting", pinnedVersion: "0.2.0",
   maxUsers: 25, modules: ["example-hello"],
-  // Deliberately not Nexo's purple/blue: this is how a different firm's theme looks.
-  branding: { appName: "Acme Portal", primaryColor: "#0d9488", accentColor: "#f59e0b" },
+  // Deliberately not Nexo's purple/blue: this is how a different firm's theme looks. For a real firm the client
+  // chooses these; here they follow abezeau.com (burgundy and warm sand) and its white logo, for testing only.
+  branding: { appName: "A Bezeau", primaryColor: "#942e2d", accentColor: "#c8a47e", logoUrl: "https://abezeau.com/wp-content/uploads/sites/103/2026/02/Components.png" },
 });
 
 // Use the real generated bundle to get this client's credentials (exercises the bundle generator too).
@@ -87,7 +88,7 @@ run("instance", "apps/instance/src/index.ts", {
   INITIAL_ADMIN_PASSWORD: get("INITIAL_ADMIN_PASSWORD"),
   APP_SECRET: get("APP_SECRET"),
   DEV_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173",
-  SEED_PROFILE: "accounting", // demo data for the Acme demo tenant (the console puts this in real bundles)
+  SEED_PROFILE: "accounting", // demo data for the A Bezeau demo tenant (the console puts this in real bundles)
   SHAREPOINT_MOCK: "1", // local stand-in for SharePoint (never honored in production)
 });
 await waitFor(`http://127.0.0.1:${INSTANCE_PORT}/api/health`, "instance");

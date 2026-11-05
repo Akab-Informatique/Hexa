@@ -49,7 +49,7 @@ export function LanguageToggle({ onChange }: { onChange?: (l: "fr" | "en") => vo
 
 export function BrandMark({ name, logoUrl, size = 36 }: { name: string; logoUrl?: string; size?: number }) {
   return logoUrl ? (
-    <img src={logoUrl} alt={name} style={{ height: size, maxWidth: size * 4 }} className="object-contain" />
+    <img src={logoUrl} alt={name} style={{ height: size * 1.5, maxWidth: size * 5 }} className="object-contain" />
   ) : (
     <div className="grid place-items-center rounded-xl font-bold text-white" style={{ width: size, height: size, background: "linear-gradient(135deg, var(--brand), var(--brand-2))", boxShadow: "0 8px 24px -8px var(--glow)" }}>
       {name.slice(0, 1).toUpperCase()}
