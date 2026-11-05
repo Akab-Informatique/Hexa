@@ -23,6 +23,8 @@ import { expenseRoutes } from "./routes/expenses.ts";
 import { timeAdminRoutes } from "./routes/timeAdmin.ts";
 import { serviceRoutes } from "./routes/services.ts";
 import { invoicingRoutes } from "./routes/invoicing.ts";
+import { meetingRoutes } from "./routes/meeting.ts";
+import { pipelineRoutes } from "./routes/pipeline.ts";
 import { classRoutes } from "./routes/classes.ts";
 import { directoryRoutes } from "./routes/directory.ts";
 import { integrationRoutes } from "./routes/integrations.ts";
@@ -73,7 +75,9 @@ export function buildApp(): Hono<Env> {
 
   // Business modules. Each route file enforces its own permissions (see packages/shared/src/permissions.ts).
   app.route("/api/clients", clientRoutes);
+  app.route("/api/pipeline", pipelineRoutes);
   app.route("/api/tasks", taskRoutes);
+  app.route("/api/team/meeting", meetingRoutes);
   app.route("/api/team", teamRoutes);
   app.route("/api/my", myToolsRoutes);
   app.route("/api/command", commandRoutes);

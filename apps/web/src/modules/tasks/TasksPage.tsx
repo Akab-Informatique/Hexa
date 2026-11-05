@@ -27,7 +27,8 @@ export default function TasksPage() {
   const users = useUsers();
   const clients = useClients();
   const [params, setParams] = useSearchParams();
-  const [f, setF] = useState({ q: "", assignee: "", status: "open", client: "", priority: "", due: "" });
+  // Links (the meeting gauges, a person's count) arrive with their filters in the address.
+  const [f, setF] = useState({ q: "", assignee: params.get("assignee") ?? "", status: params.get("status") ?? "open", client: params.get("client") ?? "", priority: "", due: params.get("due") ?? "" });
   const [dialog, setDialog] = useState<{ id: string | null } | null>(null);
   const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
 
@@ -52,7 +53,7 @@ export default function TasksPage() {
         <select className="input !w-auto" value={f.assignee} onChange={(e) => set("assignee", e.target.value)} aria-label="assignee"><option value="">{l("Tous", "Everyone")}</option><option value="me">{l("Moi", "Me")}</option><option value="none">{l("Non assignées", "Unassigned")}</option>{users.data?.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
         <select className="input !w-auto" value={f.client} onChange={(e) => set("client", e.target.value)} aria-label="client"><option value="">{l("Tous les clients", "All clients")}</option>{clients.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
         <select className="input !w-auto" value={f.priority} onChange={(e) => set("priority", e.target.value)} aria-label="priority"><option value="">{l("Priorité", "Priority")}</option><option value="urgent">{l("Urgente", "Urgent")}</option><option value="high">{l("Haute", "High")}</option><option value="normal">{l("Normale", "Normal")}</option><option value="low">{l("Basse", "Low")}</option></select>
-        <select className="input !w-auto" value={f.due} onChange={(e) => set("due", e.target.value)} aria-label="due"><option value="">{l("Échéance", "Due")}</option><option value="overdue">{l("En retard", "Overdue")}</option><option value="today">{l("Aujourd'hui", "Today")}</option><option value="week">{l("Cette semaine", "This week")}</option></select>
+        <select className="input !w-auto" value={f.due} onChange={(e) => set("due", e.target.value)} aria-label="due"><option value="">{l("Échéance", "Due")}</option><option value="overdue">{l("En retard", "Overdue")}</option><option value="today">{l("Aujourd'hui", "Today")}</option><option value="friday">{l("D'ici vendredi", "By Friday")}</option><option value="week">{l("Cette semaine", "This week")}</option></select>
       </Toolbar>
 
       <div className="glass overflow-x-auto p-2">

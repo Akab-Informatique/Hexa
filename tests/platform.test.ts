@@ -222,3 +222,26 @@ describe("invoice due day and aging", () => {
     expect(aging("2026-01-01", "2026-04-15").bucket).toBe("d90");
   });
 });
+
+import { easterSunday, fridayOf, quebecHolidays } from "../packages/shared/src/billing.ts";
+
+describe("Quebec holidays and the working week", () => {
+  it("works out Easter", () => {
+    expect(easterSunday(2026)).toBe("2026-04-05");
+    expect(easterSunday(2027)).toBe("2027-03-28");
+  });
+  it("lists the statutory holidays of 2026", () => {
+    const h = Object.fromEntries(quebecHolidays(2026).map((x) => [x.fr, x.date]));
+    expect(h["Lundi de Pâques"]).toBe("2026-04-06");
+    expect(h["Journée nationale des patriotes"]).toBe("2026-05-18");
+    expect(h["Fête du Travail"]).toBe("2026-09-07");
+    expect(h["Action de grâce"]).toBe("2026-10-12");
+    expect(h["Noël"]).toBe("2026-12-25");
+  });
+  it("finds the Friday that ends the working week (the next one on a weekend)", () => {
+    expect(fridayOf("2026-06-02")).toBe("2026-06-05"); // Tuesday
+    expect(fridayOf("2026-06-05")).toBe("2026-06-05"); // Friday
+    expect(fridayOf("2026-06-06")).toBe("2026-06-12"); // Saturday
+    expect(fridayOf("2026-06-07")).toBe("2026-06-12"); // Sunday
+  });
+});

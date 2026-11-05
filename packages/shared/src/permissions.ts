@@ -24,6 +24,7 @@ export const MODULES: ModuleDef[] = [
       p("team.dashboard.edit", "Personnaliser ses tableaux de bord", "Customize own dashboards"),
       p("team.dashboard.share", "Partager des tableaux de bord", "Share dashboards"),
       p("team.dashboard.lock", "Verrouiller des tableaux de bord partagés", "Lock shared dashboards"),
+      p("team.dashboard.manage", "Administrer les tableaux de bord partagés (sans en être le propriétaire)", "Administer shared dashboards (without owning them)"),
       p("team.meeting.view", "Voir la rencontre d'équipe", "View the team meeting"),
       p("team.meeting.edit", "Ajouter des points à la rencontre", "Add meeting points"),
       p("team.meeting.manage", "Gérer la rencontre d'équipe", "Manage the team meeting"),

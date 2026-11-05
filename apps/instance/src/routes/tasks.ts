@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { addRecurrence, todayISO, addDays, mondayOf } from "@nexo/shared/billing";
+import { addRecurrence, todayISO, addDays, fridayOf, mondayOf } from "@nexo/shared/billing";
 import { pool } from "../db.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";
@@ -26,11 +26,13 @@ const TaskInput = z.object({
   waitsForId: z.string().uuid().nullable().optional(),
   recurrence: z.object({ every: z.number().int().min(1).max(365), unit: z.enum(["day", "week", "month", "year"]), until: Day.optional() }).nullable().optional(),
   tags: z.array(z.string().max(40)).max(20).optional(), viewerIds: z.array(z.string().uuid()).optional(),
+  kind: z.enum(["normal", "continuous", "daily"]).optional(), startTime: z.string().regex(/^\d{1,2}:\d{2}$/).nullable().optional(), dueTime: z.string().regex(/^\d{1,2}:\d{2}$/).nullable().optional(),
+  remindEveryDays: z.number().int().min(1).max(365).nullable().optional(),
 });
 const COLS: Record<string, string> = {
   title: "title", description: "description", status: "status", priority: "priority", assigneeId: "assignee_id", clientId: "client_id",
   startDate: "start_date", dueDate: "due_date", estimateMinutes: "estimate_minutes", visibility: "visibility", parentId: "parent_id",
-  waitsForId: "waits_for_id", tags: "tags",
+  waitsForId: "waits_for_id", tags: "tags", kind: "kind", startTime: "start_time", dueTime: "due_time", remindEveryDays: "remind_every_days",
 };
 
 const SELECT = `select t.*, a.name as assignee_name, cl.name as client_name,
@@ -60,6 +62,7 @@ taskRoutes.get("/", requirePermission(...VIEW), async (c) => {
   const today = todayISO();
   if (q.due === "overdue") where.push(`t.due_date < ${arg(today)} and t.status <> 'done'`);
   else if (q.due === "today") where.push(`t.due_date = ${arg(today)}`);
+  else if (q.due === "friday") where.push(`t.due_date between ${arg(today)} and ${arg(fridayOf(today))} and t.status <> 'done'`);
   else if (q.due === "week") where.push(`t.due_date between ${arg(mondayOf(today))} and ${arg(addDays(mondayOf(today), 6))}`);
   if (q.q?.trim()) where.push(`(t.title ilike '%' || ${arg(q.q.trim())} || '%' or t.description ilike '%' || ${arg(q.q.trim())} || '%')`);
 
@@ -100,6 +103,10 @@ taskRoutes.post("/", requirePermission(...EDIT), async (c) => {
   );
   const id = r.rows[0].id as string;
   if (d.viewerIds?.length) for (const v of d.viewerIds) await pool.query("insert into task_viewers values ($1, $2) on conflict do nothing", [id, v]);
+  if (d.kind || d.startTime || d.dueTime || d.remindEveryDays) {
+    // A continuous task comes back every n days (a week by default); a daily one never has a due day.
+    await pool.query("update tasks set kind = coalesce($2, kind), start_time = $3, due_time = $4, remind_every_days = case when coalesce($2, kind) = 'continuous' then coalesce($5, 7) else null end where id = $1", [id, d.kind ?? null, d.startTime ?? null, d.dueTime ?? null, d.remindEveryDays ?? null]);
+  }
   return c.json({ id }, 201);
 });
 

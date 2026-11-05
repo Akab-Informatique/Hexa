@@ -22,7 +22,7 @@ export async function rightsOf(user: { id: string; kind: Audience; is_master: bo
 export async function seedSystemGroups(): Promise<void> {
   const staffAll = permissionsFor("staff");
   const readOnly = staffAll.filter((k) => /\.(view|use)$/.test(k) && !k.startsWith("admin."));
-  const basic = staffAll.filter((k) => !k.startsWith("admin.") && !/\.(manage|approve)$/.test(k));
+  const basic = staffAll.filter((k) => !k.startsWith("admin.") && !/\.(manage|approve|lock)$/.test(k));
   const defs = [
     { slug: "administrators", name: "Administrateurs", description: "Tous les droits du personnel", permissions: staffAll, locked: true },
     { slug: "staff", name: "Personnel", description: "Accès standard (sans gestion ni administration)", permissions: basic, locked: false },

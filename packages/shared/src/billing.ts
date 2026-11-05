@@ -62,3 +62,43 @@ export function aging(dueDate: string, today: string): { daysLate: number; bucke
   if (late <= 0) return { daysLate: 0, bucket: "notDue" };
   return { daysLate: late, bucket: late <= 30 ? "d1_30" : late <= 60 ? "d31_60" : late <= 90 ? "d61_90" : "d90" };
 }
+
+/** Easter Sunday (Gregorian), as YYYY-MM-DD. */
+export function easterSunday(year: number): string {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** The nth Monday (1-based) of a month, or the last Monday strictly before a given day when `before` is set. */
+const nthMonday = (year: number, month: number, n: number) => {
+  const first = parseISODate(`${year}-${String(month).padStart(2, "0")}-01`);
+  const shift = (8 - first.getUTCDay()) % 7; // days to the first Monday
+  return addDays(toISODate(first), shift + 7 * (n - 1));
+};
+
+/** Quebec statutory holidays of a year: date and name (FR, EN). Easter Monday stands for the Good Friday / Easter Monday choice. */
+export function quebecHolidays(year: number): { date: string; fr: string; en: string }[] {
+  const easter = easterSunday(year);
+  const may25 = parseISODate(`${year}-05-25`);
+  const back = (may25.getUTCDay() + 6) % 7; // days since Monday
+  const patriots = addDays(toISODate(may25), back === 0 ? -7 : -back); // the Monday strictly before May 25
+  return [
+    { date: `${year}-01-01`, fr: "Jour de l'An", en: "New Year's Day" },
+    { date: addDays(easter, 1), fr: "Lundi de Pâques", en: "Easter Monday" },
+    { date: patriots, fr: "Journée nationale des patriotes", en: "National Patriots' Day" },
+    { date: `${year}-06-24`, fr: "Fête nationale du Québec", en: "Quebec National Day" },
+    { date: `${year}-07-01`, fr: "Fête du Canada", en: "Canada Day" },
+    { date: nthMonday(year, 9, 1), fr: "Fête du Travail", en: "Labour Day" },
+    { date: nthMonday(year, 10, 2), fr: "Action de grâce", en: "Thanksgiving" },
+    { date: `${year}-12-25`, fr: "Noël", en: "Christmas Day" },
+  ];
+}
+
+/** Friday that ends the working week of a day: this week's Friday, or the coming one on a weekend. */
+export function fridayOf(day: string): string {
+  const dow = (parseISODate(day).getUTCDay() + 6) % 7; // Monday = 0
+  return dow >= 5 ? addDays(day, 7 - dow + 4) : addDays(day, 4 - dow);
+}

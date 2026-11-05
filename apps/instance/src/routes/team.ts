@@ -2,52 +2,81 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { addDays, mondayOf, todayISO } from "@nexo/shared/billing";
 import { pool } from "../db.ts";
+import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { auth, body, camel, camelRows, can, isUuid } from "./util.ts";
 
 export const teamRoutes = new Hono<Env>();
 
 // =============================== Dashboards ===============================
-// Model (from the reference, plus the lock): a dashboard has an owner, optional sharing with the team
-// or chosen people (view / edit), and an admin lock. One shared record: edits reflect for everyone.
-// Locked = only holders of team.dashboard.lock may change it; everyone else can copy it to make their own.
+// Model (from the reference): several dashboards per person; built-in ones (undeletable); a dashboard can be shared
+// with the team or chosen people (view / edit) and locked by an admin. A shared dashboard is ONE record, but anyone
+// who may view it can arrange it "just for me" (a personal layout over the shared one, with "back to default").
+// A person can also pick which dashboard opens first (their default).
 
 const WidgetSchema = z.object({ id: z.string().min(1).max(40), type: z.string().min(1).max(40), size: z.number().int().min(1).max(3) });
 const DEFAULT_LAYOUT = [
   { id: "w1", type: "welcome", size: 2 }, { id: "w2", type: "my-tasks", size: 2 }, { id: "w3", type: "week-status", size: 1 },
   { id: "w4", type: "meeting-points", size: 1 }, { id: "w5", type: "quick-links", size: 1 },
 ];
+const TEAM_LAYOUT = [
+  { id: "t1", type: "clock", size: 1 }, { id: "t2", type: "week-status", size: 1 }, { id: "t3", type: "tasks-by-person", size: 1 },
+  { id: "t4", type: "upcoming-deadlines", size: 2 }, { id: "t5", type: "overdue-tasks", size: 1 }, { id: "t6", type: "board-latest", size: 2 }, { id: "t7", type: "meeting-points", size: 1 },
+];
 
-interface Row { id: string; name: string; owner_id: string; visibility: string; team_access: string; locked: boolean; layout: unknown; owner_name?: string; member_access?: string | null }
+interface Row { id: string; name: string; owner_id: string; visibility: string; team_access: string; locked: boolean; layout: unknown; builtin: boolean; slug: string | null; owner_name?: string; member_access?: string | null; my_layout?: unknown; is_default?: boolean }
 
 function access(c: Parameters<typeof can>[0], r: Row) {
   const me = auth(c).user.id;
   const lockHolder = can(c, "team.dashboard.lock");
+  const manager = can(c, "team.dashboard.manage");
   const owner = r.owner_id === me;
   const editRight = owner || r.member_access === "edit" || (r.visibility === "team" && r.team_access === "edit");
+  const shared = r.visibility === "team" || r.builtin;
   return {
-    isOwner: owner,
-    canEdit: (can(c, "team.dashboard.edit") && editRight && !r.locked) || lockHolder,
-    canShare: (owner && can(c, "team.dashboard.share")) || lockHolder,
-    canLock: lockHolder,
+    isOwner: owner, shared,
+    canEdit: (can(c, "team.dashboard.edit") && editRight && !r.locked) || lockHolder || manager,
+    canShare: (owner && can(c, "team.dashboard.share")) || lockHolder || manager,
+    canLock: lockHolder || manager,
+    // Anyone who sees a dashboard and may customize can arrange their own copy of the layout.
+    canCustomize: can(c, "team.dashboard.edit"),
+    canDelete: !r.builtin && ((owner && !r.locked && can(c, "team.dashboard.edit")) || manager || lockHolder),
   };
 }
 
-const LIST = `select d.*, u.name as owner_name, m.access as member_access,
+const LIST = `select d.*, u.name as owner_name, m.access as member_access, l.layout as my_layout, (df.dashboard_id is not null) as is_default,
                 (select coalesce(json_agg(json_build_object('userId', dm.user_id, 'name', mu.name, 'access', dm.access)), '[]')
                    from dashboard_members dm join users mu on mu.id = dm.user_id where dm.dashboard_id = d.id) as members
            from dashboards d join users u on u.id = d.owner_id
            left join dashboard_members m on m.dashboard_id = d.id and m.user_id = $1
+           left join dashboard_layouts l on l.dashboard_id = d.id and l.user_id = $1
+           left join dashboard_defaults df on df.dashboard_id = d.id and df.user_id = $1
           where (d.owner_id = $1 or m.user_id is not null or d.visibility = 'team')`;
 
-teamRoutes.get("/dashboards", requirePermission("team.dashboard.view"), async (c) => {
-  let r = await pool.query(`${LIST} order by d.owner_id = $1 desc, lower(d.name)`, [auth(c).user.id]);
-  if (!r.rows.some((x) => x.owner_id === auth(c).user.id)) {
-    // First visit: everyone gets a personal starter dashboard they can customize.
-    await pool.query("insert into dashboards (name, owner_id, layout) values ($1, $2, $3::jsonb)", ["Mon tableau de bord", auth(c).user.id, JSON.stringify(DEFAULT_LAYOUT)]);
-    r = await pool.query(`${LIST} order by d.owner_id = $1 desc, lower(d.name)`, [auth(c).user.id]);
+async function ensureBuiltins(userId: string) {
+  const has = (await pool.query("select 1 from dashboards where slug = 'team'")).rowCount;
+  if (!has) {
+    const owner = (await pool.query("select id from users where kind = 'staff' and is_master order by created_at limit 1")).rows[0]?.id ?? userId;
+    await pool.query("insert into dashboards (name, owner_id, visibility, team_access, slug, builtin, layout) values ('Tableau de l''équipe', $1, 'team', 'view', 'team', true, $2::jsonb) on conflict do nothing", [owner, JSON.stringify(TEAM_LAYOUT)]);
   }
-  return c.json(r.rows.map((x) => ({ ...camel(x), ...access(c, x as Row) })));
+}
+
+const shapeRow = (c: Parameters<typeof can>[0], x: Row) => {
+  const { my_layout: _m, ...rest } = x as Row & { my_layout?: unknown };
+  void _m;
+  return { ...camel(rest as unknown as Record<string, unknown>), layout: x.my_layout ?? x.layout, sharedLayout: x.layout, hasPersonalLayout: Boolean(x.my_layout), ...access(c, x) };
+};
+
+teamRoutes.get("/dashboards", requirePermission("team.dashboard.view"), async (c) => {
+  const me = auth(c).user.id;
+  await ensureBuiltins(me);
+  let r = await pool.query(`${LIST} order by is_default desc, d.builtin desc, d.owner_id = $1 desc, lower(d.name)`, [me]);
+  if (!r.rows.some((x) => x.owner_id === me && !x.builtin)) {
+    // First visit: everyone gets a personal starter dashboard they can customize.
+    await pool.query("insert into dashboards (name, owner_id, layout) values ($1, $2, $3::jsonb)", ["Mon tableau de bord", me, JSON.stringify(DEFAULT_LAYOUT)]);
+    r = await pool.query(`${LIST} order by is_default desc, d.builtin desc, d.owner_id = $1 desc, lower(d.name)`, [me]);
+  }
+  return c.json(r.rows.map((x) => shapeRow(c, x as Row)));
 });
 
 teamRoutes.post("/dashboards", requirePermission("team.dashboard.edit"), async (c) => {
@@ -62,6 +91,15 @@ async function loadDashboard(c: Parameters<typeof can>[0], id: string): Promise<
   return (r.rows[0] as Row) ?? null;
 }
 
+/** The person's default dashboard (the one that opens first). */
+teamRoutes.put("/dashboards/default", requirePermission("team.dashboard.view"), async (c) => {
+  const d = await body(c, z.object({ dashboardId: z.string().uuid().nullable() }));
+  if (d.dashboardId === null) { await pool.query("delete from dashboard_defaults where user_id = $1", [auth(c).user.id]); return c.json({ ok: true }); }
+  if (!(await loadDashboard(c, d.dashboardId))) return c.json({ error: "not found" }, 404);
+  await pool.query("insert into dashboard_defaults (user_id, dashboard_id) values ($1,$2) on conflict (user_id) do update set dashboard_id = excluded.dashboard_id", [auth(c).user.id, d.dashboardId]);
+  return c.json({ ok: true });
+});
+
 teamRoutes.patch("/dashboards/:id", requirePermission("team.dashboard.view"), async (c) => {
   const id = c.req.param("id");
   const row = await loadDashboard(c, id);
@@ -74,6 +112,7 @@ teamRoutes.patch("/dashboards/:id", requirePermission("team.dashboard.view"), as
   }));
   if ((d.name !== undefined || d.layout !== undefined) && !a.canEdit) return c.json({ error: row.locked ? "this dashboard is locked" : "forbidden" }, 403);
   if ((d.visibility !== undefined || d.teamAccess !== undefined || d.members !== undefined) && !a.canShare) return c.json({ error: "forbidden" }, 403);
+  if (row.builtin && d.visibility !== undefined && d.visibility !== "team") return c.json({ error: "builtin_always_shared" }, 409);
   if (d.locked !== undefined && !a.canLock) return c.json({ error: "forbidden" }, 403);
 
   await pool.query(
@@ -85,90 +124,41 @@ teamRoutes.patch("/dashboards/:id", requirePermission("team.dashboard.view"), as
     await pool.query("delete from dashboard_members where dashboard_id = $1", [id]);
     for (const m of d.members) if (m.userId !== row.owner_id) await pool.query("insert into dashboard_members values ($1, $2, $3)", [id, m.userId, m.access]);
   }
+  await audit("dashboard.updated", { userId: auth(c).user.id, target: row.name, detail: Object.keys(d) });
   return c.json({ ok: true });
 });
 
-/** "Copy to mine": the way to personalize a locked or view-only shared dashboard. */
+/** "Just for me": arranges a dashboard for the person only; the shared layout is untouched. */
+teamRoutes.put("/dashboards/:id/my-layout", requirePermission("team.dashboard.edit"), async (c) => {
+  const row = await loadDashboard(c, c.req.param("id"));
+  if (!row) return c.json({ error: "not found" }, 404);
+  const d = await body(c, z.object({ layout: z.array(WidgetSchema).max(40) }));
+  await pool.query("insert into dashboard_layouts (dashboard_id, user_id, layout) values ($1,$2,$3::jsonb) on conflict (dashboard_id, user_id) do update set layout = excluded.layout, updated_at = now()", [row.id, auth(c).user.id, JSON.stringify(d.layout)]);
+  return c.json({ ok: true });
+});
+
+/** Back to the shared layout. */
+teamRoutes.delete("/dashboards/:id/my-layout", requirePermission("team.dashboard.view"), async (c) => {
+  await pool.query("delete from dashboard_layouts where dashboard_id::text = $1 and user_id = $2", [c.req.param("id"), auth(c).user.id]);
+  return c.json({ ok: true });
+});
+
+/** "Copy to mine": the way to get a free-standing dashboard out of a locked or view-only shared one. */
 teamRoutes.post("/dashboards/:id/copy", requirePermission("team.dashboard.edit"), async (c) => {
   const row = await loadDashboard(c, c.req.param("id"));
   if (!row) return c.json({ error: "not found" }, 404);
-  const r = await pool.query("insert into dashboards (name, owner_id, layout) values ($1, $2, $3::jsonb) returning id", [`${row.name} (copie)`, auth(c).user.id, JSON.stringify(row.layout)]);
+  const r = await pool.query("insert into dashboards (name, owner_id, layout) values ($1, $2, $3::jsonb) returning id", [`${row.name} (copie)`, auth(c).user.id, JSON.stringify(row.my_layout ?? row.layout)]);
   return c.json({ id: r.rows[0].id }, 201);
 });
 
 teamRoutes.delete("/dashboards/:id", requirePermission("team.dashboard.edit"), async (c) => {
   const row = await loadDashboard(c, c.req.param("id"));
   if (!row) return c.json({ error: "not found" }, 404);
-  if (!(row.owner_id === auth(c).user.id && !row.locked) && !can(c, "team.dashboard.lock")) return c.json({ error: "forbidden" }, 403);
+  if (row.builtin) return c.json({ error: "builtin_cannot_be_deleted" }, 409);
+  if (!access(c, row).canDelete) return c.json({ error: "forbidden" }, 403);
   await pool.query("delete from dashboards where id = $1", [row.id]);
+  await audit("dashboard.deleted", { userId: auth(c).user.id, target: row.name });
   return c.json({ ok: true });
 });
 
-// =============================== Weekly meeting ===============================
-const Monday = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-
-teamRoutes.get("/meeting", requirePermission("team.meeting.view"), async (c) => {
-  const week = mondayOf(c.req.query("week") && Monday.safeParse(c.req.query("week")).success ? c.req.query("week")! : todayISO());
-  const weekEnd = addDays(week, 6);
-  const me = auth(c).user.id;
-  const VIS = `(t.visibility = 'team' or t.created_by = $1 or t.assignee_id = $1)`;
-
-  const [points, hot, absences, stats, review] = await Promise.all([
-    pool.query("select p.*, u.name as author_name from meeting_points p left join users u on u.id = p.author_id where p.week_start = $1 order by p.done, p.created_at", [week]),
-    // "Hot tasks": urgent/high priority tasks open or due this week.
-    pool.query(
-      `select t.id, t.title, t.status, t.priority, t.due_date, a.name as assignee_name from tasks t left join users a on a.id = t.assignee_id
-        where ${VIS} and t.priority in ('urgent','high') and (t.status <> 'done' or t.completed_at::date between $2 and $3)
-          and (t.due_date is null or t.due_date <= $3) order by t.status = 'done', t.due_date nulls last limit 30`, [me, week, weekEnd]),
-    pool.query("select a.*, u.name as user_name from absences a join users u on u.id = a.user_id where a.starts_on <= $2 and a.ends_on >= $1 order by a.starts_on", [week, weekEnd]),
-    pool.query(
-      `select count(*) filter (where t.status <> 'done' and t.due_date < $2)::int as overdue,
-              count(*) filter (where t.status <> 'done' and t.due_date between $2 and $3)::int as due_this_week,
-              count(*) filter (where t.status <> 'done' and t.assignee_id is null)::int as unassigned,
-              count(*) filter (where t.status = 'blocked')::int as blocked
-         from tasks t where ${VIS}`, [me, week, weekEnd]),
-    // Review: for each of the 4 weeks before, tasks opened vs closed, plus what is still open from those weeks.
-    Promise.all([1, 2, 3, 4].map(async (i) => {
-      const s = addDays(week, -7 * i), e = addDays(s, 6);
-      const r = await pool.query(
-        `select count(*) filter (where t.created_at::date between $2 and $3)::int as opened,
-                count(*) filter (where t.completed_at::date between $2 and $3)::int as closed
-           from tasks t where ${VIS}`, [me, s, e]);
-      const stillOpen = await pool.query(
-        `select t.id, t.title, t.priority, t.due_date, a.name as assignee_name from tasks t left join users a on a.id = t.assignee_id
-          where ${VIS} and t.status <> 'done' and t.due_date between $2 and $3 order by t.due_date limit 15`, [me, s, e]);
-      return { weekStart: s, ...r.rows[0], stillOpen: camelRows(stillOpen) };
-    })),
-  ]);
-  return c.json({ week, weekEnd, points: camelRows(points), hot: camelRows(hot), absences: camelRows(absences), stats: stats.rows[0], review });
-});
-
-const PointInput = z.object({ weekStart: Monday, kind: z.enum(["point", "hot", "issue"]).default("point"), title: z.string().min(1).max(300), body: z.string().max(5000).optional() });
-
-teamRoutes.post("/meeting/points", requirePermission("team.meeting.edit", "team.meeting.manage"), async (c) => {
-  const d = await body(c, PointInput);
-  const r = await pool.query("insert into meeting_points (week_start, kind, title, body, author_id) values ($1, $2, $3, coalesce($4,''), $5) returning id", [mondayOf(d.weekStart), d.kind, d.title, d.body, auth(c).user.id]);
-  return c.json({ id: r.rows[0].id }, 201);
-});
-
-teamRoutes.patch("/meeting/points/:id", requirePermission("team.meeting.edit", "team.meeting.manage"), async (c) => {
-  const row = (await pool.query("select author_id from meeting_points where id = $1", [c.req.param("id")])).rows[0];
-  if (!row) return c.json({ error: "not found" }, 404);
-  const d = await body(c, z.object({ done: z.boolean().optional(), title: z.string().min(1).max(300).optional(), body: z.string().max(5000).optional() }));
-  // Anyone in the meeting can tick a point off; only the author or a manager rewrites it.
-  if ((d.title !== undefined || d.body !== undefined) && row.author_id !== auth(c).user.id && !can(c, "team.meeting.manage")) return c.json({ error: "forbidden" }, 403);
-  await pool.query(
-    `update meeting_points set title = coalesce($2, title), body = coalesce($3, body), done = coalesce($4, done),
-            done_at = case when $4 is true then now() when $4 is false then null else done_at end where id = $1`,
-    [c.req.param("id"), d.title ?? null, d.body ?? null, d.done ?? null],
-  );
-  return c.json({ ok: true });
-});
-
-teamRoutes.delete("/meeting/points/:id", requirePermission("team.meeting.edit", "team.meeting.manage"), async (c) => {
-  const row = (await pool.query("select author_id from meeting_points where id = $1", [c.req.param("id")])).rows[0];
-  if (!row) return c.json({ ok: true });
-  if (row.author_id !== auth(c).user.id && !can(c, "team.meeting.manage")) return c.json({ error: "forbidden" }, 403);
-  await pool.query("delete from meeting_points where id = $1", [c.req.param("id")]);
-  return c.json({ ok: true });
-});
+// The weekly meeting lives in routes/meeting.ts.
