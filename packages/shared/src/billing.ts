@@ -102,3 +102,58 @@ export function fridayOf(day: string): string {
   const dow = (parseISODate(day).getUTCDay() + 6) % 7; // Monday = 0
   return dow >= 5 ? addDays(day, 7 - dow + 4) : addDays(day, 4 - dow);
 }
+
+// ------------------------------------------------------------------ Cash forecast (vendor payments)
+export type Freq = "weekly" | "monthly" | "yearly";
+
+/** Dates of a recurring payment between two days (inclusive): the anchor date and then every week / month / year. */
+export function recurrenceDates(anchor: string, freq: Freq, from: string, to: string): string[] {
+  const unit = freq === "weekly" ? "week" : freq === "monthly" ? "month" : "year";
+  const out: string[] = [];
+  // Counted from the anchor each time (Jan 31, Feb 28, Mar 31), never from the previous date.
+  for (let k = 0; k < 5000; k++) {
+    const d = addRecurrence(anchor, { every: k, unit });
+    if (d > to) break;
+    if (d >= from) out.push(d);
+  }
+  return out;
+}
+
+export interface ForecastInput {
+  today: string; days: number; balanceCents: number;
+  /** Days after the due date that vendors are really paid / clients really pay. Overdue amounts are counted from today. */
+  payDelayDays: number; lateDelayDays: number;
+  bills: { vendor: string; dueDate: string | null; amountCents: number }[];
+  invoices: { client: string; dueDate: string; balanceCents: number }[];
+  recurring: { label: string; anchor: string; freq: Freq; amountCents: number }[];
+  /** Weekday of payday (Monday = 0) and what is paid out each week. */
+  payrollWeekday: number | null; payrollWeeklyCents: number;
+}
+export interface ForecastItem { kind: "invoice" | "bill" | "recurring" | "payroll"; label: string; cents: number }
+export interface ForecastDay { date: string; inCents: number; outCents: number; balanceCents: number; items: ForecastItem[] }
+
+/** Day-by-day cash: invoices in, bills / recurring payments / payroll out, from the balance typed by hand. */
+export function buildForecast(i: ForecastInput) {
+  const end = addDays(i.today, i.days - 1);
+  const byDay = new Map<string, ForecastItem[]>();
+  const put = (date: string, item: ForecastItem) => { if (date >= i.today && date <= end) byDay.set(date, [...(byDay.get(date) ?? []), item]); };
+  const later = (a: string, b: string) => (a > b ? a : b);
+  for (const inv of i.invoices) put(later(i.today, addDays(inv.dueDate, i.lateDelayDays)), { kind: "invoice", label: inv.client, cents: inv.balanceCents });
+  for (const b of i.bills) put(b.dueDate ? later(i.today, addDays(b.dueDate, i.payDelayDays)) : i.today, { kind: "bill", label: b.vendor, cents: -b.amountCents });
+  for (const r of i.recurring) for (const d of recurrenceDates(r.anchor, r.freq, i.today, end)) put(d, { kind: "recurring", label: r.label, cents: -r.amountCents });
+  if (i.payrollWeekday !== null && i.payrollWeeklyCents > 0) {
+    for (let k = 0; k < i.days; k++) { const d = addDays(i.today, k); if ((parseISODate(d).getUTCDay() + 6) % 7 === i.payrollWeekday) put(d, { kind: "payroll", label: "payroll", cents: -i.payrollWeeklyCents }); }
+  }
+  const rows: ForecastDay[] = [];
+  let bal = i.balanceCents;
+  for (let k = 0; k < i.days; k++) {
+    const date = addDays(i.today, k);
+    const items = byDay.get(date) ?? [];
+    const inC = items.filter((x) => x.cents > 0).reduce((a, x) => a + x.cents, 0), outC = -items.filter((x) => x.cents < 0).reduce((a, x) => a + x.cents, 0);
+    bal += inC - outC;
+    rows.push({ date, inCents: inC, outCents: outC, balanceCents: bal, items });
+  }
+  const firstShortfall = rows.find((r) => r.balanceCents < 0) ?? null;
+  const lowest = rows.reduce((m, r) => (r.balanceCents < m.balanceCents ? r : m), rows[0]!);
+  return { rows, firstShortfall: firstShortfall ? { date: firstShortfall.date, balanceCents: firstShortfall.balanceCents } : null, lowest: { date: lowest.date, balanceCents: lowest.balanceCents }, endBalanceCents: bal };
+}

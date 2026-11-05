@@ -44,29 +44,14 @@ accountingRoutes.patch("/vendors/:id", requirePermission("accounting.vendors.man
 });
 
 const BillInput = z.object({
-  vendorId: z.string().uuid(), number: z.string().max(60).optional(), billDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  vendorId: z.string().uuid(), number: z.string().max(60).optional(), billDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   amount: z.number().min(0).max(1e9), notes: z.string().max(1000).optional(), status: z.enum(["unpaid", "scheduled", "paid"]).optional(),
 });
 
-/** The "payments to do" list: unpaid bills by due date, with overdue and due-this-week totals. */
-accountingRoutes.get("/bills", requirePermission("accounting.vendors.view", "accounting.vendors.manage"), async (c) => {
-  const status = c.req.query("status") ?? "open";
-  const r = await pool.query(
-    `select b.*, v.name as vendor_name from vendor_bills b join vendors v on v.id = b.vendor_id
-      where ($1 = 'all' or ($1 = 'open' and b.status <> 'paid') or b.status = $1) order by b.status = 'paid', b.due_date limit 500`,
-    [["open", "all", "unpaid", "scheduled", "paid"].includes(status) ? status : "open"]);
-  const today = todayISO();
-  const rows = camelRows<{ dueDate: string; amount: number; status: string }>(r);
-  const open = rows.filter((b) => b.status !== "paid");
-  const sum = (xs: typeof rows) => Math.round(xs.reduce((a, b) => a + b.amount, 0) * 100) / 100;
-  return c.json({
-    bills: rows, today,
-    totals: { open: sum(open), overdue: sum(open.filter((b) => b.dueDate < today)), dueThisWeek: sum(open.filter((b) => b.dueDate >= today && b.dueDate <= addDays(today, 7))) },
-  });
-});
+// The payments list, calendar, recurring payments, payroll plan and forecast live in routes/vendorPayments.ts.
 accountingRoutes.post("/bills", requirePermission("accounting.vendors.manage"), async (c) => {
   const d = await body(c, BillInput);
-  const r = await pool.query("insert into vendor_bills (vendor_id, number, bill_date, due_date, amount, notes, status) values ($1, coalesce($2,''), coalesce($3, current_date), $4, $5, coalesce($6,''), coalesce($7,'unpaid')) returning id", [d.vendorId, d.number, d.billDate, d.dueDate, d.amount, d.notes, d.status]);
+  const r = await pool.query("insert into vendor_bills (vendor_id, number, bill_date, due_date, amount, notes, status) values ($1, coalesce($2,''), coalesce($3, current_date), $4::date, $5, coalesce($6,''), coalesce($7,'unpaid')) returning id", [d.vendorId, d.number, d.billDate, d.dueDate ?? null, d.amount, d.notes, d.status]);
   return c.json({ id: r.rows[0].id }, 201);
 });
 accountingRoutes.patch("/bills/:id", requirePermission("accounting.vendors.manage"), async (c) => {

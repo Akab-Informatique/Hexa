@@ -245,3 +245,39 @@ describe("Quebec holidays and the working week", () => {
     expect(fridayOf("2026-06-07")).toBe("2026-06-12"); // Sunday
   });
 });
+
+import { buildForecast, recurrenceDates } from "../packages/shared/src/billing.ts";
+
+describe("recurring payments and the cash forecast", () => {
+  it("counts monthly dates from the anchor so the day never drifts", () => {
+    expect(recurrenceDates("2026-01-31", "monthly", "2026-01-01", "2026-04-30")).toEqual(["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"]);
+    expect(recurrenceDates("2026-01-05", "weekly", "2026-01-10", "2026-01-31")).toEqual(["2026-01-12", "2026-01-19", "2026-01-26"]);
+    expect(recurrenceDates("2025-03-01", "yearly", "2026-01-01", "2027-12-31")).toEqual(["2026-03-01", "2027-03-01"]);
+  });
+  const base = { today: "2026-06-01", days: 10, balanceCents: 100000, payDelayDays: 0, lateDelayDays: 5, bills: [], invoices: [], recurring: [], payrollWeekday: null, payrollWeeklyCents: 0 };
+  it("runs the balance day by day: invoices in, bills out", () => {
+    const f = buildForecast({ ...base, bills: [{ vendor: "A", dueDate: "2026-06-03", amountCents: 30000 }], invoices: [{ client: "C", dueDate: "2026-06-02", balanceCents: 50000 }] });
+    expect(f.rows).toHaveLength(10);
+    expect(f.rows[2]!.balanceCents).toBe(70000);
+    expect(f.rows[6]!.balanceCents).toBe(120000);
+    expect(f.firstShortfall).toBeNull();
+  });
+  it("counts overdue amounts from today and finds the first shortfall", () => {
+    const f = buildForecast({ ...base, balanceCents: 10000, bills: [{ vendor: "Late", dueDate: "2026-05-01", amountCents: 50000 }, { vendor: "None", dueDate: null, amountCents: 1000 }] });
+    expect(f.rows[0]!.outCents).toBe(51000);
+    expect(f.firstShortfall).toEqual({ date: "2026-06-01", balanceCents: -41000 });
+    expect(f.lowest.balanceCents).toBe(-41000);
+  });
+  it("adds recurring payments and a weekly payroll on its weekday", () => {
+    const f = buildForecast({ ...base, days: 14, recurring: [{ label: "Loyer", anchor: "2026-06-05", freq: "weekly", amountCents: 1000 }], payrollWeekday: 4, payrollWeeklyCents: 20000 });
+    // 2026-06-05 and 06-12 are Fridays: rent and payroll both fall on them
+    expect(f.rows[4]!.items.map((i) => i.kind).sort()).toEqual(["payroll", "recurring"]);
+    expect(f.rows[11]!.items.map((i) => i.kind).sort()).toEqual(["payroll", "recurring"]);
+    expect(f.endBalanceCents).toBe(100000 - 2 * 21000);
+  });
+  it("delays payment of bills by the pay delay", () => {
+    const f = buildForecast({ ...base, payDelayDays: 3, bills: [{ vendor: "A", dueDate: "2026-06-02", amountCents: 100 }] });
+    expect(f.rows[4]!.items.some((i) => i.kind === "bill")).toBe(true);
+    expect(f.rows[1]!.items.some((i) => i.kind === "bill")).toBe(false);
+  });
+});
