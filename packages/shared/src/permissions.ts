@@ -66,9 +66,10 @@ export const MODULES: ModuleDef[] = [
   {
     key: "docs", audience: "staff", section: "management", label: { fr: "Documentation", en: "Documentation" },
     permissions: [
-      p("docs.view", "Voir la documentation", "View documentation"),
-      p("docs.edit", "Modifier la documentation", "Edit documentation"),
-      p("docs.manage", "Gérer la documentation", "Manage documentation"),
+      p("docs.view", "Parcourir les dossiers SharePoint autorisés", "Browse the SharePoint folders they are allowed"),
+      p("docs.edit", "Ajouter, créer et supprimer dans les dossiers en modification", "Upload, create and delete in folders with edit access"),
+      p("docs.access.manage", "Gérer l'accès aux dossiers (selon son propre accès)", "Manage folder access (up to their own access)"),
+      p("docs.manage", "Voir toutes les bibliothèques et gérer tous les accès", "See every library and manage all access"),
     ],
   },
   {

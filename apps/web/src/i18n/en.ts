@@ -53,7 +53,7 @@ export const en: Dict = {
     o365Help: "Calendar, mail and SharePoint through Microsoft Graph. Requires an application registered in Azure (client ID, secret and tenant).",
     mailjetHelp: "Sending messages to clients and system emails. Requires a Mailjet API key and secret key.",
     quickbooksHelp: "Sync of customers, invoices and vendors. Requires an Intuit app (client ID and secret) and the redirect address.",
-    sharepointHelp: "Documentation linked to your SharePoint libraries, through the same Microsoft application.",
+    sharepointHelp: "The Documentation page browses this SharePoint site through the Microsoft Graph API, using the Microsoft 365 app (it needs the Sites.ReadWrite.All application permission). Who sees which folder is set in the portal, on Documentation.",
     tenantBranding: "Branding", tenantModules: "Enabled modules", tenantLicense: "License", primary: "Primary color", accent: "Accent color", appName: "Application name",
     brandingManaged: "Branding is managed from the Nexo console. Contact your provider to change it.", noModules: "No client module enabled",
     auditAt: "Date", auditUser: "User", auditAction: "Action", auditTarget: "Target",

@@ -118,3 +118,31 @@ describe("billing and dates", () => {
     expect(mondayOf("2026-11-08")).toBe("2026-11-02");
   });
 });
+
+import { leadsToAccess, levelOn } from "../apps/instance/src/lib/docRules.ts";
+import { cleanPath } from "../apps/instance/src/lib/sharepoint.ts";
+
+describe("documentation folder rules", () => {
+  const rules = [{ path: "Acme Corp", level: "view" as const }, { path: "Acme Corp/2025", level: "edit" as const }];
+  it("inherits down the tree and takes the highest level", () => {
+    expect(levelOn(rules, "Acme Corp")).toBe("view");
+    expect(levelOn(rules, "Acme Corp/2024")).toBe("view");
+    expect(levelOn(rules, "Acme Corp/2025/T4")).toBe("edit");
+    expect(levelOn(rules, "acme corp/2025")).toBe("edit");
+  });
+  it("gives nothing elsewhere, and a library-root rule covers all", () => {
+    expect(levelOn(rules, "Boulangerie Dupont")).toBeNull();
+    expect(levelOn(rules, "Acme Corporation")).toBeNull();
+    expect(levelOn([{ path: "", level: "view" }], "Any/Thing")).toBe("view");
+  });
+  it("keeps the way to an allowed folder visible", () => {
+    expect(leadsToAccess([{ path: "A/B/C", level: "view" }], "A")).toBe(true);
+    expect(leadsToAccess([{ path: "A/B/C", level: "view" }], "A/B")).toBe(true);
+    expect(leadsToAccess([{ path: "A/B/C", level: "view" }], "X")).toBe(false);
+  });
+  it("refuses path traversal", () => {
+    expect(cleanPath("/a//b/")).toBe("a/b");
+    expect(() => cleanPath("a/../b")).toThrow();
+    expect(() => cleanPath("a/b:c")).toThrow();
+  });
+});

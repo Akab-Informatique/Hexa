@@ -52,7 +52,7 @@ export const fr = {
     o365Help: "Calendrier, courriels et SharePoint via Microsoft Graph. Nécessite l'enregistrement d'une application dans Azure (identifiant, secret et locataire).",
     mailjetHelp: "Envoi des messages aux clients et courriels du système. Nécessite une clé d'API et une clé secrète Mailjet.",
     quickbooksHelp: "Synchronisation des clients, factures et fournisseurs. Nécessite une application Intuit (identifiant et secret) et l'adresse de redirection.",
-    sharepointHelp: "Documentation liée à vos bibliothèques SharePoint, via la même application Microsoft.",
+    sharepointHelp: "La page Documentation parcourt ce site SharePoint par l'API Microsoft Graph, avec l'application Microsoft 365 (permission d'application Sites.ReadWrite.All requise). Qui voit quel dossier se règle dans le portail, sous Documentation.",
     tenantBranding: "Image de marque", tenantModules: "Modules activés", tenantLicense: "Licence", primary: "Couleur principale", accent: "Couleur d'accent", appName: "Nom de l'application",
     brandingManaged: "L'image de marque est gérée depuis la console Nexo. Contactez votre fournisseur pour la modifier.", noModules: "Aucun module client activé",
     auditAt: "Date", auditUser: "Utilisateur", auditAction: "Action", auditTarget: "Cible",

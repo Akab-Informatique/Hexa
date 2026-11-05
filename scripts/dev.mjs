@@ -59,7 +59,8 @@ await api("/api/releases", { version: "0.2.0", notes: "Demo update" });
 await api("/api/clients", {
   id: "demo", name: "Acme Corp", domain: "portal.acme.test", adminEmail: "admin@acme.test", pinnedVersion: "0.2.0",
   maxUsers: 25, modules: ["example-hello"],
-  branding: { appName: "Acme Portal", primaryColor: "#7c3aed", accentColor: "#1e1b4b" },
+  // Deliberately not Nexo's purple/blue: this is how a different firm's theme looks.
+  branding: { appName: "Acme Portal", primaryColor: "#0d9488", accentColor: "#f59e0b" },
 });
 
 // Use the real generated bundle to get this client's credentials (exercises the bundle generator too).
@@ -79,6 +80,7 @@ run("instance", "apps/instance/src/index.ts", {
   INITIAL_ADMIN_PASSWORD: get("INITIAL_ADMIN_PASSWORD"),
   APP_SECRET: get("APP_SECRET"),
   DEV_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173",
+  SHAREPOINT_MOCK: "1", // local stand-in for SharePoint (never honored in production)
 });
 await waitFor(`http://127.0.0.1:${INSTANCE_PORT}/api/health`, "instance");
 

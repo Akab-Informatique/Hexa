@@ -13,6 +13,12 @@ directoryRoutes.get("/users", async (c) => {
   return c.json(r.rows);
 });
 
+directoryRoutes.get("/groups", async (c) => {
+  if (c.get("auth")!.user.kind !== "staff") return c.json({ error: "forbidden" }, 403);
+  const r = await pool.query("select id, name from groups where audience = 'staff' order by lower(name)");
+  return c.json(r.rows);
+});
+
 directoryRoutes.get("/clients", async (c) => {
   if (c.get("auth")!.user.kind !== "staff") return c.json({ error: "forbidden" }, 403);
   const r = await pool.query("select id, name, status from clients where status <> 'inactive' order by lower(name)");

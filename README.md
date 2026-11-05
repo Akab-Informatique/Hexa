@@ -54,7 +54,7 @@ Sidebar sections follow the reference portal. Every page and action is guarded b
 - **Team:** customizable dashboards (several per person, shareable, lockable by an admin, "copy to mine"); weekly meeting (points, issues, hot tasks, absences, review of past weeks).
 - **My tools:** timesheet (weekly grid, submit, approve; approved billable time feeds Work to bill), knowledge base, procedures (step-by-step, draft/published); calendar and inbox are connection pages that wait for the Microsoft 365 integration.
 - **Command center:** message board (all or selected clients, optional email copy waiting for Mailjet); pipeline ("my day" + status board).
-- **Management:** clients (profile, contacts, contracts, parent/child, history-safe delete), tasks (checklist, notes, sub-tasks, dependencies, recurrence, private/selected visibility), documentation (SharePoint links).
+- **Management:** clients (profile, contacts, contracts, parent/child, history-safe delete), tasks (checklist, notes, sub-tasks, dependencies, recurrence, private/selected visibility), documentation (SharePoint browsed through the Graph API; per-folder access for users and groups is managed in the portal, inherited down the tree. Local dev uses a built-in stand-in, `SHAREPOINT_MOCK=1`).
 - **Internal accounting:** invoices (line-by-line tax rounding, draft/sent/paid/void), work to bill (approve/edit/exclude), vendors and payments to make; HR (profiles, absences).
 - **Administration:** users, groups and the rights matrix, integration credentials (sealed), branding and modules, activity log.
 
@@ -69,4 +69,4 @@ client users (portal) come later.
 - Typecheck and unit tests pass. **Not yet run end-to-end with Docker** (not available on the build machine): test the bundle install, the update and the rollback on a real server before selling.
 - Only the master administrator can install an update from the app.
 - Max-user enforcement: `maxUsers` is delivered to the instance and `userCount` is reported back; enforcement belongs in the app's user-creation code.
-- Not built yet: the Microsoft 365 / SharePoint / QuickBooks / Mailjet sync itself (credentials are stored, nothing is called yet), invoice PDF + email, the client portal (client users), and client-specific modules.
+- Not built yet: the Microsoft 365 calendar/inbox, QuickBooks and Mailjet sync (credentials are stored, nothing is called yet; SharePoint is wired but not yet tried against a real tenant, files over 4 MB are refused), invoice PDF + email, the client portal (client users), and client-specific modules.

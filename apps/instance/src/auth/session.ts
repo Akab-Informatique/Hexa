@@ -91,7 +91,9 @@ export const sameOriginWrites: MiddlewareHandler = async (c, next) => {
     if (origin && host && new URL(origin).host !== host && !config.devOrigins.includes(new URL(origin).origin)) {
       return c.json({ error: "cross-origin request refused" }, 403);
     }
-    if (c.req.header("content-length") !== "0" && c.req.raw.body && !(c.req.header("content-type") ?? "").includes("json")) {
+    // File uploads are raw bytes; the custom header cannot be sent cross-site without a CORS preflight, so it is as safe as JSON.
+    const upload = c.req.header("x-nexo-upload") === "1" && (c.req.header("content-type") ?? "").startsWith("application/octet-stream");
+    if (!upload && c.req.header("content-length") !== "0" && c.req.raw.body && !(c.req.header("content-type") ?? "").includes("json")) {
       return c.json({ error: "json required" }, 415);
     }
   }

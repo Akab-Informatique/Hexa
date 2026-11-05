@@ -17,6 +17,7 @@ import { myToolsRoutes } from "./routes/mytools.ts";
 import { commandRoutes } from "./routes/command.ts";
 import { accountingRoutes } from "./routes/accounting.ts";
 import { hrRoutes } from "./routes/hr.ts";
+import { docsRoutes } from "./routes/docs.ts";
 import { directoryRoutes } from "./routes/directory.ts";
 import { integrationRoutes } from "./routes/integrations.ts";
 import { ZodError } from "zod";
@@ -70,6 +71,7 @@ export function buildApp(): Hono<Env> {
   app.route("/api/command", commandRoutes);
   app.route("/api/accounting", accountingRoutes);
   app.route("/api/hr", hrRoutes);
+  app.route("/api/docs", docsRoutes);
   app.route("/api/directory", directoryRoutes);
 
   app.onError((err, c) => {

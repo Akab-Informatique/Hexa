@@ -101,5 +101,47 @@ const put = await call("PUT", "/api/admin/integrations/mailjet", { values: { sen
 const list = (await call("GET", "/api/admin/integrations")).body.find((x) => x.provider === "mailjet");
 ok("integration secrets stored but never returned", put.status === 200 && list.fields.find((f) => f.key === "apiKey").isSet === true && list.fields.find((f) => f.key === "apiKey").value === "" && !JSON.stringify(list).includes('"k"'));
 
+// ---- Documentation (SharePoint through the API, folder rules in the portal) ----
+const groupsList = (await call("GET", "/api/admin/groups")).body;
+const staffGroup = groupsList.find((g) => g.slug === "staff");
+const dEmail = `smoke-docs-${Date.now()}@example.com`;
+const dUser = await call("POST", "/api/admin/users", { email: dEmail, name: "SMOKE Docs User", groupIds: [staffGroup.id] });
+ok("create restricted user", dUser.status === 201, JSON.stringify(dUser.body));
+let uc = "";
+{
+  const r = await fetch(BASE + "/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: dEmail, password: dUser.body.temporaryPassword }) });
+  uc = r.headers.get("set-cookie").split(";")[0];
+  await call("POST", "/api/auth/password", { current: dUser.body.temporaryPassword, next: "Dev-only-pass-2026!" }, uc);
+}
+const adminLibs = (await call("GET", "/api/docs/libraries")).body;
+const clientsLib = adminLibs.find((l) => l.name.startsWith("Dossiers clients"))?.id;
+ok("admin (docs.manage) sees every library", adminLibs.length === 3 && Boolean(clientsLib));
+ok("no rule: a user sees no library", (await call("GET", "/api/docs/libraries", undefined, uc)).body.length === 0);
+ok("no rule: browsing is refused", (await call("GET", `/api/docs/browse?drive=${clientsLib}&path=Acme%20Corp`, undefined, uc)).status === 403);
+ok("a user cannot manage access", (await call("POST", "/api/docs/access", { drive: clientsLib, path: "Acme Corp", principalType: "user", principalId: dUser.body.id, level: "edit" }, uc)).status === 403);
+ok("rule on a missing folder is refused", (await call("POST", "/api/docs/access", { drive: clientsLib, path: "Nope", principalType: "user", principalId: dUser.body.id, level: "view" })).status === 404);
+ok("give read access to one client folder", (await call("POST", "/api/docs/access", { drive: clientsLib, path: "Acme Corp", principalType: "user", principalId: dUser.body.id, level: "view" })).status === 200);
+const ulibs = (await call("GET", "/api/docs/libraries", undefined, uc)).body;
+ok("user now sees only that library", ulibs.length === 1 && ulibs[0].id === clientsLib);
+const root = (await call("GET", `/api/docs/browse?drive=${clientsLib}&path=`, undefined, uc)).body;
+ok("library root shows only the way to the allowed folder", root.level === "path" && root.items.length === 1 && root.items[0].name === "Acme Corp", JSON.stringify(root));
+const sub = await call("GET", `/api/docs/browse?drive=${clientsLib}&path=Acme%20Corp%2F2025`, undefined, uc);
+ok("access is inherited by sub-folders", sub.status === 200 && sub.body.level === "view" && sub.body.items.some((i) => i.name === "Bilan.txt"));
+ok("another client's folder is refused", (await call("GET", `/api/docs/browse?drive=${clientsLib}&path=Boulangerie%20Dupont`, undefined, uc)).status === 403);
+const dl = await fetch(BASE + `/api/docs/file?drive=${clientsLib}&path=${encodeURIComponent("Acme Corp/2025/Bilan.txt")}`, { headers: { cookie: uc } });
+ok("download within access", dl.status === 200 && (await dl.text()).includes("Bilan"));
+const dl2 = await fetch(BASE + `/api/docs/file?drive=${clientsLib}&path=${encodeURIComponent("Boulangerie Dupont/2025/Déclaration TPS-TVQ.txt")}`, { headers: { cookie: uc } });
+ok("download outside access refused", dl2.status === 403);
+const up = (c0, p0, n) => fetch(BASE + `/api/docs/file?drive=${clientsLib}&path=${encodeURIComponent(p0)}&name=${encodeURIComponent(n)}`, { method: "PUT", headers: { cookie: c0, "content-type": "application/octet-stream", "x-nexo-upload": "1" }, body: "hello" });
+ok("read-only access cannot upload", (await up(uc, "Acme Corp/2025", "x.txt")).status === 403);
+ok("path traversal refused", (await call("GET", `/api/docs/browse?drive=${clientsLib}&path=Acme%20Corp%2F..%2FBoulangerie`, undefined, uc)).status === 400);
+ok("edit access on a sub-folder", (await call("POST", "/api/docs/access", { drive: clientsLib, path: "Acme Corp/2025", principalType: "user", principalId: dUser.body.id, level: "edit" })).status === 200);
+ok("edit access can upload", (await up(uc, "Acme Corp/2025", "smoke.txt")).status === 200);
+ok("…but not above that folder", (await up(uc, "Acme Corp", "smoke.txt")).status === 403);
+ok("create a sub-folder", (await call("POST", "/api/docs/folder", { drive: clientsLib, path: "Acme Corp/2025", name: `SMOKE-${Date.now()}` }, uc)).status === 200);
+const rules = (await call("GET", `/api/docs/access?drive=${clientsLib}`)).body;
+for (const r of rules.filter((x) => x.principalId === dUser.body.id)) await call("DELETE", `/api/docs/access/${r.id}`);
+ok("removing the rules removes the access", (await call("GET", "/api/docs/libraries", undefined, uc)).body.length === 0);
+
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");
 process.exit(failures ? 1 : 0);
