@@ -6,6 +6,7 @@ import { accruablePaidMinutes, centsOf, holidayBasisMinutes, holidayPayCents, pa
 import { pool, getSetting } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
+import { applyAutoApprove } from "../lib/autoApprove.ts";
 import { auth, body, camelRows, can } from "./util.ts";
 
 // Timesheets modelled on the reference portal: typed entries, a work day with lunch rules, an hours bank,
@@ -295,6 +296,7 @@ async function handOffToBilling(userId: string, start: string) {
        values ($1,'time',$2,$3,$4,$5,$6,$7) on conflict do nothing`,
       [e.client_id, e.id, e.description || e.task_title || "Temps de travail", Math.round((((e.billable_minutes ?? e.minutes) / 60)) * 100) / 100, rate, e.work_date, userId]);
   }
+  for (const clientId of new Set(rows.map((e) => e.client_id!))) await applyAutoApprove(clientId);
 }
 
 async function setWeek(userId: string, start: string, status: string, fields: { by?: string | null; reason?: string; submit?: boolean; paid?: boolean } = {}) {

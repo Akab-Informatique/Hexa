@@ -22,6 +22,7 @@ import { timeRoutes } from "./routes/time.ts";
 import { expenseRoutes } from "./routes/expenses.ts";
 import { timeAdminRoutes } from "./routes/timeAdmin.ts";
 import { serviceRoutes } from "./routes/services.ts";
+import { invoicingRoutes } from "./routes/invoicing.ts";
 import { classRoutes } from "./routes/classes.ts";
 import { directoryRoutes } from "./routes/directory.ts";
 import { integrationRoutes } from "./routes/integrations.ts";
@@ -76,6 +77,7 @@ export function buildApp(): Hono<Env> {
   app.route("/api/team", teamRoutes);
   app.route("/api/my", myToolsRoutes);
   app.route("/api/command", commandRoutes);
+  app.route("/api/accounting", invoicingRoutes);
   app.route("/api/accounting", accountingRoutes);
   app.route("/api/hr", hrRoutes);
   app.route("/api/docs", docsRoutes);

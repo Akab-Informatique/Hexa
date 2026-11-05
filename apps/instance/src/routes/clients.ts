@@ -7,6 +7,7 @@ import { todayISO } from "@nexo/shared/billing";
 import { pool, getSetting, setSetting } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
+import { applyAutoApprove } from "../lib/autoApprove.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";
 
 export const clientRoutes = new Hono<Env>();
@@ -303,6 +304,8 @@ clientRoutes.patch("/:id", requirePermission("clients.edit"), async (c) => {
   // Typing another billing address by hand frees the link with the billing contact.
   const free = d.billingEmail !== undefined ? ", billing_contact_id = null" : "";
   const r = await pool.query(`update clients set ${sets.join(", ")}${free}, updated_at = now() where id = $1 returning id`, [id, ...values]);
+  // Turning an auto-approve rule on also approves what is already waiting.
+  if (r.rowCount && d.autoApproveKinds !== undefined) await applyAutoApprove(id);
   return r.rowCount ? c.json({ ok: true }) : c.json({ error: "not found" }, 404);
 });
 const BILLING_FIELDS_CLIENT = ["billingEmail", "termsDays", "poRequired", "autoApproveKinds", "invoiceNotes"];

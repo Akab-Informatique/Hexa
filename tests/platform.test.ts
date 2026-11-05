@@ -205,3 +205,20 @@ describe("contract charge schedule", () => {
     expect(monthlyEquivalentCents([{ kind: "monthly", priceCents: 10000, quantity: 2 }, { kind: "yearly", priceCents: 12000, quantity: 1 }, { kind: "one_time", priceCents: 999, quantity: 1 }], "monthly")).toBe(21000);
   });
 });
+
+import { aging, dueAfterSent } from "../packages/shared/src/billing.ts";
+
+describe("invoice due day and aging", () => {
+  it("counts the due day from the day the invoice is sent: terms + 1", () => {
+    expect(dueAfterSent("2026-03-10", 30)).toBe("2026-04-10");
+    expect(dueAfterSent("2026-03-10", 0)).toBe("2026-03-11");
+    expect(dueAfterSent("2026-12-30", 15)).toBe("2027-01-15");
+  });
+  it("puts an unpaid invoice in an aging bucket", () => {
+    expect(aging("2026-03-10", "2026-03-10")).toEqual({ daysLate: 0, bucket: "notDue" });
+    expect(aging("2026-03-10", "2026-03-11").bucket).toBe("d1_30");
+    expect(aging("2026-03-10", "2026-04-09").bucket).toBe("d1_30");
+    expect(aging("2026-03-10", "2026-04-10").bucket).toBe("d31_60");
+    expect(aging("2026-01-01", "2026-04-15").bucket).toBe("d90");
+  });
+});

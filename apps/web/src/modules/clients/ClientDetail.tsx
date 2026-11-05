@@ -8,6 +8,7 @@ import { fmtDate, money, useL, useLocale } from "../../lib/l";
 import { Chip, confirmDo, Empty, errMsg, FormDialog, Tabs, type FieldDef } from "../../components/kit";
 import { Modal, PageHeader } from "../../components/ui";
 import { ClassChip, clientFields, statusTone, type ClientClass } from "./ClientsPage";
+import { viewLabel, viewTone } from "../accounting/InvoiceDialog";
 import { ContractWindow, NewContractDialog, codeText } from "./ContractWindow";
 import type { TaskRow } from "../tasks/TasksPage";
 
@@ -18,7 +19,7 @@ interface Detail {
   billingEmail: string; billingContactId: string | null; termsDays?: number | null; poRequired?: boolean; autoApproveKinds?: string[]; invoiceNotes?: string;
   contacts: Contact[]; contracts: Contract[]; children: { id: string; name: string }[]; [k: string]: unknown;
 }
-interface InvoiceRow { id: string; number: string; status: string; total: number; issueDate: string; dueDate: string }
+interface InvoiceRow { id: string; number: string; status: string; view: string; total: number; balance: number; issueDate: string; dueDate: string }
 type Tab = "info" | "contacts" | "contracts" | "tasks" | "invoices" | "billing";
 
 export default function ClientDetail() {
@@ -144,7 +145,7 @@ export default function ClientDetail() {
         <section className="glass p-2">
           {!invoices.data?.length ? <Empty>{l("Aucune facture.", "No invoices.")}</Empty> : (
             <table className="grid"><tbody>{invoices.data.map((i) => (
-              <tr key={i.id}><td><Link to={`/accounting/invoices?open=${i.id}`} className="font-medium no-underline">{i.number}</Link></td><td className="text-muted">{fmtDate(i.issueDate, loc)}</td><td>{money(i.total, loc)}</td><td><Chip tone={i.status === "paid" ? "ok" : i.status === "void" ? "off" : "warn"}>{i.status}</Chip></td></tr>))}</tbody></table>
+              <tr key={i.id}><td><Link to={`/accounting/invoices?open=${i.id}`} className="font-medium no-underline">{i.number}</Link></td><td className="text-muted">{fmtDate(i.issueDate, loc)}</td><td>{money(i.total, loc)}</td><td><Chip tone={viewTone(i.view)}>{viewLabel(i.view, l)}</Chip></td><td className="text-right text-muted">{i.balance > 0 && i.status === "sent" ? money(i.balance, loc) : ""}</td></tr>))}</tbody></table>
           )}
         </section>
       )}

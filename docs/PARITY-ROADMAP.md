@@ -10,6 +10,7 @@ Status key: **missing** = nothing today, **thin** = exists but far simpler than 
 ## Done so far
 - **Timesheets, Expenses, HR ledger** (commit 406c4fe): typed entries, work day and lunch rule, hours bank, weekly approval, expenses with mileage, HR ledger with confirmed adjustments.
 - **CRM and contracts** (first pass): classification, billing contact and email, per-client invoicing settings, shared tab order, paged and sortable client list, delete check; service catalogue; contract window (services, charge schedule with prorata, billed-through, activity); Accounting › Contracts page; work to bill generated from contract charges. Still missing from the reference here: autopay, hours-bank balance logic, parent/child bank pooling, QuickBooks item/tax codes, client-portal access on contacts.
+- **Approvals and Invoices** (first pass): time frame, client then contract grouping, auto-approve rules, set aside with a reason, draft-invoice step with PO and due rule; all-invoices list with filters, sorts, paging and URL state, partial payments, account statements with aging, printable invoice sheet. Still missing: server PDF and email with reminders (needs Mailjet), pay online, quick invoice, QuickBooks codes, payments page.
 
 ## Round 1: core staff modules (chosen first)
 

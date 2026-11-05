@@ -4,6 +4,7 @@ import { z } from "zod";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
+import { applyAutoApprove } from "../lib/autoApprove.ts";
 import { auth, body, camelRows, can } from "./util.ts";
 
 // Expenses modelled on the reference portal: a report (a folder for a period) holds items; each item is sent,
@@ -285,6 +286,7 @@ expenseRoutes.post("/approvals/decision", requirePermission("mytools.expenses.ap
       await pool.query(
         `insert into billing_items (client_id, source, source_id, description, quantity, unit_price, work_date, created_by) values ($1,'expense',$2,$3,1,$4,$5,$6) on conflict do nothing`,
         [i.client_id, i.id, i.description || "Dépense", Math.round(i.amount_cents) / 100, i.spent_on, i.user_id]);
+      await applyAutoApprove(i.client_id);
     }
   }
   await audit(`expense.${d.decision}`, { userId: auth(c).user.id, target: `${items.length} item(s)` });

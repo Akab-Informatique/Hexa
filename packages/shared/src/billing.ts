@@ -49,3 +49,16 @@ export function addRecurrence(date: string, r: { every: number; unit: "day" | "w
   } else d.setUTCFullYear(d.getUTCFullYear() + r.every);
   return toISODate(d);
 }
+
+/**
+ * An invoice goes out as soon as it is finalized, so its due day counts from the day it is sent:
+ * sent day + terms + 1 day (terms 0 = on receipt, due the next day). Reference rule.
+ */
+export const dueAfterSent = (sentDay: string, termsDays: number): string => addDays(sentDay, termsDays + 1);
+
+/** Days late (0 when not late yet) and the aging bucket of an unpaid invoice. */
+export function aging(dueDate: string, today: string): { daysLate: number; bucket: "notDue" | "d1_30" | "d31_60" | "d61_90" | "d90" } {
+  const late = Math.round((parseISODate(today).getTime() - parseISODate(dueDate).getTime()) / 86_400_000);
+  if (late <= 0) return { daysLate: 0, bucket: "notDue" };
+  return { daysLate: late, bucket: late <= 30 ? "d1_30" : late <= 60 ? "d31_60" : late <= 90 ? "d61_90" : "d90" };
+}

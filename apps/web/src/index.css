@@ -127,3 +127,13 @@ table.grid tr:hover td { background: rgb(255 255 255 / 0.03); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 0.16); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
 :focus-visible { outline: 2px solid color-mix(in oklab, var(--brand) 70%, white); outline-offset: 2px; }
+
+/* Printing an invoice or a statement: only the sheet is printed, on white. */
+@media print {
+  body { background: #fff !important; }
+  body * { visibility: hidden !important; }
+  #print-area, #print-area * { visibility: visible !important; }
+  #print-area { position: absolute; left: 0; top: 0; width: 100%; background: #fff !important; color: #111 !important; padding: 16px; backdrop-filter: none !important; }
+  #print-area .grid th, #print-area .grid td { color: #111 !important; border-color: #ccc !important; }
+  .canvas { display: none !important; }
+}
