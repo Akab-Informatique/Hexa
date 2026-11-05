@@ -1,12 +1,13 @@
 import { config } from "./config.ts";
 import { pool } from "./db.ts";
-import { audit, seedSystemGroups } from "./auth/access.ts";
+import { audit, seedClientGroup, seedSystemGroups } from "./auth/access.ts";
 import { seedDemo } from "./seed/demo.ts";
 import { hashPassword, MIN_PASSWORD } from "./auth/crypto.ts";
 
 /** Seeds system groups, and on a brand-new install creates the first master administrator. */
 export async function bootstrap(): Promise<void> {
   await seedSystemGroups();
+  await seedClientGroup();
   const { rows } = await pool.query("select count(*)::int as n from users");
   if (rows[0].n > 0) return;
   const { initialAdminEmail: email, initialAdminPassword: password } = config;

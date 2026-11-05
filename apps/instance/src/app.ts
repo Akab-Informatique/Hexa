@@ -17,6 +17,7 @@ import { myToolsRoutes } from "./routes/mytools.ts";
 import { commandRoutes } from "./routes/command.ts";
 import { accountingRoutes } from "./routes/accounting.ts";
 import { hrRoutes } from "./routes/hr.ts";
+import { portalAdminRoutes, portalRoutes } from "./routes/portal.ts";
 import { docsRoutes } from "./routes/docs.ts";
 import { timeRoutes } from "./routes/time.ts";
 import { expenseRoutes } from "./routes/expenses.ts";
@@ -78,6 +79,8 @@ export function buildApp(): Hono<Env> {
   app.route("/api/admin", adminRoutes);
 
   // Business modules. Each route file enforces its own permissions (see packages/shared/src/permissions.ts).
+  app.route("/api/clients", portalAdminRoutes);
+  app.route("/api/portal", portalRoutes);
   app.route("/api/clients", clientRoutes);
   app.route("/api/pipeline", pipelineRoutes);
   app.route("/api/microsoft", microsoftRoutes);
@@ -113,6 +116,7 @@ export function buildApp(): Hono<Env> {
 
   // ---- Updates (pull model). Only the master administrator may install. ----
   app.get("/api/update/status", requireReady, async (c) => {
+    if (c.get("auth")!.user.kind !== "staff") return c.json({ error: "forbidden" }, 403);
     const lic = license.current();
     const target = lic.pinnedVersion;
     const updateAvailable = Boolean(target) && VERSION_RE.test(target) && compareVersions(target, config.version) > 0;

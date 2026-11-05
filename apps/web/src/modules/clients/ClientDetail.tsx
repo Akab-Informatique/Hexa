@@ -1,3 +1,4 @@
+import { PortalAccess } from "./PortalAccess";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -117,6 +118,7 @@ export default function ClientDetail() {
                 <div className="mt-2 flex flex-wrap gap-1.5">{k.isPrimary && <Chip tone="warn">{l("Principal", "Main")}</Chip>}{k.isBilling && <Chip tone="ok">{l("Facturation", "Billing")}</Chip>}</div>
                 <div className="mt-2 text-sm text-muted">{[k.email, k.phone].filter(Boolean).join(" · ") || "—"}</div>
               </div>))}</div>)}
+          <PortalAccess clientId={id} />
         </section>
       )}
 

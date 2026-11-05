@@ -67,8 +67,15 @@ Status key: **missing** = nothing today, **thin** = exists but far simpler than 
 
 ## Later rounds
 - Sales (pipeline, dashboard, contracts tab), Quotes, Services/Inventory, Projects.
-- Client portal (client users): board, invoices, contracts, documents, mirroring the reference's client side.
+- Client portal: built (see "Client portal" below). Still missing from the reference: quotes, devices.
 - Real integrations: Microsoft 365 calendar/inbox, QuickBooks sync, Mailjet sending, Stripe pay-online.
+
+## Client portal (built)
+- A CRM contact is given access with one button (Client file > Contacts > Portal). A client user is created with a random password nobody knows and a welcome email carries a one-time link (72 h, single use) to choose a password; with no Mailjet, the link is shown to staff instead. Removing access turns the account off and ends its sessions.
+- Client sees: home (balance, overdue count, message board), invoices (unpaid/paid, detail, print, statement), contracts, documents (SharePoint folders shared with their client, read-only), My account (password, language).
+- Isolation: every portal query is bound to the `client_id` of the session, never to the request; drafts and voided invoices never show; client users are refused on every staff route (checked in the smoke test, two clients side by side).
+- Folder rules gained a third principal, `client` (view only), managed from the client file; client users hold no `docs.*` right so every write is refused.
+- Not done: client-side tickets/quotes/devices, forgot-password for clients (staff re-send the link), pay-online.
 
 ## Notes
 - Rights: the reference splits billing rights (`crm.billing`) from general contract edits; Nexo should add the same split.

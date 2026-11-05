@@ -40,6 +40,16 @@ export async function seedSystemGroups(): Promise<void> {
   }
 }
 
+/** The group every client portal user belongs to; it always holds every client right (a user can still be given fewer through overrides). */
+export async function seedClientGroup(): Promise<void> {
+  await pool.query(
+    `insert into groups (slug, name, description, audience, permissions, is_system, locked)
+     values ('client-portal', 'Portail client', 'Accès standard au portail client', 'client', $1::jsonb, true, true)
+     on conflict (slug) do update set permissions = excluded.permissions`,
+    [JSON.stringify(permissionsFor("client"))],
+  );
+}
+
 export async function audit(action: string, opts: { userId?: string | null; target?: string; detail?: unknown; ip?: string } = {}) {
   await pool.query("insert into audit_log (user_id, action, target, detail, ip) values ($1, $2, $3, $4::jsonb, $5)", [
     opts.userId ?? null, action, opts.target ?? null, JSON.stringify(opts.detail ?? {}), opts.ip ?? null,

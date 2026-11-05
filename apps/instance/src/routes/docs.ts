@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
-import { requirePermission, type Env } from "../auth/session.ts";
+import { type Env } from "../auth/session.ts";
 import { leadsToAccess, levelOn, type Level, type Rule } from "../lib/docRules.ts";
 import { cleanPath, getProvider, joinPath, SpError, type Item, type Provider } from "../lib/sharepoint.ts";
 import { auth, body, camelRows, can } from "./util.ts";
@@ -11,14 +11,23 @@ import { auth, body, camelRows, can } from "./util.ts";
 // each request is checked against the portal's folder rules (doc_access), so who sees which folder is
 // managed here. A rule on a folder covers everything below it. Users with docs.manage see every library.
 export const docsRoutes = new Hono<Env>();
-docsRoutes.use("*", requirePermission("docs.view", "docs.edit", "docs.manage"));
+// Staff need a docs right; client portal users reach the same routes read-only (they hold no docs.* right, so every
+// write check below refuses them), limited to the folders given to them or to their client.
+docsRoutes.use("*", async (c, next) => {
+  const a = c.get("auth");
+  if (!a || a.stage !== "ready") return c.json({ error: "unauthorized" }, 401);
+  const ok = a.user.kind === "client" ? Boolean(a.user.clientId) && can(c, "clientportal.docs.view") : can(c, "docs.view", "docs.edit", "docs.manage");
+  if (!ok) return c.json({ error: "forbidden" }, 403);
+  await next();
+});
 
 async function myRules(c: Parameters<typeof auth>[0], drive: string): Promise<Rule[]> {
   const a = auth(c);
   const r = await pool.query(
     `select path, level from doc_access where drive_id = $1 and (
        (principal_type = 'user' and principal_id = $2) or
-       (principal_type = 'group' and principal_id in (select group_id from user_groups where user_id = $2)))`, [drive, a.user.id]);
+       (principal_type = 'group' and principal_id in (select group_id from user_groups where user_id = $2)) or
+       (principal_type = 'client' and principal_id = $3::uuid))`, [drive, a.user.id, a.user.clientId]);
   return r.rows as Rule[];
 }
 
@@ -51,7 +60,8 @@ docsRoutes.get("/libraries", async (c) => {
   const a = auth(c);
   const r = await pool.query(
     `select distinct drive_id from doc_access where (principal_type = 'user' and principal_id = $1) or
-       (principal_type = 'group' and principal_id in (select group_id from user_groups where user_id = $1))`, [a.user.id]);
+       (principal_type = 'group' and principal_id in (select group_id from user_groups where user_id = $1)) or
+       (principal_type = 'client' and principal_id = $2::uuid)`, [a.user.id, a.user.clientId]);
   const ok = new Set(r.rows.map((x) => x.drive_id as string));
   return c.json(libs.filter((l) => ok.has(l.id)));
 });
@@ -144,15 +154,16 @@ docsRoutes.get("/access", async (c) => {
   const drive = c.req.query("drive");
   const r = await pool.query(
     `select a.id, a.drive_id, a.drive_name, a.path, a.principal_type, a.principal_id, a.level, a.created_at,
-            coalesce(u.name, g.name) as principal_name
+            coalesce(u.name, g.name, cl.name) as principal_name
        from doc_access a left join users u on a.principal_type = 'user' and u.id = a.principal_id
                          left join groups g on a.principal_type = 'group' and g.id = a.principal_id
-      where ($1::text is null or a.drive_id = $1) order by a.drive_name, lower(a.path), a.principal_type, lower(coalesce(u.name, g.name))`, [drive ?? null]);
+                         left join clients cl on a.principal_type = 'client' and cl.id = a.principal_id
+      where ($1::text is null or a.drive_id = $1) order by a.drive_name, lower(a.path), a.principal_type, lower(coalesce(u.name, g.name, cl.name))`, [drive ?? null]);
   return c.json(camelRows(r));
 });
 
 const RuleInput = z.object({
-  drive: z.string().min(1), path: z.string().default(""), principalType: z.enum(["user", "group"]), principalId: z.string().uuid(), level: z.enum(["view", "edit"]),
+  drive: z.string().min(1), path: z.string().default(""), principalType: z.enum(["user", "group", "client"]), principalId: z.string().uuid(), level: z.enum(["view", "edit"]),
 });
 
 docsRoutes.post("/access", async (c) => {
@@ -167,9 +178,13 @@ docsRoutes.post("/access", async (c) => {
     const mine = levelOn(await myRules(c, d.drive), path);
     if (!mine || (d.level === "edit" && mine !== "edit")) throw new SpError(403, "forbidden");
   }
+  // A client's portal users only ever get "view": they hold no docs.edit right, and the rule must not promise more.
+  if (d.principalType === "client" && d.level !== "view") throw new SpError(400, "clients get view access only");
   const exists = d.principalType === "user"
     ? (await pool.query("select 1 from users where id = $1 and kind = 'staff'", [d.principalId])).rowCount
-    : (await pool.query("select 1 from groups where id = $1", [d.principalId])).rowCount;
+    : d.principalType === "client"
+      ? (await pool.query("select 1 from clients where id = $1", [d.principalId])).rowCount
+      : (await pool.query("select 1 from groups where id = $1", [d.principalId])).rowCount;
   if (!exists) throw new SpError(404, "unknown user or group");
   // The folder must exist: a typo would otherwise create a rule that protects nothing.
   if (path) {

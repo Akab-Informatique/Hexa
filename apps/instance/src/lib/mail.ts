@@ -77,3 +77,12 @@ export function boardMail(firm: string, title: string, bodyText: string, lang: "
   void lang;
   return { subject: title, html: wrap(firm, `<h2 style="margin:0 0 12px">${esc(title)}</h2><p>${esc(bodyText).replace(/\n/g, "<br>")}</p>`), text: `${title}\n\n${bodyText}` };
 }
+
+/** Welcome email of a client portal user: a one-time link to choose a password (the password itself is never sent). */
+export function welcomeMail(d: { firm: string; name: string; link: string; hours: number }, lang: "fr" | "en") {
+  const fr = lang === "fr";
+  const subject = fr ? `Votre accès au portail ${d.firm}` : `Your ${d.firm} portal access`;
+  const intro = fr ? `Un accès au portail client de ${d.firm} a été créé pour vous. Choisissez votre mot de passe avec le lien ci-dessous (valide ${d.hours} h).` : `A ${d.firm} client portal account was created for you. Choose your password with the link below (valid for ${d.hours} h).`;
+  const html = wrap(d.firm, `<p>${fr ? "Bonjour" : "Hello"} ${esc(d.name)},</p><p>${esc(intro)}</p><p><a href="${esc(d.link)}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#6d4aff;color:#fff;text-decoration:none">${fr ? "Choisir mon mot de passe" : "Choose my password"}</a></p><p style="color:#666;font-size:13px">${esc(d.link)}</p>`);
+  return { subject, html, text: `${intro}\n\n${d.link}` };
+}

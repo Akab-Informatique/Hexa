@@ -133,7 +133,13 @@ export const MODULES: ModuleDef[] = [
   },
   {
     key: "clientportal", audience: "client", section: "clientportal", label: { fr: "Portail client", en: "Client portal" },
-    permissions: [p("clientportal.view", "Accéder au portail", "Access the portal")],
+    permissions: [
+      p("clientportal.view", "Accéder au portail", "Access the portal"),
+      p("clientportal.board.view", "Voir le babillard", "See the message board"),
+      p("clientportal.invoices.view", "Voir ses factures et son relevé", "See its invoices and statement"),
+      p("clientportal.contracts.view", "Voir ses contrats", "See its contracts"),
+      p("clientportal.docs.view", "Voir ses documents", "See its documents"),
+    ],
   },
 ];
 

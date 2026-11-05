@@ -5,7 +5,7 @@ import { z } from "zod";
 import { config } from "../config.ts";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
-import { hashPassword, MIN_PASSWORD, seal, unseal, verifyPassword } from "../auth/crypto.ts";
+import { hashPassword, MIN_PASSWORD, seal, sha256, unseal, verifyPassword } from "../auth/crypto.ts";
 import { clientIp, createSession, destroySession, requireStage, type Env } from "../auth/session.ts";
 import * as license from "../license.ts";
 
@@ -121,5 +121,22 @@ authRoutes.post("/password", requireStage("password", "ready"), async (c) => {
 authRoutes.post("/locale", requireStage("ready", "password", "mfa-setup"), async (c) => {
   const { locale } = z.object({ locale: z.enum(["fr", "en"]) }).parse(await c.req.json().catch(() => ({})));
   await pool.query("update users set locale = $2 where id = $1", [c.get("auth")!.user.id, locale]);
+  return c.json({ ok: true });
+});
+
+// ---- One-time link (client portal welcome email): choose a password without knowing the current one ----
+authRoutes.post("/set-password", async (c) => {
+  const ip = clientIp(c);
+  if (throttled(ip)) return c.json({ error: "too many attempts" }, 429);
+  const b = z.object({ token: z.string().min(20).max(200), password: z.string().min(MIN_PASSWORD) }).safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return c.json({ error: `password must be at least ${MIN_PASSWORD} characters` }, 400);
+  // Claimed atomically: one use only, and only while valid.
+  const t = (await pool.query(
+    "update password_tokens set used_at = now() where token_hash = $1 and used_at is null and expires_at > now() returning user_id", [sha256(b.data.token)])).rows[0];
+  if (!t) return c.json({ error: "link invalid or expired" }, 410);
+  const u = (await pool.query("update users set password_hash = $2, must_change_password = false, failed_logins = 0, locked_until = null where id = $1 and active returning id", [t.user_id, await hashPassword(b.data.password)])).rows[0];
+  if (!u) return c.json({ error: "link invalid or expired" }, 410);
+  await pool.query("delete from sessions where user_id = $1", [u.id]);
+  await audit("password.set_by_link", { userId: u.id, ip });
   return c.json({ ok: true });
 });

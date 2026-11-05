@@ -574,5 +574,106 @@ await post("/api/accounting/quickbooks/disconnect", {});
 ok("disconnecting forgets the company", (await call("GET", "/api/accounting/quickbooks/status")).body.connected === false);
 ok("tokens never come back from the integrations list", !/qb-access|qb-refresh|ms-access|ms-refresh/.test(JSON.stringify((await call("GET", "/api/admin/integrations")).body)));
 
+// ---- Client portal ----
+async function clientLogin(em, pw) {
+  const res = await fetch(BASE + "/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: em, password: pw }) });
+  const set = res.headers.get("set-cookie");
+  return { status: res.status, cookie: set ? set.split(";")[0] : "" };
+}
+const PO_PW = "Portal-pass-2026-xyz";
+const poA = (await post("/api/clients", { name: "SMOKE Portal A" })).body.id;
+const poB = (await post("/api/clients", { name: "SMOKE Portal B" })).body.id;
+const poKA = (await post(`/api/clients/${poA}/contacts`, { name: "Ann Portal", email: "ann.portal@a.test" })).body.id;
+const poKB = (await post(`/api/clients/${poB}/contacts`, { name: "Bob Portal", email: "bob.portal@b.test" })).body.id;
+const poKN = (await post(`/api/clients/${poA}/contacts`, { name: "No Mail" })).body.id;
+const poInvA = (await post("/api/accounting/invoices", { clientId: poA, lines: [{ description: "SMOKE A service", quantity: 2, unitPrice: 100 }] })).body.id;
+const poInvA2 = (await post("/api/accounting/invoices", { clientId: poA, lines: [{ description: "SMOKE A draft only", quantity: 1, unitPrice: 50 }] })).body.id;
+const poInvB = (await post("/api/accounting/invoices", { clientId: poB, lines: [{ description: "SMOKE B service", quantity: 1, unitPrice: 999 }] })).body.id;
+await post(`/api/accounting/invoices/${poInvA}/action`, { action: "send" });
+await post(`/api/accounting/invoices/${poInvB}/action`, { action: "send" });
+await post("/api/command/board", { title: "SMOKE for everyone", body: "hello all", audience: "all" });
+await post("/api/command/board", { title: "SMOKE only B", body: "secret for B", audience: "selected", clientIds: [poB] });
+await post(`/api/clients/${poA}/contracts`, { name: "SMOKE A contract", kind: "recurring", amount: 500 });
+await post(`/api/clients/${poB}/contracts`, { name: "SMOKE B contract", kind: "recurring", amount: 700 });
+
+ok("a contact without an email cannot be given access", (await post(`/api/clients/${poA}/portal/${poKN}`, {})).body?.error === "contact_email_missing");
+ok("a staff email cannot be reused for a client user", await (async () => { const k = (await post(`/api/clients/${poA}/contacts`, { name: "Dup", email: email })).body.id; return (await post(`/api/clients/${poA}/portal/${k}`, {})).body?.error === "email_used"; })());
+const poGrant = await post(`/api/clients/${poA}/portal/${poKA}`, {});
+ok("giving access creates the user and sends the poWelcome email", poGrant.status === 201 && poGrant.body.emailed === true && poGrant.body.link === undefined, JSON.stringify(poGrant.body));
+const poWelcome = (await mockMails()).filter((m) => (m.to ?? []).some((t) => t.Email === "ann.portal@a.test")).pop();
+const poTok = /set-password\?token=([0-9a-f]+)/.exec(poWelcome?.text ?? "")?.[1];
+ok("the email holds a one-time link and never a password", Boolean(poTok) && !/password:/i.test(poWelcome.text));
+ok("before choosing a password nobody can sign in", (await clientLogin("ann.portal@a.test", "anything-at-all-1")).status === 401);
+ok("a short password is refused", (await call("POST", "/api/auth/set-password", { token: poTok, password: "short" }, "")).status === 400);
+ok("a wrong link is refused", (await call("POST", "/api/auth/set-password", { token: "0".repeat(64), password: PO_PW }, "")).status === 410);
+ok("the link sets the password", (await call("POST", "/api/auth/set-password", { token: poTok, password: PO_PW }, "")).status === 200);
+ok("the link works only once", (await call("POST", "/api/auth/set-password", { token: poTok, password: PO_PW + "2" }, "")).status === 410);
+const poCl = await clientLogin("ann.portal@a.test", PO_PW);
+const poCc = poCl.cookie;
+const poMeC = (await call("GET", "/api/auth/me", undefined, poCc)).body;
+ok("the client signs in as a client of their own company", poCl.status === 200 && poMeC.stage === "ready" && poMeC.user.kind === "client" && poMeC.user.clientId === poA, JSON.stringify(poMeC));
+ok("a client holds only client rights", poMeC.rights.includes("clientportal.invoices.view") && !poMeC.rights.some((r) => !r.startsWith("clientportal.")));
+
+const poInv = (await call("GET", "/api/portal/invoices", undefined, poCc)).body;
+ok("the client sees only their own sent invoices", poInv.length === 1 && poInv[0].id === poInvA && poInv[0].balance > 0, JSON.stringify(poInv));
+ok("another client's invoice is not found", (await call("GET", `/api/portal/invoices/${poInvB}`, undefined, poCc)).status === 404);
+ok("a draft invoice is not found", (await call("GET", `/api/portal/invoices/${poInvA2}`, undefined, poCc)).status === 404);
+const poDet = (await call("GET", `/api/portal/invoices/${poInvA}`, undefined, poCc)).body;
+ok("the invoice detail has lines and totals but no internals", poDet.lines.length === 1 && Number(poDet.total) > 200 && poDet.createdBy === undefined && poDet.quickbooksId === undefined && poDet.rates === undefined);
+const poSt = (await call("GET", "/api/portal/statement", undefined, poCc)).body;
+ok("the statement is the client's own", poSt.rows.length === 1 && poSt.rows[0].id === poInvA && poSt.total === poInv[0].balance);
+const poCon = (await call("GET", "/api/portal/contracts", undefined, poCc)).body;
+ok("contracts are the client's own", poCon.length === 1 && poCon[0].name === "SMOKE A contract");
+const poBoard = (await call("GET", "/api/portal/board", undefined, poCc)).body.map((m) => m.title);
+ok("the board shows messages for everyone and none meant for another client", poBoard.includes("SMOKE for everyone") && !poBoard.includes("SMOKE only B"));
+const poMe = (await call("GET", "/api/portal/me", undefined, poCc)).body;
+ok("the portal summary shows the balance", poMe.client.name === "SMOKE Portal A" && poMe.balance === poInv[0].balance);
+
+for (const p of ["/api/clients", "/api/accounting/invoices", "/api/tasks", "/api/admin/users", "/api/directory/clients", "/api/directory/integrations", "/api/update/status", "/api/command/board", "/api/team/dashboards", "/api/docs/access"]) {
+  const r = await call("GET", p, undefined, poCc);
+  ok(`a client is refused on ${p}`, r.status === 403 || r.status === 401, String(r.status));
+}
+ok("staff do not use the client portal API", (await call("GET", "/api/portal/invoices")).status === 403);
+
+// Client B sees none of A
+await post(`/api/clients/${poB}/portal/${poKB}`, {});
+const poTokB = /set-password\?token=([0-9a-f]+)/.exec((await mockMails()).filter((m) => (m.to ?? []).some((t) => t.Email === "bob.portal@b.test")).pop()?.text ?? "")?.[1];
+await call("POST", "/api/auth/set-password", { token: poTokB, password: PO_PW }, "");
+const poCb = (await clientLogin("bob.portal@b.test", PO_PW)).cookie;
+const poBInv = (await call("GET", "/api/portal/invoices", undefined, poCb)).body;
+ok("client B sees only B's invoice", poBInv.length === 1 && poBInv[0].id === poInvB && (await call("GET", `/api/portal/invoices/${poInvA}`, undefined, poCb)).status === 404);
+ok("client B sees the message meant for B", (await call("GET", "/api/portal/board", undefined, poCb)).body.some((m) => m.title === "SMOKE only B"));
+
+// Documents for a client
+ok("no folder rule: a client sees no library", (await call("GET", "/api/docs/libraries", undefined, poCc)).body.length === 0);
+ok("a client may not manage folder rules", (await call("POST", "/api/docs/access", { drive: clientsLib, path: "Acme Corp", principalType: "client", principalId: poA, level: "view" }, poCc)).status === 403);
+ok("a client rule is view only", (await call("POST", "/api/docs/access", { drive: clientsLib, path: "Acme Corp", principalType: "client", principalId: poA, level: "edit" })).status === 400);
+ok("staff share a folder with a client", (await call("POST", "/api/docs/access", { drive: clientsLib, path: "Acme Corp", principalType: "client", principalId: poA, level: "view" })).status === 200);
+ok("the client now sees that library", (await call("GET", "/api/docs/libraries", undefined, poCc)).body.some((l) => l.id === clientsLib));
+ok("the client browses the shared folder", (await call("GET", `/api/docs/browse?drive=${clientsLib}&path=Acme%20Corp%2F2025`, undefined, poCc)).status === 200);
+ok("another folder is refused for the client", (await call("GET", `/api/docs/browse?drive=${clientsLib}&path=Boulangerie%20Dupont`, undefined, poCc)).status === 403);
+ok("client B sees nothing of A's folder", (await call("GET", `/api/docs/browse?drive=${clientsLib}&path=Acme%20Corp`, undefined, poCb)).status === 403);
+const poDl = await fetch(BASE + `/api/docs/file?drive=${clientsLib}&path=${encodeURIComponent("Acme Corp/2025/Bilan.txt")}`, { headers: { cookie: poCc } });
+ok("the client downloads a shared file", poDl.status === 200);
+ok("a client cannot upload", (await up(poCc, "Acme Corp/2025", "x.txt")).status === 403);
+ok("a client cannot create or delete", (await call("POST", "/api/docs/folder", { drive: clientsLib, path: "Acme Corp", name: "hack" }, poCc)).status === 403 && (await call("DELETE", `/api/docs/item?drive=${clientsLib}&path=${encodeURIComponent("Acme Corp/2025/Bilan.txt")}`, undefined, poCc)).status === 403);
+
+// Removing access
+const poRm = await call("DELETE", `/api/clients/${poA}/portal/${poKA}`);
+ok("removing access ends the session at once", poRm.status === 200 && (await call("GET", "/api/auth/me", undefined, poCc)).body.stage === "anonymous");
+ok("a removed client cannot sign in", (await clientLogin("ann.portal@a.test", PO_PW)).status === 401);
+const poBack = await post(`/api/clients/${poA}/portal/${poKA}`, {});
+ok("access can be restored with a new link", poBack.status === 201 && poBack.body.userId === poGrant.body.userId);
+ok("the old password still needs the new link flow only when reset", (await clientLogin("ann.portal@a.test", PO_PW)).status === 200);
+ok("an ordinary staff user cannot manage portal access", await (async () => {
+  const u = await post("/api/admin/users", { email: "smoke.portalstaff@x.test", name: "Portal Staff", groupIds: [] });
+  const g = (await call("GET", "/api/admin/groups")).body.find((x) => x.slug === "staff");
+  await call("PATCH", `/api/admin/users/${u.body.id}`, { groupIds: [g.id] });
+  const l1 = await clientLogin("smoke.portalstaff@x.test", u.body.temporaryPassword);
+  await call("POST", "/api/auth/password", { current: u.body.temporaryPassword, next: PO_PW }, l1.cookie);
+  const l2 = await clientLogin("smoke.portalstaff@x.test", PO_PW);
+  return (await call("POST", `/api/clients/${poB}/portal/${poKB}`, {}, l2.cookie)).status === 403;
+})());
+
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");
 process.exit(failures ? 1 : 0);

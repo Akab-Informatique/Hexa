@@ -16,7 +16,7 @@ import { auth, body, buildUpdate, camel, camelRows, isUuid } from "./util.ts";
 // - payments can be partial; the status follows the balance; an invoice with payments cannot be voided.
 export const invoicingRoutes = new Hono<Env>();
 
-class Fail extends Error { constructor(public status: number, public code: string, public extra?: object) { super(code); } }
+export class Fail extends Error { constructor(public status: number, public code: string, public extra?: object) { super(code); } }
 invoicingRoutes.onError((e, c) => {
   if (e instanceof Fail) return c.json({ error: e.code, ...e.extra }, e.status as 400);
   throw e;
@@ -117,7 +117,7 @@ async function newInvoice(clientId: string, userId: string, lines: z.infer<typeo
 }
 
 /** Invoices with what was paid, the balance and a view status: open | overdue | partial | paid | voided | draft. */
-const WITH_PAID = `with v as (
+export const WITH_PAID = `with v as (
   select i.*, cl.name as client_name, coalesce(p.paid, 0) as paid_cents,
     case when i.status = 'void' then 'voided' when i.status = 'draft' then 'draft'
          when coalesce(p.paid, 0) >= round(i.total * 100) then 'paid'
@@ -154,7 +154,7 @@ invoicingRoutes.get("/invoices", requirePermission(...INV_VIEW), async (c) => {
   return c.json({ rows, total: t.n, page, size, totals: { amount: roundCents(Number(t.total)), balance: dollars(Number(t.balance)) } });
 });
 
-async function invoiceDetail(id: string) {
+export async function invoiceDetail(id: string) {
   if (!isUuid(id)) throw new Fail(404, "not_found");
   const r = (await pool.query(`${WITH_PAID} select v.*, cl.address, cl.city, cl.province, cl.postal_code, cl.billing_email, cl.email as client_email, cl.terms_days from v join clients cl on cl.id = v.client_id where v.id = $2`, [todayISO(), id])).rows[0];
   if (!r) throw new Fail(404, "not_found");
@@ -289,8 +289,9 @@ invoicingRoutes.post("/invoices/:id/emailed", requirePermission("accounting.invo
 });
 
 // ---- Account statement: what a client still owes, by due day, with the aging of the debt
-invoicingRoutes.get("/clients/:id/statement", requirePermission(...INV_VIEW), async (c) => {
-  const id = c.req.param("id");
+invoicingRoutes.get("/clients/:id/statement", requirePermission(...INV_VIEW), async (c) => c.json(await statementOf(c.req.param("id"))));
+
+export async function statementOf(id: string) {
   if (!isUuid(id)) throw new Fail(404, "not_found");
   const today = todayISO();
   const cl = (await pool.query("select id, name, address, city, province, postal_code, billing_email, email from clients where id = $1", [id])).rows[0];
@@ -304,5 +305,5 @@ invoicingRoutes.get("/clients/:id/statement", requirePermission(...INV_VIEW), as
     return { id: x.id, number: x.number, issueDate: x.issueDate, dueDate: x.dueDate, poNumber: x.poNumber, total: Number(x.total), balance, daysLate: a.daysLate, bucket: a.bucket };
   });
   const total = roundCents(rows.reduce((a, x) => a + x.balance, 0));
-  return c.json({ client: camel(cl), today, rows, buckets, total, pastDue: roundCents(total - buckets.notDue) });
-});
+  return { client: camel(cl), today, rows, buckets, total, pastDue: roundCents(total - buckets.notDue) };
+}

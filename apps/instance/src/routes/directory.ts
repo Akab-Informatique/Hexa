@@ -25,4 +25,7 @@ directoryRoutes.get("/clients", async (c) => {
   return c.json(r.rows);
 });
 
-directoryRoutes.get("/integrations", async (c) => c.json(await integrationStatus()));
+directoryRoutes.get("/integrations", async (c) => {
+  if (c.get("auth")!.user.kind !== "staff") return c.json({ error: "forbidden" }, 403);
+  return c.json(await integrationStatus());
+});
