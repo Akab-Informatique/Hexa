@@ -71,8 +71,8 @@ function BoardLatest() {
 
 function TimesheetWeek() {
   const l = useL();
-  const q = useQuery({ queryKey: ["w-ts"], queryFn: () => api<{ totalMinutes: number; hasDraft: boolean }>("/api/my/timesheet") });
-  return <Card title={l("Ma feuille de temps", "My timesheet")} to="/my/timesheet"><Big n={hours(q.data?.totalMinutes ?? 0)} label={l("cette semaine", "this week")} />{q.data?.hasDraft && (q.data.totalMinutes > 0) && <p className="mt-2 text-xs text-warn">{l("À soumettre", "To submit")}</p>}</Card>;
+  const q = useQuery({ queryKey: ["w-ts"], queryFn: () => api<{ totals: { paidMinutes: number }; status: string; entries: unknown[] }>("/api/time/week") });
+  return <Card title={l("Ma feuille de temps", "My timesheet")} to="/my/timesheet"><Big n={hours(q.data?.totals.paidMinutes ?? 0)} label={l("payées cette semaine", "paid this week")} />{(q.data?.status === "draft" || q.data?.status === "rejected") && (q.data.entries.length > 0) && <p className="mt-2 text-xs text-warn">{l("À envoyer", "To send")}</p>}</Card>;
 }
 
 function ClientsCount() {

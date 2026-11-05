@@ -15,6 +15,8 @@ import DashboardsPage from "./modules/team/DashboardsPage";
 import MeetingPage from "./modules/team/MeetingPage";
 import ConnectPage from "./modules/mytools/ConnectPage";
 import TimesheetPage from "./modules/mytools/TimesheetPage";
+import ExpensesPage from "./modules/mytools/ExpensesPage";
+import TimeTypesPage from "./admin/TimeTypesPage";
 import { KbPage, ProceduresPage } from "./modules/mytools/KnowledgePages";
 import BoardPage from "./modules/command/BoardPage";
 import DocsPage from "./modules/command/DocsPage";
@@ -39,7 +41,7 @@ export default function App() {
 /** Page for each sidebar path. The right check is repeated here so a typed URL is refused too. */
 const PAGES: Record<string, ReactNode> = {
   "/team": <DashboardsPage />, "/team/meeting": <MeetingPage />,
-  "/my/calendar": <ConnectPage kind="calendar" />, "/my/mail": <ConnectPage kind="mail" />, "/my/timesheet": <TimesheetPage />, "/my/kb": <KbPage />, "/my/procedures": <ProceduresPage />,
+  "/my/calendar": <ConnectPage kind="calendar" />, "/my/mail": <ConnectPage kind="mail" />, "/my/timesheet": <TimesheetPage />, "/my/expenses": <ExpensesPage />, "/my/kb": <KbPage />, "/my/procedures": <ProceduresPage />,
   "/command/board": <BoardPage />, "/command/pipeline": <PipelinePage />,
   "/clients": <ClientsPage />, "/tasks": <TasksPage />, "/docs": <DocsPage />,
   "/accounting/invoices": <InvoicesPage />, "/accounting/approvals": <ApprovalsPage />, "/accounting/vendors": <VendorsPage />, "/hr": <HrPage />,
@@ -69,6 +71,7 @@ function Signed({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...k: str
         <Route path="groups" element={can("admin.users.view") ? <GroupsPage /> : denied} />
         <Route path="integrations/:provider" element={can("admin.integrations.view") ? <IntegrationPage /> : denied} />
         <Route path="tenant" element={can("admin.branding.view") ? <TenantPage /> : denied} />
+        <Route path="time" element={can("admin.time.manage") ? <TimeTypesPage /> : denied} />
         <Route path="audit" element={can("admin.audit.view") ? <AuditPage /> : denied} />
       </Route>
       <Route path="*" element={<Navigate to={first?.path ?? "/admin"} replace />} />

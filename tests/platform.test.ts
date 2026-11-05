@@ -146,3 +146,26 @@ describe("documentation folder rules", () => {
     expect(() => cleanPath("a/b:c")).toThrow();
   });
 });
+
+import { accruablePaidMinutes, centsOf, holidayBasisMinutes, holidayPayCents, paidMinutes, workdayMinutes } from "../packages/shared/src/workday.ts";
+
+describe("work day and paid hours", () => {
+  it("takes the unpaid half of lunch off only on days of five hours or more without lunch", () => {
+    expect(workdayMinutes("08:00", "16:00")).toEqual({ span: 480, lunchTaken: 30, paid: 450 });
+    expect(workdayMinutes("08:00", "13:00")?.paid).toBe(300);
+    expect(workdayMinutes("08:00", "14:00")?.paid).toBe(330); // 6 h span: 5 h without lunch, so 30 min off
+    expect(workdayMinutes("16:00", "08:00")).toBeNull();
+    expect(workdayMinutes("8:00", "25:00")).toBeNull();
+  });
+  it("pays work days less the bank, plus vacation, sick, holiday and payouts", () => {
+    const e = [{ kind: "workday" as const, minutes: 450, bankMinutes: 60 }, { kind: "vacation" as const, minutes: 480 }, { kind: "work" as const, minutes: 120 }, { kind: "other" as const, minutes: 60 }];
+    expect(paidMinutes(e)).toBe(390 + 480);
+    expect(accruablePaidMinutes(e)).toBe(390);
+  });
+  it("works holiday pay out as a twentieth of four weeks, capped per week", () => {
+    const basis = [holidayBasisMinutes([{ kind: "workday", minutes: 3000 }], 40), 1200, 1200, 0];
+    expect(basis[0]).toBe(2400);
+    expect(holidayPayCents(basis, 3000)).toBe(Math.round(((2400 + 1200 + 1200) / 60) * 3000 / 20));
+    expect(centsOf(90, 3000)).toBe(4500);
+  });
+});

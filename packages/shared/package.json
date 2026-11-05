@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./permissions": "./src/permissions.ts",
     "./billing": "./src/billing.ts",
+    "./workday": "./src/workday.ts",
     "./migrate": "./src/migrate.ts"
   }
 }

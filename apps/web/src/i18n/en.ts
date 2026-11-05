@@ -19,7 +19,7 @@ export const en: Dict = {
   },
   nav: {
     team: "Team", team_dashboard: "Dashboard", team_meeting: "Team meeting",
-    mytools: "My tools", mytools_calendar: "Calendar", mytools_mail: "Inbox", mytools_timesheet: "Timesheet", mytools_kb: "Knowledge base", mytools_procedures: "Procedures",
+    mytools: "My tools", mytools_calendar: "Calendar", mytools_mail: "Inbox", mytools_timesheet: "Timesheet", mytools_expenses: "Expenses", mytools_kb: "Knowledge base", mytools_procedures: "Procedures",
     command: "Command center", command_board: "Message board", command_pipeline: "Pipeline",
     tasks_all: "Tasks",
     management: "Management", docs_sharepoint: "Documentation", clients_all: "Clients",
@@ -40,7 +40,7 @@ export const en: Dict = {
     title: "Administration", back: "Back to the app",
     groupAccess: "Users and access", users: "Users", groups: "Groups and access",
     groupIntegrations: "Integrations", o365: "Microsoft 365", mailjet: "Mailjet", quickbooks: "QuickBooks", sharepoint: "SharePoint",
-    groupTenant: "Environment", tenant: "Branding and modules", audit: "Activity log",
+    groupTenant: "Environment", tenant: "Branding and modules", time: "Time and expenses", audit: "Activity log",
     newUser: "New user", editUser: "Edit user", userGroups: "Groups", userOverrides: "Individual rights",
     overridesHelp: "Adjust this user's rights beyond their groups. \"Deny\" always wins.",
     tempPassword: "Temporary password", tempPasswordHelp: "Give it to the user. It will not be shown again and must be changed at first sign-in.",

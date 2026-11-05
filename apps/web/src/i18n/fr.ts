@@ -18,7 +18,7 @@ export const fr = {
   },
   nav: {
     team: "Équipe", team_dashboard: "Tableau de bord", team_meeting: "Rencontre d'équipe",
-    mytools: "Mes outils", mytools_calendar: "Calendrier", mytools_mail: "Boîte de réception", mytools_timesheet: "Feuille de temps", mytools_kb: "Base de connaissances", mytools_procedures: "Procédures",
+    mytools: "Mes outils", mytools_calendar: "Calendrier", mytools_mail: "Boîte de réception", mytools_timesheet: "Feuille de temps", mytools_expenses: "Dépenses", mytools_kb: "Base de connaissances", mytools_procedures: "Procédures",
     command: "Centre de commande", command_board: "Babillard", command_pipeline: "Pipeline",
     tasks_all: "Tâches",
     management: "Gestion", docs_sharepoint: "Documentation", clients_all: "Clients",
@@ -39,7 +39,7 @@ export const fr = {
     title: "Administration", back: "Retour à l'application",
     groupAccess: "Utilisateurs et accès", users: "Utilisateurs", groups: "Groupes et accès",
     groupIntegrations: "Intégrations", o365: "Microsoft 365", mailjet: "Mailjet", quickbooks: "QuickBooks", sharepoint: "SharePoint",
-    groupTenant: "Environnement", tenant: "Image de marque et modules", audit: "Journal d'activité",
+    groupTenant: "Environnement", tenant: "Image de marque et modules", time: "Temps et dépenses", audit: "Journal d'activité",
     newUser: "Nouvel utilisateur", editUser: "Modifier l'utilisateur", userGroups: "Groupes", userOverrides: "Droits individuels",
     overridesHelp: "Ajustez les droits de cet utilisateur au-delà de ses groupes. « Refuser » l'emporte toujours.",
     tempPassword: "Mot de passe temporaire", tempPasswordHelp: "Communiquez-le à l'utilisateur. Il ne sera plus affiché et devra être changé à la première connexion.",

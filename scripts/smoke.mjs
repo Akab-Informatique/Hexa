@@ -65,10 +65,10 @@ const pt = await call("POST", "/api/team/meeting/points", { weekStart: meeting.b
 ok("add meeting point", pt.status === 201);
 
 // ---- Timesheet -> work to bill -> invoice ----
-const entry = await call("POST", "/api/my/timesheet", { workDate: "2026-11-02", minutes: 90, clientId: cid, description: "SMOKE work" });
+const entry = await call("POST", "/api/time/entries", { workDate: "2026-11-02", typeKey: "work", minutes: 90, clientId: cid, description: "SMOKE work" });
 ok("add time entry", entry.status === 201);
-ok("submit week", (await call("POST", "/api/my/timesheet/submit", { week: "2026-11-02" })).body.submitted >= 1);
-ok("cannot approve own time", (await call("POST", `/api/my/timesheet/${entry.body.id}/decision`, { decision: "approve" })).status === 403);
+ok("submit week", (await call("POST", "/api/time/week/submit", { start: "2026-11-02" })).body.status === "submitted");
+ok("cannot approve own time", (await call("POST", "/api/time/approvals/decision", { userId: (await call("GET", "/api/hr/staff")).body.find((x) => x.email === email).id, start: "2026-11-02", decision: "approve" })).status === 403);
 
 const item = await call("POST", "/api/accounting/billing-items", { clientId: cid, description: "SMOKE consulting", quantity: 2, unitPrice: 100.5 });
 ok("create billing item", item.status === 201);
@@ -142,6 +142,82 @@ ok("create a sub-folder", (await call("POST", "/api/docs/folder", { drive: clien
 const rules = (await call("GET", `/api/docs/access?drive=${clientsLib}`)).body;
 for (const r of rules.filter((x) => x.principalId === dUser.body.id)) await call("DELETE", `/api/docs/access/${r.id}`);
 ok("removing the rules removes the access", (await call("GET", "/api/docs/libraries", undefined, uc)).body.length === 0);
+
+// ---- Timesheets, hours bank, HR ledger ----
+const U = dUser.body.id;
+const post = (path, data, as) => call("POST", path, data, as);
+const wd = { workDate: "2026-01-05", typeKey: "workday", start: "08:00", end: "16:00", bankMinutes: 60 };
+ok("work day needs a wage to bank hours", (await post("/api/time/entries", wd, uc)).body?.error === "hr_wage_missing");
+await call("PUT", `/api/hr/staff/${U}`, { hourlyWage: 30, jobTitle: "Comptable" });
+const wdr = await post("/api/time/entries", wd, uc);
+ok("work day created", wdr.status === 201, JSON.stringify(wdr.body));
+ok("one work day a day", (await post("/api/time/entries", { ...wd, bankMinutes: 0 }, uc)).status === 409);
+ok("short day has no lunch deducted", (await post("/api/time/entries", { workDate: "2026-01-06", typeKey: "workday", start: "08:00", end: "13:00" }, uc)).status === 201);
+let wk = (await call("GET", "/api/time/week?start=2026-01-05", undefined, uc)).body;
+const day1 = wk.entries.find((e) => e.workDate === "2026-01-05"), day2 = wk.entries.find((e) => e.workDate === "2026-01-06");
+ok("8:00-16:00 = 7.5 h paid, 8:00-13:00 = 5 h", day1.minutes === 450 && day2.minutes === 300, JSON.stringify([day1.minutes, day2.minutes]));
+ok("paid minutes = work days less banked", wk.totals.paidMinutes === 450 - 60 + 300 && wk.totals.bankedMinutes === 60);
+ok("the employee's own week carries no money", !/cents|wage|amount/i.test(JSON.stringify(wk)));
+const bal0 = (await call("GET", `/api/hr/staff/${U}/ledger`)).body.balances;
+ok("banking 1 h at 30 $ puts 30 $ in the bank", bal0.bankCents === 3000, JSON.stringify(bal0));
+const vac = await post("/api/time/entries", { workDate: "2026-01-07", typeKey: "vacation", minutes: 480 }, uc);
+ok("vacation can take the bank below zero (flagged)", vac.status === 201 && vac.body.negative.includes("vacation"));
+const hol = await post("/api/time/entries", { workDate: "2026-01-12", typeKey: "holiday" }, uc);
+const wk2 = (await call("GET", "/api/time/week?start=2026-01-12", undefined, uc)).body;
+ok("holiday pay is worked out from the 4 weeks before", hol.status === 201 && wk2.entries[0].minutes === 59, JSON.stringify(wk2.entries));
+ok("client work, billable", (await post("/api/time/entries", { workDate: "2026-01-08", typeKey: "work", minutes: 120, clientId: cid, description: "SMOKE conseil", billable: true }, uc)).status === 201);
+ok("staff cannot approve", (await post("/api/time/approvals/decision", { userId: U, start: "2026-01-05", decision: "approve" }, uc)).status === 403);
+ok("empty week cannot be sent", (await post("/api/time/week/submit", { start: "2026-02-02" }, uc)).body?.error === "week_empty");
+ok("send the week", (await post("/api/time/week/submit", { start: "2026-01-05" }, uc)).body?.status === "submitted");
+const balSent = (await call("GET", `/api/hr/staff/${U}/ledger`)).body.balances;
+ok("4 % of gross pay accrues to the vacation bank", balSent.vacationCents === -24000 + Math.round(((450 - 60 + 300) / 60) * 3000 * 0.04), JSON.stringify(balSent));
+ok("a sent week is locked for its owner", (await post("/api/time/entries", { workDate: "2026-01-09", typeKey: "meeting", minutes: 30 }, uc)).body?.error === "timesheet_locked");
+ok("a rejection needs a reason", (await post("/api/time/approvals/decision", { userId: U, start: "2026-01-05", decision: "reject" })).status === 400);
+await post("/api/time/approvals/decision", { userId: U, start: "2026-01-05", decision: "reject", reason: "SMOKE: corrige le mardi" });
+wk = (await call("GET", "/api/time/week?start=2026-01-05", undefined, uc)).body;
+ok("rejected week reopens with the reason", wk.status === "rejected" && wk.rejectReason.includes("corrige") && !wk.locked);
+ok("accrual is removed while the week is open", (await call("GET", `/api/hr/staff/${U}/ledger`)).body.balances.vacationCents === -24000);
+await post("/api/time/week/submit", { start: "2026-01-05" }, uc);
+ok("approve the week", (await post("/api/time/approvals/decision", { userId: U, start: "2026-01-05", decision: "approve" })).status === 200);
+ok("billable client time became work to bill", (await call("GET", "/api/accounting/billing-items?status=pending")).body.some((x) => x.description === "SMOKE conseil" && Number(x.quantity) === 2));
+ok("mark paid", (await post("/api/time/approvals/paid", { items: [{ userId: U, start: "2026-01-05" }], paid: true })).status === 200 && (await call("GET", "/api/time/week?start=2026-01-05", undefined, uc)).body.status === "paid");
+const rep = (await call("GET", "/api/time/report?from=2026-01-05&to=2026-01-11", undefined, uc)).body;
+ok("productivity = billable over work-day hours", rep.productivityPct === Math.round((120 / (450 + 300)) * 100), JSON.stringify(rep));
+const acc = (await call("GET", `/api/time/week/accounting?userId=${U}&start=2026-01-05`)).body;
+ok("accounting copy has the money", acc.wageCents === 3000 && acc.grossCents > 0 && Boolean(acc.balances));
+ok("HR list hides wage and balances from non-managers", (await call("GET", "/api/hr/staff", undefined, uc)).body.every((x) => x.hourlyWage == null && x.bankCents === undefined));
+ok("manual HR change needs the confirmation", (await post(`/api/hr/staff/${U}/adjust`, { account: "sick", hours: -3, reason: "x" })).status === 400);
+const adj = await post(`/api/hr/staff/${U}/adjust`, { account: "sick", hours: -3, reason: "SMOKE opening", confirm: true });
+ok("a hand change below zero is allowed and flagged", adj.status === 200 && adj.body.negative === true);
+
+// ---- Expenses ----
+const er = await post("/api/expenses/reports", { title: "SMOKE janvier", periodStart: "2026-01-01", periodEnd: "2026-01-31" }, uc);
+ok("create expense report", er.status === 201);
+const RID = er.body.id;
+const ex = (data) => post(`/api/expenses/reports/${RID}/items`, data, uc);
+ok("a trip needs from and to", (await ex({ spentOn: "2026-01-10", typeKey: "mileage", km: 10 })).body?.error === "mileage_places_required");
+ok("a trip is saved", (await ex({ spentOn: "2026-01-10", typeKey: "mileage", km: 10, fromPlace: "Joliette", toPlace: "Montréal" })).status === 201);
+ok("out-of-period expense refused", (await ex({ spentOn: "2026-02-10", typeKey: "meal", amount: 20 })).body?.error === "expense_out_of_period");
+ok("billable expense needs a client", (await ex({ spentOn: "2026-01-11", typeKey: "parking", amount: 12.5, billable: true })).body?.error === "client_required");
+ok("billable expense saved", (await ex({ spentOn: "2026-01-11", typeKey: "parking", amount: 12.5, billable: true, clientId: cid, description: "SMOKE stationnement" })).status === 201);
+const rd = (await call("GET", `/api/expenses/reports/${RID}`, undefined, uc)).body;
+const trip = rd.items.find((i) => i.unit === "km");
+ok("the employee sees kilometres but never the money of a trip", trip.amountCents === null && rd.totalKm === 10 && rd.totalCents === 1250);
+ok("the km rate is not exposed", !/rateCents|rate_cents/.test(JSON.stringify((await call("GET", "/api/expenses/types", undefined, uc)).body)));
+ok("send the report", (await post(`/api/expenses/reports/${RID}/submit`, undefined, uc)).body?.submitted === 2);
+ok("a sent report is locked", (await ex({ spentOn: "2026-01-12", typeKey: "meal", amount: 9 })).body?.error === "report_submitted");
+const appr = (await call("GET", "/api/expenses/approvals")).body.find((x) => x.reportId === RID);
+ok("approver sees the trip's money (70 c/km)", Boolean(appr) && appr.items.find((i) => i.unit === "km").amountCents === 700);
+const ids = appr.items.map((i) => i.id);
+ok("staff cannot decide on expenses", (await post("/api/expenses/approvals/decision", { ids, decision: "approve" }, uc)).status === 403);
+ok("a refusal needs a reason", (await post("/api/expenses/approvals/decision", { ids: [trip.id], decision: "refuse" })).status === 400);
+await post("/api/expenses/approvals/decision", { ids: [trip.id], decision: "refuse", reason: "SMOKE: precisez le trajet" });
+ok("a refused item reopens the report", (await call("GET", `/api/expenses/reports/${RID}`, undefined, uc)).body.editable === true);
+const park = appr.items.find((i) => i.unit !== "km");
+await post("/api/expenses/approvals/decision", { ids: [park.id], decision: "approve" });
+ok("approved billable expense is work to bill", (await call("GET", "/api/accounting/billing-items?status=pending")).body.some((x) => x.description === "SMOKE stationnement"));
+ok("mark expense paid", (await post("/api/expenses/approvals/paid", { ids: [park.id], paid: true })).status === 200);
+ok("favourite expense", (await post("/api/expenses/favorites", { label: "SMOKE Joliette-Montreal", typeKey: "mileage", km: 70, fromPlace: "Joliette", toPlace: "Montréal" }, uc)).status === 201 && (await call("GET", "/api/expenses/favorites", undefined, uc)).body.length === 1);
 
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");
 process.exit(failures ? 1 : 0);

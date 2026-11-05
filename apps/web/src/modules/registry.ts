@@ -1,4 +1,4 @@
-import { BookOpen, Briefcase, CalendarDays, CheckSquare, Clock, FileText, FolderOpen, Inbox, LayoutDashboard, ListChecks, Megaphone, Receipt, Truck, UserCog, Users, Workflow, Wrench, ClipboardCheck, Landmark, type LucideIcon } from "lucide-react";
+import { BookOpen, Briefcase, CalendarDays, CheckSquare, Clock, FileText, FolderOpen, Inbox, LayoutDashboard, ListChecks, Megaphone, Receipt, Truck, UserCog, Users, Workflow, Wrench, ClipboardCheck, Landmark, Wallet, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   path: string;
@@ -20,7 +20,8 @@ export const NAV: NavSection[] = [
   { key: "mytools", labelKey: "nav.mytools", icon: Wrench, items: [
     { path: "/my/calendar", labelKey: "nav.mytools_calendar", icon: CalendarDays, permission: "mytools.calendar.use" },
     { path: "/my/mail", labelKey: "nav.mytools_mail", icon: Inbox, permission: "mytools.mail.use" },
-    { path: "/my/timesheet", labelKey: "nav.mytools_timesheet", icon: Clock, permission: ["mytools.timesheet.use", "mytools.timesheet.approve"] },
+    { path: "/my/timesheet", labelKey: "nav.mytools_timesheet", icon: Clock, permission: ["mytools.timesheet.use", "mytools.timesheet.approve", "mytools.timesheet.manage"] },
+    { path: "/my/expenses", labelKey: "nav.mytools_expenses", icon: Wallet, permission: ["mytools.expenses.use", "mytools.expenses.approve"] },
     { path: "/my/kb", labelKey: "nav.mytools_kb", icon: BookOpen, permission: ["mytools.kb.view", "mytools.kb.edit"] },
     { path: "/my/procedures", labelKey: "nav.mytools_procedures", icon: FileText, permission: ["mytools.procedures.view", "mytools.procedures.edit", "mytools.procedures.manage"] },
   ] },

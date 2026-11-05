@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Cloud, History, Mail, Palette, ShieldCheck, Users, FolderSync, Receipt } from "lucide-react";
+import { ArrowLeft, Cloud, History, Mail, Palette, ShieldCheck, Users, FolderSync, Receipt, Clock } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { useBranding } from "../lib/theme";
 import { BrandMark, LanguageToggle } from "../components/ui";
@@ -18,6 +18,7 @@ const GROUPS = [
   ] },
   { key: "admin.groupTenant", items: [
     { to: "/admin/tenant", key: "admin.tenant", icon: Palette, perm: "admin.branding.view" },
+    { to: "/admin/time", key: "admin.time", icon: Clock, perm: "admin.time.manage" },
     { to: "/admin/audit", key: "admin.audit", icon: History, perm: "admin.audit.view" },
   ] },
 ];

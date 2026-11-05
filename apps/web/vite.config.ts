@@ -11,6 +11,7 @@ export default defineConfig({
     alias: {
       "@nexo/shared/permissions": path.resolve(__dirname, "../../packages/shared/src/permissions.ts"),
       "@nexo/shared/billing": path.resolve(__dirname, "../../packages/shared/src/billing.ts"),
+      "@nexo/shared/workday": path.resolve(__dirname, "../../packages/shared/src/workday.ts"),
     },
   },
   server: { port: 5173, proxy: { "/api": { target: api } } },

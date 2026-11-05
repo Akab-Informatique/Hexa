@@ -16,7 +16,8 @@
       "@nexo/shared": ["packages/shared/src/index.ts"],
       "@nexo/shared/migrate": ["packages/shared/src/migrate.ts"],
       "@nexo/shared/permissions": ["packages/shared/src/permissions.ts"],
-      "@nexo/shared/billing": ["packages/shared/src/billing.ts"]
+      "@nexo/shared/billing": ["packages/shared/src/billing.ts"],
+      "@nexo/shared/workday": ["packages/shared/src/workday.ts"]
     }
   },
   "include": ["packages/*/src", "apps/instance/src", "apps/console/src", "apps/updater/src", "modules/*", "tests"],
