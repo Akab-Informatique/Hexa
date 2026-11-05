@@ -1,4 +1,4 @@
-import { BookOpen, Briefcase, CalendarDays, CheckSquare, Clock, FileText, FolderOpen, Inbox, LayoutDashboard, ListChecks, Megaphone, Receipt, Truck, UserCog, Users, Workflow, Wrench, ClipboardCheck, Landmark, Wallet, type LucideIcon } from "lucide-react";
+import { BookOpen, Briefcase, CalendarDays, CheckSquare, Clock, FileText, FolderOpen, Inbox, LayoutDashboard, ListChecks, Megaphone, Receipt, Truck, UserCog, Users, Workflow, Wrench, ClipboardCheck, Landmark, Wallet, Package, FileSignature, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   path: string;
@@ -32,10 +32,12 @@ export const NAV: NavSection[] = [
   { key: "management", labelKey: "nav.management", icon: Briefcase, items: [
     { path: "/clients", labelKey: "nav.clients_all", icon: Briefcase, permission: "clients.view" },
     { path: "/tasks", labelKey: "nav.tasks_all", icon: CheckSquare, permission: ["tasks.view", "command.pipeline.view"] },
+    { path: "/services", labelKey: "nav.services_catalogue", icon: Package, permission: ["services.view", "services.manage"] },
     { path: "/docs", labelKey: "nav.docs_sharepoint", icon: FolderOpen, permission: ["docs.view", "docs.edit", "docs.manage"] },
   ] },
   { key: "accounting", labelKey: "nav.accounting", icon: Landmark, items: [
     { path: "/accounting/invoices", labelKey: "nav.accounting_invoices", icon: Receipt, permission: ["accounting.invoices.view", "accounting.invoices.edit", "accounting.invoices.manage"] },
+    { path: "/accounting/contracts", labelKey: "nav.accounting_contracts", icon: FileSignature, permission: ["clients.contracts.view"] },
     { path: "/accounting/approvals", labelKey: "nav.accounting_approvals", icon: ClipboardCheck, permission: ["accounting.approvals.view", "accounting.approvals.manage"] },
     { path: "/accounting/vendors", labelKey: "nav.accounting_vendors", icon: Truck, permission: ["accounting.vendors.view", "accounting.vendors.manage"] },
     { path: "/hr", labelKey: "nav.hr_staff", icon: UserCog, permission: ["hr.view", "hr.manage"] },

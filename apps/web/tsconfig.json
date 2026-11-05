@@ -15,7 +15,8 @@
     "paths": {
       "@nexo/shared/permissions": ["../../packages/shared/src/permissions.ts"],
       "@nexo/shared/billing": ["../../packages/shared/src/billing.ts"],
-      "@nexo/shared/workday": ["../../packages/shared/src/workday.ts"]
+      "@nexo/shared/workday": ["../../packages/shared/src/workday.ts"],
+      "@nexo/shared/contractCharges": ["../../packages/shared/src/contractCharges.ts"]
     }
   },
   "include": ["src"]

@@ -21,6 +21,8 @@ import { docsRoutes } from "./routes/docs.ts";
 import { timeRoutes } from "./routes/time.ts";
 import { expenseRoutes } from "./routes/expenses.ts";
 import { timeAdminRoutes } from "./routes/timeAdmin.ts";
+import { serviceRoutes } from "./routes/services.ts";
+import { classRoutes } from "./routes/classes.ts";
 import { directoryRoutes } from "./routes/directory.ts";
 import { integrationRoutes } from "./routes/integrations.ts";
 import { ZodError } from "zod";
@@ -65,6 +67,7 @@ export function buildApp(): Hono<Env> {
   app.route("/api/auth", authRoutes);
   app.route("/api/admin/integrations", integrationRoutes);
   app.route("/api/admin/time", timeAdminRoutes);
+  app.route("/api/admin/classes", classRoutes);
   app.route("/api/admin", adminRoutes);
 
   // Business modules. Each route file enforces its own permissions (see packages/shared/src/permissions.ts).
@@ -78,6 +81,7 @@ export function buildApp(): Hono<Env> {
   app.route("/api/docs", docsRoutes);
   app.route("/api/time", timeRoutes);
   app.route("/api/expenses", expenseRoutes);
+  app.route("/api/services", serviceRoutes);
   app.route("/api/directory", directoryRoutes);
 
   app.onError((err, c) => {

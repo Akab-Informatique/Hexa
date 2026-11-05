@@ -86,6 +86,8 @@ export const MODULES: ModuleDef[] = [
       p("clients.contracts.view", "Voir les contrats", "View contracts"),
       p("clients.contracts.edit", "Modifier les contrats", "Edit contracts"),
       p("clients.users.manage", "Gérer les accès portail des clients", "Manage client portal access"),
+      p("clients.billing.manage", "Modifier la facturation des clients (courriel, délais, taux, forfaits)", "Edit client billing (email, terms, rates, packages)"),
+      p("clients.layout.manage", "Régler l'ordre des onglets du dossier client", "Set the order of the client page tabs"),
     ],
   },
   {
@@ -98,6 +100,13 @@ export const MODULES: ModuleDef[] = [
       p("accounting.approvals.manage", "Approuver le travail à facturer", "Approve work to bill"),
       p("accounting.vendors.view", "Voir les fournisseurs", "View vendors"),
       p("accounting.vendors.manage", "Gérer les fournisseurs et paiements", "Manage vendors and payments"),
+    ],
+  },
+  {
+    key: "services", audience: "staff", section: "management", label: { fr: "Services", en: "Services" },
+    permissions: [
+      p("services.view", "Voir le catalogue de services", "View the service catalogue"),
+      p("services.manage", "Gérer le catalogue de services", "Manage the service catalogue"),
     ],
   },
   {
@@ -116,6 +125,7 @@ export const MODULES: ModuleDef[] = [
       p("admin.integrations.view", "Voir les intégrations", "View integrations"),
       p("admin.integrations.manage", "Configurer les intégrations", "Configure integrations"),
       p("admin.branding.view", "Voir l'image de marque et les modules", "View branding and modules"),
+      p("admin.classes.manage", "Gérer les classifications de clients", "Manage client classifications"),
       p("admin.time.manage", "Gérer les types de temps et de dépenses", "Manage time and expense types"),
       p("admin.audit.view", "Voir le journal d'activité", "View the activity log"),
     ],

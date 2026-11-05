@@ -169,3 +169,39 @@ describe("work day and paid hours", () => {
     expect(centsOf(90, 3000)).toBe(4500);
   });
 });
+
+import { chargesFor, monthlyEquivalentCents } from "../packages/shared/src/contractCharges.ts";
+
+describe("contract charge schedule", () => {
+  const monthly = { billingPeriod: "monthly" as const, startsOn: "2026-01-10", endsOn: null };
+  const svc = { id: "a", name: "Tenue de livres", kind: "monthly" as const, priceCents: 10000, quantity: 1, addedOn: "2026-01-10" };
+  it("prorates the first month by days and then charges full months", () => {
+    const c = chargesFor(monthly, [svc], "2026-03-31");
+    expect(c.map((x) => x.cents)).toEqual([7097, 10000, 10000]); // 22 of 31 days in January
+    expect(c[0]).toMatchObject({ date: "2026-01-10", prorated: true, days: 22, periodDays: 31 });
+    expect(c[1]).toMatchObject({ date: "2026-02-01", prorated: false });
+  });
+  it("prorates the last part month when the contract ends inside it", () => {
+    const c = chargesFor({ ...monthly, endsOn: "2026-02-14" }, [svc], "2026-12-31");
+    expect(c).toHaveLength(2);
+    expect(c[1]!.cents).toBe(Math.round((10000 * 14) / 28));
+  });
+  it("charges a yearly service once per contract year, prorated when added late", () => {
+    const y = { id: "b", name: "Déclaration annuelle", kind: "yearly" as const, priceCents: 120000, quantity: 1, addedOn: "2026-07-11" };
+    const c = chargesFor(monthly, [y], "2027-12-31");
+    expect(c).toHaveLength(2);
+    expect(c[0]).toMatchObject({ date: "2026-07-11", prorated: true });
+    expect(c[0]!.cents).toBe(Math.round((120000 * c[0]!.days) / c[0]!.periodDays));
+    expect(c[1]).toMatchObject({ date: "2027-01-10", cents: 120000, prorated: false });
+  });
+  it("charges a monthly service of a yearly contract twelve-fold, and a one-time service once", () => {
+    const yearly = { billingPeriod: "yearly" as const, startsOn: "2026-01-01", endsOn: null };
+    expect(chargesFor(yearly, [{ ...svc, addedOn: "2026-01-01" }], "2026-12-31")[0]!.cents).toBe(120000);
+    const once = chargesFor(monthly, [{ ...svc, kind: "one_time" as const, priceCents: 5000, quantity: 2 }], "2030-01-01");
+    expect(once).toHaveLength(1);
+    expect(once[0]!.cents).toBe(10000);
+  });
+  it("gives a monthly equivalent for lists", () => {
+    expect(monthlyEquivalentCents([{ kind: "monthly", priceCents: 10000, quantity: 2 }, { kind: "yearly", priceCents: 12000, quantity: 1 }, { kind: "one_time", priceCents: 999, quantity: 1 }], "monthly")).toBe(21000);
+  });
+});

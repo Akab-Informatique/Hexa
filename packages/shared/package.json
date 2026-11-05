@@ -10,6 +10,7 @@
     "./permissions": "./src/permissions.ts",
     "./billing": "./src/billing.ts",
     "./workday": "./src/workday.ts",
+    "./contractCharges": "./src/contractCharges.ts",
     "./migrate": "./src/migrate.ts"
   }
 }

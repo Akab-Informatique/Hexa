@@ -7,6 +7,10 @@ multi-tenant differences (per-tenant branding, modules, flags, demo data).
 
 Status key: **missing** = nothing today, **thin** = exists but far simpler than the reference.
 
+## Done so far
+- **Timesheets, Expenses, HR ledger** (commit 406c4fe): typed entries, work day and lunch rule, hours bank, weekly approval, expenses with mileage, HR ledger with confirmed adjustments.
+- **CRM and contracts** (first pass): classification, billing contact and email, per-client invoicing settings, shared tab order, paged and sortable client list, delete check; service catalogue; contract window (services, charge schedule with prorata, billed-through, activity); Accounting › Contracts page; work to bill generated from contract charges. Still missing from the reference here: autopay, hours-bank balance logic, parent/child bank pooling, QuickBooks item/tax codes, client-portal access on contacts.
+
 ## Round 1: core staff modules (chosen first)
 
 ### Dashboard (thin)

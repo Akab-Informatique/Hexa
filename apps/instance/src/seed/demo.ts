@@ -12,11 +12,19 @@ export async function seedDemo(profile: string, adminId: string): Promise<void> 
       [c.name, c.businessNumber, c.fiscalYearEnd, c.city, adminId]);
     const id = r.rows[0].id as string;
     ids.push(id);
-    await pool.query("insert into client_contacts (client_id, name, email, title, is_primary, is_billing) values ($1,$2,$3,$4,true,true)", [id, c.contact.name, c.contact.email, c.contact.title]);
+    const k = await pool.query("insert into client_contacts (client_id, name, email, title, is_primary, is_billing) values ($1,$2,$3,$4,true,true) returning id", [id, c.contact.name, c.contact.email, c.contact.title]);
+    await pool.query("update clients set billing_contact_id = $2, billing_email = $3 where id = $1", [id, k.rows[0].id, c.contact.email]);
     if (c.contract) {
-      await pool.query(
-        `insert into client_contracts (client_id, name, kind, amount, hourly_rate, cycle, starts_on) values ($1,$2,$3,$4,$5,$6,current_date - 90)`,
-        [id, c.contract.name, c.contract.kind, c.contract.amount ?? 0, c.contract.hourlyRate ?? null, c.contract.cycle]);
+      const kr = await pool.query(
+        `insert into client_contracts (client_id, name, kind, amount, hourly_rate, cycle, starts_on, billing_period) values ($1,$2,$3,$4,$5,$6,current_date - 90,$7) returning id`,
+        [id, c.contract.name, c.contract.kind, c.contract.amount ?? 0, c.contract.hourlyRate ?? null, c.contract.cycle, c.contract.cycle === "yearly" ? "yearly" : "monthly"]);
+      if (c.contract.kind === "recurring") {
+        // A recurring contract carries its service, copied from the catalogue (name and price at the time).
+        const kind = c.contract.cycle === "yearly" ? "yearly" : "monthly";
+        const cents = Math.round((c.contract.amount ?? 0) * 100);
+        const sv = await pool.query("insert into services (name, kind, price_cents) values ($1,$2,$3) on conflict (lower(name)) do update set name = services.name returning id", [c.contract.name, kind, cents]);
+        await pool.query("insert into contract_services (contract_id, service_id, name, kind, unit_price_cents, quantity, added_on) values ($1,$2,$3,$4,$5,1,current_date - 90)", [kr.rows[0].id, sv.rows[0].id, c.contract.name, kind, cents]);
+      }
     }
   }
   for (const t of p.tasks) {
