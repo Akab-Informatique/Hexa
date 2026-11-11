@@ -12,6 +12,7 @@ import { TrackingView } from "./TrackingPage";
 import { ClassChip, clientFields, freqLabel, statusTone, type ClientClass } from "./ClientsPage";
 import { viewLabel, viewTone } from "../accounting/InvoiceDialog";
 import { ContractWindow, NewContractDialog, codeText } from "./ContractWindow";
+import { ClientProducts } from "./ClientProducts";
 import type { TaskRow } from "../tasks/TasksPage";
 
 interface Contact { id: string; name: string; email: string; phone: string; title: string; isPrimary: boolean; isBilling: boolean; notes: string }
@@ -131,6 +132,7 @@ export default function ClientDetail() {
       )}
 
       {active === "contracts" && (
+        <>
         <section className="glass p-2">
           <div className="flex justify-end p-2">{can("clients.contracts.edit") && <button className="btn btn-primary" onClick={() => setDialog({ kind: "newContract" })}><Plus size={15} />{l("Contrat", "Contract")}</button>}</div>
           {c.contracts.length === 0 ? <Empty>{l("Aucun contrat.", "No contracts.")}</Empty> : (
@@ -140,6 +142,8 @@ export default function ClientDetail() {
                 <td>{k.kind === "hourly" || k.kind === "hours_bank" ? (k.hourlyRate != null ? (Number(k.hourlyRate) === 0 ? l("Heures incluses", "Hours included") : `${money(k.hourlyRate, loc)}/h`) : "—") : k.kind === "fixed" ? money(k.amount, loc) : ""}</td>
                 <td><Chip tone={k.status === "active" ? "ok" : "off"}>{k.status === "active" ? l("Actif", "Active") : k.status === "paused" ? l("En pause", "Paused") : l("Terminé", "Ended")}</Chip></td></tr>))}</tbody></table>)}
         </section>
+        <ClientProducts clientId={id} onChanged={refresh} />
+        </>
       )}
 
       {active === "tasks" && (

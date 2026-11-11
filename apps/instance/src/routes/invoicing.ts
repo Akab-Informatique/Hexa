@@ -198,7 +198,7 @@ invoicingRoutes.post("/invoices/from-items", requirePermission("accounting.invoi
     if (cl.po_required && !o.poNumber?.trim()) { skipped.push({ clientId, name: cl.name, reason: "po_required" }); continue; }
     const lines = rows.map((it) => ({
       description: `${it.contract_name ? `${it.contract_name} · ` : ""}${it.description}${it.work_date ? ` (${String(it.work_date).slice(0, 10)})` : ""}`,
-      quantity: Number(it.quantity), unitPrice: Number(it.unit_price), taxable: true, billingItemId: it.id as string,
+      quantity: Number(it.quantity), unitPrice: Number(it.unit_price), taxable: it.taxable !== false, billingItemId: it.id as string,
     }));
     const calc = computeInvoice(lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, taxable: l.taxable })), s);
     const due = o.dueDate ?? dueAfterSent(todayISO(), await termsOf(clientId));

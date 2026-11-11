@@ -11,6 +11,7 @@
     "./billing": "./src/billing.ts",
     "./workday": "./src/workday.ts",
     "./contractCharges": "./src/contractCharges.ts",
+    "./productSale": "./src/productSale.ts",
     "./migrate": "./src/migrate.ts"
   }
 }

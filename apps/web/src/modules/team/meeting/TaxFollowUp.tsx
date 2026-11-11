@@ -3,11 +3,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
 import { useAuth } from "../../../lib/auth";
 import { fmtDate, useL, useLocale } from "../../../lib/l";
-import { changeTip } from "../../clients/TrackingPage";
+import { changeTip } from "../../../lib/changeTip";
 
 type St = "todo" | "done" | "na" | "progress" | "review";
 interface Box { status: St; prev: string; by: string | null; at: string | null }
-interface Das { clientId: string; name: string; resource: string; filer: string; fed: Box; prov: Box; ccq: Box }
+interface Das { clientId: string; name: string; resource: string; filer: string; fed?: Box; prov?: Box; ccq?: Box }
 interface Tax extends Box { clientId: string; name: string; resource: string }
 interface Month { due: string; period: string; dasDue: string; taxDue: string; das: Das[]; tax: Tax[] }
 
@@ -24,9 +24,12 @@ export function TaxFollowUp() {
   const edit = can("clients.tracking.edit");
   if (!q.data) return null;
   const set = async (clientId: string, kind: "das" | "tax", period: string, item: string, cur: St) => {
-    await api(`/api/tracking/${clientId}/filing`, { method: "PUT", body: { kind, period, item, status: NEXT[cur] } });
-    await qc.invalidateQueries({ queryKey: ["meeting-tracking"] });
-    await qc.invalidateQueries({ queryKey: ["tracking"] });
+    try {
+      await api(`/api/tracking/${clientId}/filing`, { method: "PUT", body: { kind, period, item, status: NEXT[cur] } });
+    } finally {
+      // Always replace local state with server truth, also when the save failed.
+      await Promise.all([qc.invalidateQueries({ queryKey: ["meeting-tracking"] }), qc.invalidateQueries({ queryKey: ["tracking"] })]);
+    }
   };
   const chip = (s: St) => ({ color: s === "done" ? "var(--ok)" : s === "na" ? "var(--muted)" : "var(--warn)", borderColor: s === "done" ? "var(--ok)" : s === "na" ? "var(--line)" : "var(--warn)" });
   const mark = (s: St) => (s === "done" ? "✓" : s === "na" ? "N/A" : "·");
@@ -39,7 +42,9 @@ export function TaxFollowUp() {
       </div>
       <div className="grid gap-5 lg:grid-cols-2">
         {q.data.months.map((m, idx) => {
-          const dasOpen = m.das.filter((d) => [d.fed, d.prov, d.ccq].some((b) => open(b.status)) && d.filer !== "them");
+          // Only the firm's own DAS: 'us' = fed/prov/ccq, 'them_ccq_us' = ccq; any other label is not ours. The server already sends open boxes only.
+          const keysOf = (d: Das) => ((d.filer === "us" ? ["fed", "prov", "ccq"] : d.filer === "them_ccq_us" ? ["ccq"] : []) as ("fed" | "prov" | "ccq")[]).filter((k) => d[k] !== undefined);
+          const dasOpen = m.das.filter((d) => keysOf(d).some((k) => open(d[k]?.status ?? "na")));
           const taxOpen = m.tax.filter((t) => open(t.status));
           return (
             <div key={m.due}>
@@ -51,8 +56,8 @@ export function TaxFollowUp() {
                     <li key={d.clientId} className="flex items-center justify-between gap-2">
                       <span className="min-w-0 truncate"><Link to={`/clients/${d.clientId}`} className="no-underline hover:underline">{d.name}</Link>{d.resource && <span className="text-xs text-muted"> · {d.resource}</span>}</span>
                       <span className="flex shrink-0 gap-1">
-                        {(["fed", "prov", "ccq"] as const).filter((k) => k !== "ccq" || d.filer !== "them" || d.ccq.status !== "na").map((k) => (
-                          <button key={k} type="button" title={changeTip(l, loc, d[k].status, d[k].by, d[k].at)} disabled={!edit} onClick={() => void set(d.clientId, "das", m.period, k, d[k].status)} className="h-6 rounded-md border px-1.5 text-[11px]" style={chip(d[k].status)}>{k === "fed" ? "Féd" : k === "prov" ? "QC" : "CCQ"} {mark(d[k].status)}</button>
+                        {keysOf(d).map((k) => (
+                          <button key={k} type="button" title={changeTip(l, loc, d[k]?.status ?? "todo", d[k]?.by, d[k]?.at)} disabled={!edit} onClick={() => void set(d.clientId, "das", m.period, k, d[k]?.status ?? "todo")} className="h-6 rounded-md border px-1.5 text-[11px]" style={chip(d[k]?.status ?? "todo")}>{k === "fed" ? "Féd" : k === "prov" ? "QC" : "CCQ"} {mark(d[k]?.status ?? "todo")}</button>
                         ))}
                       </span>
                     </li>

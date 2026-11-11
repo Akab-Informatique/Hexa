@@ -3,6 +3,7 @@ import { z } from "zod";
 import { addRecurrence, todayISO, addDays, fridayOf, mondayOf } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
+import { audit } from "../auth/access.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";
 
 export const taskRoutes = new Hono<Env>();
@@ -103,7 +104,7 @@ taskRoutes.post("/", requirePermission(...EDIT), async (c) => {
      d.estimateMinutes ?? null, d.visibility, d.parentId ?? null, d.waitsForId ?? null, d.recurrence ? JSON.stringify(d.recurrence) : null, d.tags],
   );
   const id = r.rows[0].id as string;
-  for (const [i, text] of (d.checklist ?? []).entries()) await pool.query("insert into task_checklist (task_id, text, position) values ($1, $2, $3)", [id, text, i]);
+  if (d.checklist?.length) await pool.query("insert into task_checklist (task_id, text, position) select $1, t, i - 1 from unnest($2::text[]) with ordinality as u(t, i)", [id, d.checklist]);
   if (d.viewerIds?.length) for (const v of d.viewerIds) await pool.query("insert into task_viewers values ($1, $2) on conflict do nothing", [id, v]);
   if (d.kind || d.startTime || d.dueTime || d.remindEveryDays) {
     // A continuous task comes back every n days (a week by default); a daily one never has a due day.
@@ -122,8 +123,16 @@ taskRoutes.get("/:id", requirePermission(...VIEW), async (c) => {
     pool.query("select n.*, u.name as user_name from task_notes n left join users u on u.id = n.user_id where n.task_id = $1 order by n.created_at", [id]),
     pool.query("select id, title, status, assignee_id, due_date from tasks s where s.parent_id = $2 and (s.visibility = 'team' or s.created_by = $1 or s.assignee_id = $1) order by s.created_at", [auth(c).user.id, id]),
     pool.query("select u.id, u.name from task_viewers v join users u on u.id = v.user_id where v.task_id = $1", [id]),
-    // Everyone's time entries on this task, newest first.
-    pool.query("select e.id, e.work_date, e.minutes, e.description, e.billable, e.status, u.name as user_name from timesheet_entries e join users u on u.id = e.user_id where e.task_id = $1 order by e.work_date desc, e.created_at desc", [id]),
+    // Deliberate rule, narrower than time.ts (which keeps timesheets private to their owner and approvers): any viewer of a task
+    // sees who logged how much and when, but only for the viewer's own entries or submitted/approved ones; drafts/rejected entries
+    // of others stay hidden. The free-text description is only returned for the viewer's own entries (or to approvers/managers).
+    // Billable flag and status are never returned.
+    pool.query(
+      `select e.id, e.work_date, e.minutes, case when $3 or e.user_id = $2 then e.description else '' end as description, u.name as user_name
+         from timesheet_entries e join users u on u.id = e.user_id
+        where e.task_id = $1 and ($3 or e.user_id = $2 or e.status in ('submitted','approved'))
+        order by e.work_date desc, e.created_at desc`,
+      [id, auth(c).user.id, can(c, "mytools.timesheet.approve", "mytools.timesheet.manage")]),
   ]);
   return c.json({ ...camel(r.rows[0]), checklist: camelRows(checklist), notes: camelRows(notes), subtasks: camelRows(subtasks), viewers: viewers.rows, timeEntries: camelRows(time) });
 });
@@ -241,9 +250,12 @@ taskRoutes.delete("/checklist/:cid", requirePermission(...EDIT), async (c) => {
 
 taskRoutes.post("/:id/notes", requirePermission(...VIEW), async (c) => {
   const id = c.req.param("id");
+  if (!isUuid(id)) return c.json({ error: "not found" }, 404);
   const visible = await pool.query("select 1 from tasks t where t.id = $2 and " + VISIBLE, [auth(c).user.id, id]);
   if (!visible.rowCount) return c.json({ error: "not found" }, 404);
   const { body: text, audience } = await body(c, z.object({ body: z.string().min(1).max(5000), audience: z.enum(["internal", "client"]).default("internal") }));
+  if (audience === "client" && !can(c, ...EDIT)) return c.json({ error: "forbidden" }, 403);
   await pool.query("insert into task_notes (task_id, user_id, body, audience) values ($1, $2, $3, $4)", [id, auth(c).user.id, text, audience]);
+  if (audience === "client") await audit("task.note_to_client", { userId: auth(c).user.id, target: id });
   return c.json({ ok: true }, 201);
 });

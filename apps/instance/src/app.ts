@@ -12,6 +12,7 @@ import { authRoutes } from "./routes/auth.ts";
 import { adminRoutes } from "./routes/admin.ts";
 import { clientRoutes } from "./routes/clients.ts";
 import { trackingRoutes } from "./routes/tracking.ts";
+import { autoTaskRuleRoutes } from "./routes/autoTaskRules.ts";
 import { taskRoutes } from "./routes/tasks.ts";
 import { teamRoutes } from "./routes/team.ts";
 import { myToolsRoutes } from "./routes/mytools.ts";
@@ -87,6 +88,7 @@ export function buildApp(): Hono<Env> {
   app.route("/api/tracking", trackingRoutes);
   app.route("/api/pipeline", pipelineRoutes);
   app.route("/api/microsoft", microsoftRoutes);
+  app.route("/api/auto-task-rules", autoTaskRuleRoutes);
   app.route("/api/tasks", taskTimerRoutes);
   app.route("/api/tasks", taskRoutes);
   app.route("/api/team/meeting", meetingRoutes);

@@ -1,13 +1,16 @@
-import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { chargesFor, monthlyEquivalentCents, type ServiceLine } from "@hexa/shared/contractCharges";
+import { chargesFor, monthlyEquivalentCents } from "@hexa/shared/contractCharges";
+import { canAttach, centsToDecimal, checkSale, isValidDay, MAX_PRICE_CENTS, type ServiceKindDb } from "@hexa/shared/productSale";
 import { todayISO } from "@hexa/shared/billing";
 import { pool, getSetting, setSetting } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { applyAutoApprove } from "../lib/autoApprove.ts";
+import { autoTasksSoon } from "../lib/autoTasks.ts";
+import { uuidFromKey } from "../lib/billingKeys.ts";
+import { linesOf, refreshContractBilling } from "../lib/contractBilling.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";
 
 export const clientRoutes = new Hono<Env>();
@@ -101,16 +104,12 @@ clientRoutes.post("/", requirePermission("clients.edit"), async (c) => {
   if (d.contactName?.trim()) {
     await pool.query("insert into client_contacts (client_id, name, email, phone, is_primary) values ($1, $2, $3, $4, true)", [r.rows[0].id, d.contactName.trim(), d.email ?? "", d.phone ?? ""]);
   }
+  autoTasksSoon(r.rows[0].id);
   await audit("client.created", { userId: auth(c).user.id, target: d.name });
   return c.json({ id: r.rows[0].id }, 201);
 });
 
 // ------------------------------------------------------------------ Contracts across clients (before /:id)
-async function linesOf(contractId: string): Promise<ServiceLine[]> {
-  const r = await pool.query("select id, name, kind, unit_price_cents, quantity, added_on from contract_services where contract_id = $1 order by added_on, created_at", [contractId]);
-  return r.rows.map((x) => ({ id: x.id, name: x.name, kind: x.kind, priceCents: x.unit_price_cents, quantity: Number(x.quantity), addedOn: x.added_on }));
-}
-
 clientRoutes.get("/contracts/all", requirePermission("clients.contracts.view"), async (c) => {
   const st = c.req.query("status") ?? "active";
   const q = (c.req.query("q") ?? "").trim();
@@ -126,28 +125,9 @@ clientRoutes.get("/contracts/all", requirePermission("clients.contracts.view"), 
   }));
 });
 
-/** Work to bill from contract services: one line per service and charge that has come due, once (the id is a hash). */
+/** Work to bill from contract services, once per charge (see lib/contractBilling.ts). */
 clientRoutes.post("/contracts/refresh-billing", requirePermission("accounting.approvals.manage", "clients.billing.manage"), async (c) => {
-  const today = todayISO();
-  const contracts = (await pool.query(
-    `select k.*, cl.auto_approve_kinds from client_contracts k join clients cl on cl.id = k.client_id where k.status = 'active' and cl.status <> 'inactive'`)).rows;
-  let created = 0;
-  for (const k of contracts) {
-    const lines = await linesOf(k.id);
-    if (!lines.length) continue;
-    const charges = chargesFor({ billingPeriod: k.billing_period, startsOn: k.starts_on, endsOn: k.ends_on }, lines, today)
-      .filter((ch) => !k.billed_through || ch.date > k.billed_through);
-    for (const ch of charges) {
-      const h = createHash("sha1").update(`${k.id}:${ch.lineId}:${ch.date}`).digest("hex");
-      const sourceId = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
-      const auto = (k.auto_approve_kinds as string[]).includes("contract");
-      const r = await pool.query(
-        `insert into billing_items (client_id, source, source_id, contract_id, description, quantity, unit_price, work_date, status)
-         values ($1,'contract',$2,$3,$4,1,$5,$6,$7) on conflict do nothing`,
-        [k.client_id, sourceId, k.id, `${k.name} · ${ch.description}${ch.prorated ? ` — prorata ${ch.days}/${ch.periodDays} j` : ""}`, ch.cents / 100, ch.date, auto ? "approved" : "pending"]);
-      created += r.rowCount ?? 0;
-    }
-  }
+  const created = await refreshContractBilling();
   await audit("contracts.billing_refreshed", { userId: auth(c).user.id, detail: { created } });
   return c.json({ created });
 });
@@ -237,51 +217,172 @@ clientRoutes.delete("/contracts/:cid", requirePermission("clients.contracts.edit
 });
 
 // ---- Services on a contract
-const LineInput = z.object({ serviceId: z.string().uuid().nullable().optional(), name: z.string().min(1).max(200).optional(), kind: z.enum(["monthly", "yearly", "one_time"]).optional(), price: z.number().min(0).max(1e7).optional(), quantity: z.number().min(0.01).max(100000).optional(), addedOn: Day.optional() });
+// Money is integer cents. A line keeps its own price (override of the catalogue price), start, optional end and period.
+const PriceCents = z.number().int().min(0).max(MAX_PRICE_CENTS);
+const LineInput = z.object({
+  serviceId: z.string().uuid().nullable().optional(), name: z.string().trim().min(1).max(200).optional(), kind: z.enum(["monthly", "quarterly", "yearly", "one_time"]).optional(),
+  priceCents: PriceCents.optional(), quantity: z.number().min(0.01).max(100000).optional(), addedOn: Day.optional(), endsOn: Day.nullable().optional(),
+});
 
 async function assertInTerm(k: Record<string, any>, day: string) {
-  if (day < k.starts_on || (k.ends_on && day > k.ends_on)) throw new Fail(400, "service_outside_term");
+  if (!isValidDay(day) || day < k.starts_on || (k.ends_on && day > k.ends_on)) throw new Fail(400, "service_outside_term");
+}
+async function assertClientOpen(clientId: string) {
+  const cl = (await pool.query("select name, status from clients where id = $1", [clientId])).rows[0];
+  if (!cl) throw new Fail(404, "not_found");
+  if (cl.status === "inactive") throw new Fail(409, "client_inactive");
+  return cl as { name: string; status: string };
+}
+/** A catalogue service that can be newly attached: active and recurring. Lines already attached are never checked again (they keep billing). */
+async function attachableService(id: string) {
+  const s = (await pool.query("select name, kind, price_cents, active from services where id = $1", [id])).rows[0];
+  if (!s) throw new Fail(404, "service_not_found");
+  if (!s.active) throw new Fail(409, "service_inactive");
+  if (!canAttach({ active: s.active, kind: s.kind as ServiceKindDb })) throw new Fail(409, "service_is_product");
+  return s as { name: string; kind: ServiceKindDb; price_cents: number };
 }
 
 clientRoutes.post("/contracts/:cid/services", requirePermission("clients.contracts.edit"), async (c) => {
   const k = await contractRow(c.req.param("cid"));
   if (k.kind !== "recurring") throw new Fail(409, "contract_not_recurring");
+  await assertClientOpen(k.client_id);
   const d = await body(c, LineInput);
-  let name = d.name, kind = d.kind, price = d.price;
+  let name = d.name, kind = d.kind, price = d.priceCents;
   if (d.serviceId) {
-    const s = (await pool.query("select * from services where id = $1 and active", [d.serviceId])).rows[0];
-    if (!s) throw new Fail(404, "service_not_found");
-    name ??= s.name; kind ??= s.kind; price ??= s.price_cents / 100;
+    const s = await attachableService(d.serviceId);
+    name ??= s.name; kind ??= s.kind; price ??= s.price_cents;
   }
   if (!name) throw new Fail(400, "name_required");
-  if (d.price !== undefined && !can(c, "clients.billing.manage")) throw new Fail(403, "forbidden");
+  if (d.priceCents !== undefined && !can(c, "clients.billing.manage")) throw new Fail(403, "forbidden");
   const day = d.addedOn ?? (todayISO() < k.starts_on ? k.starts_on : todayISO());
   await assertInTerm(k, day);
+  if (d.endsOn && (!isValidDay(d.endsOn) || d.endsOn < day)) throw new Fail(400, "service_dates");
   const r = await pool.query(
-    "insert into contract_services (contract_id, service_id, name, kind, unit_price_cents, quantity, added_on) values ($1,$2,$3,$4,$5,$6,$7) returning id",
-    [k.id, d.serviceId ?? null, name, kind ?? "monthly", Math.round((price ?? 0) * 100), d.quantity ?? 1, day]);
+    "insert into contract_services (contract_id, service_id, name, kind, unit_price_cents, quantity, added_on, ends_on) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id",
+    [k.id, d.serviceId ?? null, name, kind ?? "monthly", price ?? 0, d.quantity ?? 1, day, d.endsOn ?? null]);
   await logEvent(k.id, "service_added", `${name} × ${d.quantity ?? 1}`, auth(c).user.id);
+  await audit("contract.service_attached", { userId: auth(c).user.id, target: k.client_name, detail: { contractId: k.id, lineId: r.rows[0].id, serviceId: d.serviceId ?? null, priceCents: price ?? 0, startsOn: day, endsOn: d.endsOn ?? null } });
   return c.json({ id: r.rows[0].id }, 201);
 });
 
 clientRoutes.patch("/contracts/:cid/services/:sid", requirePermission("clients.contracts.edit"), async (c) => {
   const k = await contractRow(c.req.param("cid"));
-  const d = await body(c, LineInput.pick({ price: true, quantity: true, addedOn: true }));
-  if (d.price !== undefined && !can(c, "clients.billing.manage")) throw new Fail(403, "forbidden");
+  const sid = c.req.param("sid");
+  if (!isUuid(sid)) throw new Fail(404, "not_found");
+  const d = await body(c, LineInput.pick({ priceCents: true, quantity: true, addedOn: true, endsOn: true }));
+  if (d.priceCents !== undefined && !can(c, "clients.billing.manage")) throw new Fail(403, "forbidden");
   if (d.addedOn) await assertInTerm(k, d.addedOn);
+  const endsSet = d.endsOn !== undefined;
+  if (d.endsOn && !isValidDay(d.endsOn)) throw new Fail(400, "service_dates");
   const r = await pool.query(
-    "update contract_services set unit_price_cents = coalesce($3, unit_price_cents), quantity = coalesce($4, quantity), added_on = coalesce($5, added_on) where id::text = $2 and contract_id = $1 returning name",
-    [k.id, c.req.param("sid"), d.price != null ? Math.round(d.price * 100) : null, d.quantity ?? null, d.addedOn ?? null]);
+    `update contract_services set unit_price_cents = coalesce($3, unit_price_cents), quantity = coalesce($4, quantity), added_on = coalesce($5, added_on),
+            ends_on = case when $6 then $7::date else ends_on end
+      where id = $2 and contract_id = $1 and (not $6 or $7::date is null or $7::date >= coalesce($5::date, added_on)) returning name`,
+    [k.id, sid, d.priceCents ?? null, d.quantity ?? null, d.addedOn ?? null, endsSet, d.endsOn ?? null]);
   if (!r.rowCount) throw new Fail(404, "not_found");
   await logEvent(k.id, "service_changed", r.rows[0].name, auth(c).user.id);
+  await audit("contract.service_changed", { userId: auth(c).user.id, target: k.client_name, detail: { contractId: k.id, lineId: sid, priceCents: d.priceCents ?? null, endsOn: d.endsOn ?? null } });
   return c.json({ ok: true });
 });
 
 clientRoutes.delete("/contracts/:cid/services/:sid", requirePermission("clients.contracts.edit"), async (c) => {
   const k = await contractRow(c.req.param("cid"));
-  const r = await pool.query("delete from contract_services where id::text = $2 and contract_id = $1 returning name", [k.id, c.req.param("sid")]);
-  if (r.rowCount) await logEvent(k.id, "service_removed", r.rows[0].name, auth(c).user.id);
+  const sid = c.req.param("sid");
+  if (!isUuid(sid)) throw new Fail(404, "not_found");
+  const r = await pool.query("delete from contract_services where id = $2 and contract_id = $1 returning name", [k.id, sid]);
+  if (r.rowCount) { await logEvent(k.id, "service_removed", r.rows[0].name, auth(c).user.id); await audit("contract.service_removed", { userId: auth(c).user.id, target: k.client_name, detail: { contractId: k.id, lineId: sid } }); }
   return c.json({ ok: true });
+});
+
+// ---- Fixed recurring service attached straight to a client (client page): it lives on the client's "Services à prix fixe" contract,
+// found (or created) here, so the existing billing refresh creates its to-bill lines.
+const AttachInput = z.object({ serviceId: z.string().uuid(), priceCents: PriceCents.optional(), quantity: z.number().min(0.01).max(1000).optional(), startsOn: Day, endsOn: Day.nullable().optional() }).strict();
+const AUTO_CONTRACT = "Services à prix fixe";
+
+clientRoutes.post("/:id/services", requirePermission("clients.contracts.edit"), async (c) => {
+  const clientId = c.req.param("id");
+  if (!isUuid(clientId)) throw new Fail(404, "not_found");
+  const d = await body(c, AttachInput);
+  const cl = await assertClientOpen(clientId);
+  if (d.priceCents !== undefined && !can(c, "clients.billing.manage")) throw new Fail(403, "forbidden");
+  if (!isValidDay(d.startsOn) || (d.endsOn && (!isValidDay(d.endsOn) || d.endsOn < d.startsOn))) throw new Fail(400, "service_dates");
+  const s = await attachableService(d.serviceId);
+  const price = d.priceCents ?? s.price_cents;
+  let k = (await pool.query(
+    `select id, starts_on from client_contracts where client_id = $1 and kind = 'recurring' and status = 'active' and name = $2 and starts_on <= $3
+        and (ends_on is null or ($4::date is not null and ends_on >= $4::date)) order by created_at limit 1`, [clientId, AUTO_CONTRACT, d.startsOn, d.endsOn ?? null])).rows[0];
+  if (!k) {
+    k = (await pool.query("insert into client_contracts (client_id, name, kind, cycle, starts_on, billing_period) values ($1,$2,'recurring','monthly',$3,'monthly') returning id, starts_on", [clientId, AUTO_CONTRACT, d.startsOn])).rows[0];
+    await logEvent(k.id, "created", AUTO_CONTRACT, auth(c).user.id);
+  }
+  const r = await pool.query(
+    "insert into contract_services (contract_id, service_id, name, kind, unit_price_cents, quantity, added_on, ends_on) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id",
+    [k.id, d.serviceId, s.name, s.kind, price, d.quantity ?? 1, d.startsOn, d.endsOn ?? null]);
+  await logEvent(k.id, "service_added", `${s.name} × ${d.quantity ?? 1}`, auth(c).user.id);
+  await audit("contract.service_attached", { userId: auth(c).user.id, target: cl.name, detail: { contractId: k.id, lineId: r.rows[0].id, serviceId: d.serviceId, priceCents: price, startsOn: d.startsOn, endsOn: d.endsOn ?? null } });
+  // The first charge may already be due: make it now (idempotent, only this client).
+  const created = await refreshContractBilling(clientId).catch(() => 0);
+  return c.json({ id: r.rows[0].id, contractId: k.id, created }, 201);
+});
+
+// ---- Products: a one-time sale to a client = ONE line of work to bill (source 'manual', service_id set), pending in the approvals queue.
+// Idempotency: the form sends a random `idempotencyKey` (kept for the life of the dialog); the line's source_id is a hash of client + key, so
+// a double click or a retry returns the same line (200, duplicate: true) instead of selling twice. Without a key, an identical sale
+// (same client, product, quantity, price, note) by the same person within 10 seconds is refused (409 duplicate_recent).
+// Selling the same product twice on purpose = two different keys = two lines.
+const SaleInput = z.object({
+  serviceId: z.string().uuid(), quantity: z.number().optional(), priceCents: PriceCents.optional(),
+  note: z.string().trim().max(300).optional(), date: Day.optional(), idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,100}$/).optional(),
+}).strict();
+
+clientRoutes.post("/:id/products", requirePermission("clients.billing.manage"), async (c) => {
+  const clientId = c.req.param("id");
+  if (!isUuid(clientId)) throw new Fail(404, "not_found");
+  const d = await body(c, SaleInput);
+  const cl = await assertClientOpen(clientId);
+  const s = (await pool.query("select name, kind, price_cents, active, taxable from services where id = $1", [d.serviceId])).rows[0];
+  if (!s) throw new Fail(404, "service_not_found");
+  const sale = checkSale({ active: s.active, kind: s.kind }, d.priceCents ?? s.price_cents, d.quantity ?? 1);
+  if ("error" in sale) throw new Fail(sale.error === "service_inactive" || sale.error === "not_a_product" ? 409 : 400, sale.error);
+  const day = d.date ?? todayISO();
+  if (!isValidDay(day)) throw new Fail(400, "date_invalid");
+  const description = (d.note ? `${s.name} — ${d.note}` : s.name).slice(0, 500);
+  const unit = centsToDecimal(sale.unitCents), qty = (sale.qtyHundredths / 100).toFixed(2);
+  const user = auth(c).user.id;
+  let id: string | null = null, duplicate = false;
+  if (d.idempotencyKey) {
+    const sourceId = uuidFromKey(`product:${clientId}:${d.idempotencyKey}`);
+    const ins = await pool.query(
+      `insert into billing_items (client_id, source, source_id, description, quantity, unit_price, work_date, status, created_by, service_id, taxable)
+       values ($1,'manual',$2,$3,$4,$5,$6,'pending',$7,$8,$9) on conflict do nothing returning id`, [clientId, sourceId, description, qty, unit, day, user, d.serviceId, s.taxable]);
+    id = ins.rows[0]?.id ?? null;
+    if (!id) { id = (await pool.query("select id from billing_items where source = 'manual' and source_id = $1 and client_id = $2", [sourceId, clientId])).rows[0]?.id ?? null; duplicate = true; }
+  } else {
+    const ins = await pool.query(
+      `insert into billing_items (client_id, source, description, quantity, unit_price, work_date, status, created_by, service_id, taxable)
+       select $1,'manual',$2,$3,$4,$5,'pending',$6,$7,$8
+        where not exists (select 1 from billing_items where client_id = $1 and service_id = $7 and created_by = $6 and description = $2 and quantity = $3 and unit_price = $4 and created_at > now() - interval '10 seconds')
+       returning id`, [clientId, description, qty, unit, day, user, d.serviceId, s.taxable]);
+    id = ins.rows[0]?.id ?? null;
+    if (!id) throw new Fail(409, "duplicate_recent");
+  }
+  if (!duplicate) await audit("product.sold", { userId: user, target: cl.name, detail: { clientId, serviceId: d.serviceId, itemId: id, quantity: Number(qty), unitCents: sale.unitCents, totalCents: sale.totalCents } });
+  return c.json({ id, duplicate, totalCents: sale.totalCents }, duplicate ? 200 : 201);
+});
+
+/** Products sold to a client and where each one stands (pending / approved / invoiced / excluded). Small payload: last 200. */
+clientRoutes.get("/:id/products", requirePermission("clients.billing.manage", "clients.contracts.view"), async (c) => {
+  const clientId = c.req.param("id");
+  if (!isUuid(clientId)) throw new Fail(404, "not_found");
+  const r = await pool.query(
+    `select b.id, b.service_id, b.description, b.quantity, b.unit_price, b.status, b.work_date, b.created_at, b.invoice_id, u.name as sold_by, i.number as invoice_number
+       from billing_items b left join users u on u.id = b.created_by left join invoices i on i.id = b.invoice_id
+      where b.client_id = $1 and b.service_id is not null order by b.created_at desc limit 200`, [clientId]);
+  return c.json(r.rows.map((x) => {
+    const unit = Math.round(Number(x.unit_price) * 100);
+    return { id: x.id, serviceId: x.service_id, description: x.description, quantity: Number(x.quantity), unitPriceCents: unit, totalCents: Math.round((Math.round(Number(x.quantity) * 100) * unit) / 100),
+      status: x.status, workDate: x.work_date, createdAt: x.created_at, soldBy: x.sold_by, invoiceId: x.invoice_id, invoiceNumber: x.invoice_number ?? null };
+  }));
 });
 
 // ------------------------------------------------------------------ One client
@@ -319,6 +420,8 @@ clientRoutes.patch("/:id", requirePermission("clients.edit"), async (c) => {
   const r = await pool.query(`update clients set ${sets.join(", ")}${free}, updated_at = now() where id = $1 returning id`, [id, ...values]);
   // Turning an auto-approve rule on also approves what is already waiting.
   if (r.rowCount && d.autoApproveKinds !== undefined) await applyAutoApprove(id);
+  // Becoming active, a tax frequency or a class can imply tasks: create them now instead of waiting for the hourly tick.
+  if (r.rowCount && (d.status !== undefined || d.taxFrequency !== undefined || d.classKey !== undefined)) autoTasksSoon(id);
   return r.rowCount ? c.json({ ok: true }) : c.json({ error: "not found" }, 404);
 });
 const BILLING_FIELDS_CLIENT = ["billingEmail", "termsDays", "poRequired", "autoApproveKinds", "invoiceNotes"];

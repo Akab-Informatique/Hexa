@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { addDays, fridayOf, mondayOf, quebecHolidays, todayISO } from "@hexa/shared/billing";
+import { quebecToday } from "../lib/quebecDate.ts";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
@@ -284,7 +285,7 @@ meetingRoutes.get("/trends", async (c) => {
 // What the weekly meeting reviews: DAS (due the 15th) and taxes (due at month end) for the period that ends the month
 // before each due month, from the tax follow-up calendar. A client is listed when it has that duty (filer / frequency).
 meetingRoutes.get("/tracking", requirePermission("clients.tracking.view", "clients.tracking.edit"), async (c) => {
-  const today = todayISO();
+  const today = quebecToday();
   const y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7));
   const ym = (yy: number, mm: number) => { const d = new Date(Date.UTC(yy, mm - 1, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
   const months = [0, 1].map((i) => {
@@ -300,16 +301,28 @@ meetingRoutes.get("/tracking", requirePermission("clients.tracking.view", "clien
   const filings = (await pool.query("select f.client_id, f.kind, f.period, f.item, f.status, f.prev_status, f.updated_at as at, u.name as by from client_filings f left join users u on u.id = f.updated_by where f.kind in ('das','tax') and f.period = any($1::text[])", [periods])).rows;
   const years = [...new Set(periods.map((p) => p.slice(0, 4)))];
   const taxTracked = new Set((await pool.query("select distinct client_id from client_filings where kind = 'tax' and left(period, 4) = any($1::text[])", [years])).rows.map((r) => r.client_id));
+  const byKey = new Map<string, (typeof filings)[number]>();
+  for (const f of filings) byKey.set(`${f.client_id}|${f.kind}|${f.period}|${f.item}`, f);
   const st = (id: string, kind: string, period: string, item: string) => {
-    const f = filings.find((x) => x.client_id === id && x.kind === kind && x.period === period && x.item === item);
+    const f = byKey.get(`${id}|${kind}|${period}|${item}`);
     return { status: f?.status ?? "todo", prev: f?.prev_status ?? "", by: f?.by ?? null, at: f?.at ?? null };
   };
+  const isOpen = (s: string) => s === "todo" || s === "progress" || s === "review";
+  type Box = ReturnType<typeof st>;
   return c.json({
     months: months.map((mo) => ({
       ...mo,
-      das: clients.filter((k) => k.das_filer).map((k) => ({ clientId: k.id, name: k.name, resource: k.resource, filer: k.das_filer, fed: st(k.id, "das", mo.period, "fed"), prov: st(k.id, "das", mo.period, "prov"), ccq: st(k.id, "das", mo.period, "ccq") })),
+      // Only the firm's own DAS ('us' = fed/prov/ccq, 'them_ccq_us' = ccq only), and only clients with a box still open.
+      das: clients.filter((k) => k.das_filer === "us" || k.das_filer === "them_ccq_us").flatMap((k) => {
+        const boxes: { fed?: Box; prov?: Box; ccq?: Box } = {};
+        for (const item of (k.das_filer === "us" ? ["fed", "prov", "ccq"] : ["ccq"]) as ("fed" | "prov" | "ccq")[]) {
+          boxes[item] = st(k.id, "das", mo.period, item);
+        }
+        // A client is listed only while one of its boxes is open (its done boxes then stay visible, as before).
+        return Object.values(boxes).some((b) => isOpen(b.status)) ? [{ clientId: k.id, name: k.name, resource: k.resource, filer: k.das_filer, ...boxes }] : [];
+      }),
       tax: clients.filter((k) => k.tax_frequency === "monthly" || (k.tax_frequency === "quarterly" && [1, 4, 7, 10].includes(Number(mo.period.slice(5)))) || (!k.tax_frequency && taxTracked.has(k.id)))
-        .map((k) => ({ clientId: k.id, name: k.name, resource: k.resource, ...st(k.id, "tax", mo.period, "") })),
+        .flatMap((k) => { const b = st(k.id, "tax", mo.period, ""); return isOpen(b.status) ? [{ clientId: k.id, name: k.name, resource: k.resource, ...b }] : []; }),
     })),
   });
 });

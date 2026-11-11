@@ -8,7 +8,9 @@ export const addDaysISO = (s: string, n: number) => { const d = D(s); d.setUTCDa
 const daysInMonth = (y: number, m0: number) => new Date(Date.UTC(y, m0 + 1, 0)).getUTCDate();
 const monthStart = (s: string) => `${s.slice(0, 7)}-01`;
 const monthEnd = (s: string) => `${s.slice(0, 7)}-${String(daysInMonth(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1)).padStart(2, "0")}`;
-const nextMonth = (s: string) => addDaysISO(monthEnd(s), 1);
+/** First day of the calendar period (1 month, or 3 months = calendar quarter) holding `s`. */
+const periodStart = (s: string, months: 1 | 3) => (months === 1 ? monthStart(s) : `${s.slice(0, 4)}-${String(Math.floor((Number(s.slice(5, 7)) - 1) / 3) * 3 + 1).padStart(2, "0")}-01`);
+const periodEnd = (ps: string, months: 1 | 3) => (months === 1 ? monthEnd(ps) : monthEnd(`${ps.slice(0, 4)}-${String(Number(ps.slice(5, 7)) + 2).padStart(2, "0")}-01`));
 /** Same month and day `n` years later (29 Feb falls back to 28 Feb). */
 export const addYearsISO = (s: string, n: number) => {
   const y = Number(s.slice(0, 4)) + n, m = Number(s.slice(5, 7)), day = Number(s.slice(8, 10));
@@ -18,7 +20,9 @@ const maxD = (a: string, b: string) => (a > b ? a : b);
 const minD = (a: string, b: string) => (a < b ? a : b);
 
 export interface ContractLike { billingPeriod: "monthly" | "yearly"; startsOn: string; endsOn: string | null }
-export interface ServiceLine { id: string; name: string; kind: "monthly" | "yearly" | "one_time"; priceCents: number; quantity: number; addedOn: string }
+export type ServiceKind = "monthly" | "quarterly" | "yearly" | "one_time";
+/** `endsOn` (optional) stops the service on that day, inclusive; the contract's own end still applies. */
+export interface ServiceLine { id: string; name: string; kind: ServiceKind; priceCents: number; quantity: number; addedOn: string; endsOn?: string | null }
 export interface Charge {
   lineId: string; name: string; date: string; periodStart: string; periodEnd: string; cents: number; days: number; periodDays: number; prorated: boolean; description: string;
 }
@@ -29,6 +33,7 @@ export const prorataCents = (fullCents: number, days: number, periodDays: number
 /**
  * Every charge dated on or before `until`.
  * - monthly service on a monthly contract: one per calendar month, the first (and last) part month prorated by days;
+ * - quarterly service on a monthly contract: one per calendar quarter (Jan/Apr/Jul/Oct), part quarters prorated by days;
  * - yearly service, or a monthly service on a yearly contract (x12): one per contract year, anchored on the start day;
  * - one-time service: once, on its day.
  */
@@ -36,23 +41,24 @@ export function chargesFor(contract: ContractLike, lines: ServiceLine[], until: 
   const out: Charge[] = [];
   for (const ln of lines) {
     const start = maxD(ln.addedOn, contract.startsOn);
-    const end = contract.endsOn ?? "9999-12-31";
+    const end = minD(contract.endsOn ?? "9999-12-31", ln.endsOn ?? "9999-12-31");
     const unit = ln.priceCents * ln.quantity;
     if (start > end) continue;
     if (ln.kind === "one_time") {
       if (start <= until) out.push({ lineId: ln.id, name: ln.name, date: start, periodStart: start, periodEnd: start, cents: Math.round(unit), days: 1, periodDays: 1, prorated: false, description: ln.name });
       continue;
     }
-    const monthly = ln.kind === "monthly" && contract.billingPeriod === "monthly";
-    if (monthly) {
-      for (let ps = monthStart(start); ps <= until && ps <= end; ps = nextMonth(ps)) {
-        const pe = monthEnd(ps), from = maxD(start, ps), to = minD(end, pe);
+    const months: 1 | 3 | 0 = contract.billingPeriod === "monthly" ? (ln.kind === "monthly" ? 1 : ln.kind === "quarterly" ? 3 : 0) : 0;
+    if (months) {
+      for (let ps = periodStart(start, months); ps <= until && ps <= end; ps = addDaysISO(periodEnd(ps, months), 1)) {
+        const pe = periodEnd(ps, months), from = maxD(start, ps), to = minD(end, pe);
         const days = diffDays(from, to) + 1, periodDays = diffDays(ps, pe) + 1;
         if (from > until) break;
-        out.push({ lineId: ln.id, name: ln.name, date: from, periodStart: ps, periodEnd: pe, cents: prorataCents(unit, days, periodDays), days, periodDays, prorated: days < periodDays, description: `${ln.name} (${ps.slice(0, 7)})` });
+        out.push({ lineId: ln.id, name: ln.name, date: from, periodStart: ps, periodEnd: pe, cents: prorataCents(unit, days, periodDays), days, periodDays, prorated: days < periodDays, description: months === 1 ? `${ln.name} (${ps.slice(0, 7)})` : `${ln.name} (${ps.slice(0, 7)} → ${pe.slice(0, 7)})` });
       }
     } else {
-      const factor = ln.kind === "monthly" ? 12 : 1;
+      // Yearly service, or a monthly/quarterly one on a yearly contract (x12 / x4): one charge per contract year.
+      const factor = ln.kind === "monthly" ? 12 : ln.kind === "quarterly" ? 4 : 1;
       for (let k = 0; ; k++) {
         const ps = addYearsISO(contract.startsOn, k), pe = addDaysISO(addYearsISO(contract.startsOn, k + 1), -1);
         if (ps > until || ps > end) break;
@@ -73,6 +79,7 @@ export function monthlyEquivalentCents(lines: Pick<ServiceLine, "kind" | "priceC
   for (const l of lines) {
     const full = l.priceCents * l.quantity;
     if (l.kind === "monthly") t += full;
+    else if (l.kind === "quarterly") t += full / 3;
     else if (l.kind === "yearly") t += full / 12;
   }
   void period;

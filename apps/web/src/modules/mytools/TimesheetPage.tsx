@@ -7,9 +7,10 @@ import { addDays, fmtDate, money, mondayOf, todayISO, useL, useLocale } from "..
 import { Chip, confirmDo, Empty, errMsg, Stat, Tabs, useClients, type DirUser } from "../../components/kit";
 import { Modal, PageHeader } from "../../components/ui";
 import { workdayMinutes } from "@hexa/shared/workday";
+import { PayrollPanel } from "./PayrollPanel";
 
 interface TType { key: string; kind: string; labelFr: string; labelEn: string }
-interface Entry { id: string; workDate: string; typeKey: string; kind: string; minutes: number; startTime: string | null; endTime: string | null; lunchMinutes: number; bankMinutes: number; clientId: string | null; clientName: string | null; description: string; billable: boolean; billableMinutes: number | null }
+interface Entry { id: string; workDate: string; typeKey: string; kind: string; minutes: number; startTime: string | null; endTime: string | null; lunchMinutes: number; bankMinutes: number; clientId: string | null; clientName: string | null; description: string; billable: boolean; billableMinutes: number | null; source?: "timer" | "manual"; measuredMinutes?: number | null; originDate?: string | null }
 interface Totals { paidMinutes: number; workdayMinutes: number; bankedMinutes: number; clientMinutes: number; billableMinutes: number; byType: Record<string, number> }
 interface Week { start: string; userId: string; mine: boolean; status: "draft" | "submitted" | "approved" | "rejected" | "paid"; rejectReason: string; locked: boolean; entries: Entry[]; totals: Totals }
 interface Pending { userId: string; userName: string; weekStart: string; status: string; paidMinutes: number; workdayMinutes: number; clientMinutes: number; billableMinutes: number }
@@ -31,7 +32,7 @@ export default function TimesheetPage() {
   const { can, me } = useAuth();
   const qc = useQueryClient();
   const approver = can("mytools.timesheet.approve", "mytools.timesheet.manage");
-  const [tab, setTab] = useState<"week" | "approvals" | "report">("week");
+  const [tab, setTab] = useState<"week" | "approvals" | "report" | "payroll">("week");
   const [start, setStart] = useState(mondayOf(todayISO()));
   const [who, setWho] = useState<string>("");
   const [dlg, setDlg] = useState<null | { entry?: Entry; date?: string }>(null);
@@ -53,7 +54,7 @@ export default function TimesheetPage() {
     <>
       <PageHeader title={l("Feuille de temps", "Timesheet")} subtitle={l("Heures payées, banque d'heures et approbation", "Paid hours, hours bank and approval")}
         actions={tab === "week" && canEdit && <button className="btn btn-primary" onClick={() => setDlg({})}><Plus size={16} />{l("Ajouter une entrée", "Add an entry")}</button>} />
-      {approver && <Tabs tabs={[{ key: "week", label: l("Semaine", "Week") }, { key: "approvals", label: l("À approuver", "To approve") }, { key: "report", label: l("Rapport", "Report") }]} value={tab} onChange={setTab} />}
+      {approver && <Tabs tabs={[{ key: "week", label: l("Semaine", "Week") }, { key: "approvals", label: l("À approuver", "To approve") }, { key: "report", label: l("Rapport", "Report") }, { key: "payroll", label: l("Paie", "Payroll") }]} value={tab} onChange={setTab} />}
 
       {tab === "week" && (
         <>
@@ -65,6 +66,7 @@ export default function TimesheetPage() {
             {approver && <select className="input !w-auto" value={who} onChange={(e) => setWho(e.target.value)} aria-label="person"><option value="">{l("Ma feuille", "My timesheet")}</option>{people.data?.filter((p) => p.id !== me.user?.id).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
             {w && <Chip tone={tone(w.status)}>{l(...statusText[w.status]!)}</Chip>}
             <div className="flex-1" />
+            {w && !w.mine && can("mytools.timesheet.manage") && (w.status === "approved" || w.status === "submitted") && <button className="btn" onClick={() => { const reason = window.prompt(l("Raison de la réouverture (consignée)", "Reason for reopening (recorded)")); if (reason?.trim()) void run(() => api("/api/time/week/reopen", { body: { userId: w.userId, start, reason: reason.trim() } })); }}>{l("Rouvrir la semaine", "Reopen the week")}</button>}
             {w && !w.mine && can("mytools.timesheet.approve", "mytools.timesheet.manage", "hr.manage") && <button className="btn" onClick={() => setMoney(true)}><FileText size={15} />{l("Copie comptabilité", "Accounting copy")}</button>}
             <button className="btn" onClick={() => setOpenDays(openDays.length ? [] : days)}>{openDays.length ? l("Tout réduire", "Collapse all") : l("Tout ouvrir", "Expand all")}</button>
             {w && canEdit && w.entries.length > 0 && w.status !== "paid" && w.status !== "approved" && w.status !== "submitted" && <button className="btn btn-primary" onClick={() => confirmDo(l("Envoyer cette semaine pour approbation ?", "Send this week for approval?"), () => void run(() => api("/api/time/week/submit", { body: { start, userId: w.userId } })))}><Send size={15} />{l("Envoyer la semaine", "Send the week")}</button>}
@@ -99,7 +101,7 @@ export default function TimesheetPage() {
                   </div>
                   {open && es.length > 0 && (
                     <table className="grid mt-2"><tbody>{es.map((e) => (
-                      <tr key={e.id}><td><Chip>{label(e.typeKey)}</Chip></td>
+                      <tr key={e.id}><td><Chip>{label(e.typeKey)}</Chip>{e.source === "timer" && <span className="chip ml-1" title={e.originDate ? l(`Reporté du ${e.originDate} (semaine déjà envoyée)`, `Carried from ${e.originDate} (week already sent)`) : undefined}>{l("Chrono", "Timer")}{e.originDate ? " ↷" : ""}</span>}</td>
                         <td className="text-muted">{e.clientName ?? ""}{e.description ? ` ${e.clientName ? "·" : ""} ${e.description}` : ""}{e.kind === "workday" && e.bankMinutes > 0 ? ` · ${l("banque", "bank")} ${hm(e.bankMinutes)}` : ""}</td>
                         <td className="text-right font-medium">{hm(e.minutes)}</td>
                         <td className="whitespace-nowrap text-right">{canEdit && <><button className="btn !p-1.5" onClick={() => setDlg({ entry: e })} aria-label="edit"><Pencil size={13} /></button> <button className="btn btn-danger !p-1.5" aria-label="delete" onClick={() => confirmDo(l("Supprimer cette entrée ?", "Delete this entry?"), () => void run(() => api(`/api/time/entries/${e.id}`, { method: "DELETE" })))}><Trash2 size={13} /></button></>}</td></tr>))}</tbody></table>)}
@@ -109,6 +111,7 @@ export default function TimesheetPage() {
         </>)}
 
       {tab === "approvals" && <Approvals label={label} onOpen={(uid, wk) => { setWho(uid); setStart(wk); setTab("week"); }} />}
+      {tab === "payroll" && approver && <PayrollPanel />}
       {tab === "report" && <Report people={people.data ?? []} label={label} />}
       {dlg && types.data && w && <EntryDialog types={types.data} week={w} date={dlg.date ?? dlg.entry?.workDate ?? (w.start <= todayISO() && todayISO() <= addDays(w.start, 6) ? todayISO() : w.start)} entry={dlg.entry} onDone={refresh} onClose={() => setDlg(null)} />}
       {money_ && w && <AccountingCopy userId={w.userId} start={start} label={label} onClose={() => setMoney(false)} />}
@@ -126,6 +129,10 @@ export function codeText(code: string, l: (fr: string, en: string) => string): s
     week_empty: ["La semaine est vide.", "The week is empty."], bank_exceeds_day: ["Les heures en banque dépassent la journée.", "Banked hours exceed the day."],
     workday_times_required: ["Indiquez l'heure de début et de fin.", "Enter the start and end time."], workday_times_invalid: ["La fin doit être après le début.", "The end must be after the start."],
     travel_client_required: ["Un déplacement facturable demande un client.", "A billable trip needs a client."], minutes_required: ["Indiquez la durée.", "Enter the duration."],
+    day_total_exceeded: ["Le total de cette journée dépasserait 24 h.", "The total for this day would exceed 24 h."],
+    timer_entry_locked: ["Une entrée du chrono ne peut être supprimée que tant qu'elle est en brouillon.", "A timer entry can only be deleted while it is a draft."],
+    week_paid: ["La semaine est payée : annulez d'abord le paiement.", "The week is paid: undo the payment first."], not_reopenable: ["Cette semaine n'est pas envoyée ni approuvée.", "This week is neither sent nor approved."],
+    forbidden: ["Vous ne pouvez modifier que votre propre feuille de temps.", "You can only change your own timesheet."],
     entry_invoiced: ["Cette entrée est déjà facturée.", "This entry is already invoiced."], own_time: ["Vous ne pouvez pas approuver votre propre temps.", "You cannot approve your own time."],
   };
   return m[code] ? l(...m[code]!) : code;

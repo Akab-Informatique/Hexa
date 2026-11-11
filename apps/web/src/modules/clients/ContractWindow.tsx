@@ -2,20 +2,21 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
 import { chargesFor } from "@hexa/shared/contractCharges";
+import { parseCents } from "@hexa/shared/productSale";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fmtDate, money, todayISO, useL, useLocale } from "../../lib/l";
 import { Chip, confirmDo, Empty, errMsg, FormDialog, Stat, Tabs, type FieldDef } from "../../components/kit";
 import { Modal } from "../../components/ui";
 
-interface Line { id: string; serviceId: string | null; name: string; kind: "monthly" | "yearly" | "one_time"; unitPriceCents: number; quantity: number; addedOn: string }
+interface Line { id: string; serviceId: string | null; name: string; kind: "monthly" | "quarterly" | "yearly" | "one_time"; unitPriceCents: number; quantity: number; addedOn: string; endsOn: string | null }
 interface Charge { lineId: string; name: string; date: string; periodStart: string; periodEnd: string; cents: number; days: number; periodDays: number; prorated: boolean; description: string; billed: boolean; due: boolean }
 interface Detail {
   id: string; clientId: string; clientName: string; name: string; kind: "recurring" | "hourly" | "fixed" | "hours_bank"; amount: number; hourlyRate: number | null; cycle: string;
   startsOn: string; endsOn: string | null; status: "active" | "paused" | "ended"; notes: string; billingPeriod: "monthly" | "yearly"; billedThrough: string | null; supportDefault: boolean; bankHours: number | null;
   services: Line[]; charges: Charge[]; events: { kind: string; detail: string; createdAt: string; userName: string | null }[]; monthlyCents: number; dueCents: number; nextCharge: Charge | null; invoicedLines: number;
 }
-interface Svc { id: string; name: string; kind: "monthly" | "yearly" | "one_time"; priceCents: number; active: boolean }
+interface Svc { id: string; name: string; kind: "monthly" | "quarterly" | "yearly" | "one_time"; priceCents: number; active: boolean }
 
 const KINDS = [
   { value: "recurring", label: ["Services récurrents", "Recurring services"] }, { value: "hourly", label: ["Taux horaire", "Hourly"] },
@@ -29,6 +30,10 @@ export function codeText(code: string, l: (a: string, b: string) => string) {
     contract_dates: ["La fin doit être après le début.", "The end must be after the start."], contract_dates_services: ["Un service sortirait de la durée du contrat.", "A service would fall outside the contract term."],
     service_outside_term: ["La date du service doit être dans la durée du contrat.", "The service date must be within the contract term."], contract_billed: ["Ce contrat a déjà généré de la facturation : arrêtez-le plutôt que de le supprimer.", "This contract has already billed: stop it instead of deleting it."],
     contract_not_recurring: ["Seul un contrat de services récurrents a des services.", "Only a recurring-services contract has services."], forbidden: ["Vous n'avez pas le droit de modifier la facturation.", "You are not allowed to change billing."],
+    service_inactive: ["Ce service est désactivé : il ne peut plus être ajouté.", "This service is turned off: it can no longer be added."], service_is_product: ["Ce service est un produit (vente unique), pas un service récurrent.", "This service is a product (one-time sale), not a recurring service."],
+    not_a_product: ["Ce service n'est pas un produit.", "This service is not a product."], client_inactive: ["Ce client est inactif.", "This client is inactive."], service_not_found: ["Service introuvable.", "Service not found."], service_dates: ["La date de fin doit être après le début.", "The end must be after the start."],
+    price_invalid: ["Prix invalide (0 à 1 000 000 $).", "Invalid price (0 to 1,000,000 $)."], quantity_invalid: ["Quantité invalide (0,01 à 1000, 2 décimales).", "Invalid quantity (0.01 to 1000, 2 decimals)."], total_zero: ["Le total ne peut pas être 0 $.", "The total cannot be $0."], total_too_large: ["Le total dépasse 1 000 000 $.", "The total is over $1,000,000."],
+    duplicate_recent: ["Cette vente vient d'être enregistrée.", "This sale was just recorded."], date_invalid: ["Date invalide.", "Invalid date."],
     contact_no_email: ["Ce contact n'a pas de courriel.", "This contact has no email."], client_has_history: ["Ce client a un historique : désactivez-le.", "This client has history: deactivate it."],
   };
   return m[code] ? l(...m[code]!) : code;
@@ -124,22 +129,24 @@ function Services({ k, edit, billing, run }: { k: Detail; edit: boolean; billing
   const cat = useQuery({ queryKey: ["svc-catalogue"], queryFn: () => api<Svc[]>("/api/services") });
   const [sel, setSel] = useState("");
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<"monthly" | "yearly" | "one_time">("monthly");
+  const [kind, setKind] = useState<"monthly" | "quarterly" | "yearly" | "one_time">("monthly");
   const [price, setPrice] = useState("");
   const [qty, setQty] = useState("1");
   const [day, setDay] = useState(todayISO() < k.startsOn ? k.startsOn : todayISO());
   const chosen = cat.data?.find((s) => s.id === sel);
-  const unit = billing && price !== "" ? Math.round(Number(price) * 100) : chosen?.priceCents ?? 0;
+  const priceCents = price === "" ? null : parseCents(price);
+  const unit = billing && priceCents != null ? priceCents : chosen?.priceCents ?? 0;
+  const [endDay, setEndDay] = useState("");
   const eff = chosen?.kind ?? kind;
   // The prorata of the first charge, worked out by the same function the server uses.
-  const preview = (name || chosen) && day ? chargesFor({ billingPeriod: k.billingPeriod, startsOn: k.startsOn, endsOn: k.endsOn }, [{ id: "p", name: chosen?.name ?? name, kind: eff, priceCents: unit, quantity: Number(qty) || 1, addedOn: day }], day.slice(0, 4) + "-12-31")[0] : null;
+  const preview = (name || chosen) && day ? chargesFor({ billingPeriod: k.billingPeriod, startsOn: k.startsOn, endsOn: k.endsOn }, [{ id: "p", name: chosen?.name ?? name, kind: eff, priceCents: unit, quantity: Number(qty) || 1, addedOn: day, endsOn: endDay || null }], day.slice(0, 4) + "-12-31")[0] : null;
   return (
     <>
       <div className="glass-flat mb-4 overflow-x-auto p-1">
         {!k.services.length ? <Empty>{l("Aucun service sur ce contrat.", "No services on this contract.")}</Empty> : (
-          <table className="grid"><thead><tr><th>{l("Service", "Service")}</th><th>{l("Quantité", "Qty")}</th><th>{l("Prix", "Price")}</th><th>{l("Depuis le", "Since")}</th><th /></tr></thead>
+          <table className="grid"><thead><tr><th>{l("Service", "Service")}</th><th>{l("Quantité", "Qty")}</th><th>{l("Prix", "Price")}</th><th>{l("Période", "Period")}</th><th /></tr></thead>
             <tbody>{k.services.map((s) => (
-              <tr key={s.id}><td className="font-medium">{s.name} <span className="text-xs text-muted">· {s.kind === "monthly" ? l("mensuel", "monthly") : s.kind === "yearly" ? l("annuel", "yearly") : l("ponctuel", "one time")}</span></td><td>× {s.quantity}</td><td>{money(s.unitPriceCents / 100, loc)}</td><td>{fmtDate(s.addedOn, loc)}</td>
+              <tr key={s.id}><td className="font-medium">{s.name} <span className="text-xs text-muted">· {s.kind === "monthly" ? l("mensuel", "monthly") : s.kind === "quarterly" ? l("trimestriel", "quarterly") : s.kind === "yearly" ? l("annuel", "yearly") : l("ponctuel", "one time")}</span></td><td>× {s.quantity}</td><td>{money(s.unitPriceCents / 100, loc)}</td><td>{fmtDate(s.addedOn, loc)}{s.endsOn && <> → {fmtDate(s.endsOn, loc)}</>}</td>
                 <td className="text-right">{edit && <button className="btn btn-danger !p-1.5" aria-label="remove" onClick={() => confirmDo(l("Retirer ce service du contrat ?", "Remove this service from the contract?"), () => void run(() => api(`/api/clients/contracts/${k.id}/services/${s.id}`, { method: "DELETE" })))}><Trash2 size={13} /></button>}</td></tr>))}</tbody></table>)}
       </div>
       {edit && (
@@ -148,11 +155,12 @@ function Services({ k, edit, billing, run }: { k: Detail; edit: boolean; billing
           <div className="flex flex-wrap items-end gap-2">
             <label className="min-w-[200px] flex-1"><span className="label">{l("Du catalogue", "From the catalogue")}</span><select className="input" value={sel} onChange={(e) => { setSel(e.target.value); setPrice(""); }}><option value="">{l("— un service sur mesure —", "— a custom service —")}</option>{cat.data?.filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name} ({money(s.priceCents / 100, loc)})</option>)}</select></label>
             {!sel && <><label><span className="label">{l("Nom", "Name")}</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></label>
-              <label><span className="label">{l("Type", "Type")}</span><select className="input" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}><option value="monthly">{l("Mensuel", "Monthly")}</option><option value="yearly">{l("Annuel", "Yearly")}</option><option value="one_time">{l("Ponctuel", "One time")}</option></select></label></>}
-            {billing && <label><span className="label">{l("Prix ($)", "Price ($)")}</span><input className="input !w-28" type="number" step="0.01" placeholder={chosen ? String(chosen.priceCents / 100) : "0"} value={price} onChange={(e) => setPrice(e.target.value)} /></label>}
+              <label><span className="label">{l("Type", "Type")}</span><select className="input" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}><option value="monthly">{l("Mensuel", "Monthly")}</option><option value="quarterly">{l("Trimestriel", "Quarterly")}</option><option value="yearly">{l("Annuel", "Yearly")}</option><option value="one_time">{l("Ponctuel", "One time")}</option></select></label></>}
+            {billing && <label><span className="label">{l("Prix ($)", "Price ($)")}</span><input className="input !w-28" type="text" inputMode="decimal" placeholder={chosen ? String(chosen.priceCents / 100) : "0"} value={price} onChange={(e) => setPrice(e.target.value)} /></label>}
             <label><span className="label">{l("Quantité", "Qty")}</span><input className="input !w-20" type="number" step="0.01" min="0.01" value={qty} onChange={(e) => setQty(e.target.value)} /></label>
             <label><span className="label">{l("Commence le", "Starts")}</span><input className="input" type="date" min={k.startsOn} max={k.endsOn ?? undefined} value={day} onChange={(e) => setDay(e.target.value)} /></label>
-            <button className="btn btn-primary" disabled={!sel && !name.trim()} onClick={() => void run(async () => { await api(`/api/clients/contracts/${k.id}/services`, { body: { serviceId: sel || undefined, name: sel ? undefined : name, kind: sel ? undefined : kind, price: billing && price !== "" ? Number(price) : undefined, quantity: Number(qty) || 1, addedOn: day } }); setSel(""); setName(""); setPrice(""); })}><Plus size={15} />{l("Ajouter", "Add")}</button>
+            <label><span className="label">{l("Se termine le", "Ends")}</span><input className="input" type="date" min={day} max={k.endsOn ?? undefined} value={endDay} onChange={(e) => setEndDay(e.target.value)} /></label>
+            <button className="btn btn-primary" disabled={(!sel && !name.trim()) || (price !== "" && priceCents == null)} onClick={() => void run(async () => { await api(`/api/clients/contracts/${k.id}/services`, { body: { serviceId: sel || undefined, name: sel ? undefined : name, kind: sel ? undefined : kind, priceCents: billing && priceCents != null ? priceCents : undefined, quantity: Number(qty) || 1, addedOn: day, endsOn: endDay || null } }); setSel(""); setName(""); setPrice(""); setEndDay(""); })}><Plus size={15} />{l("Ajouter", "Add")}</button>
           </div>
           {preview && <p className="mt-2 text-xs text-muted">{l("Première charge", "First charge")}: <b>{money(preview.cents / 100, loc)}</b> {preview.prorated ? `(${l("prorata", "prorated")} ${preview.days}/${preview.periodDays} ${l("jours", "days")})` : `(${l("période complète", "full period")})`} · {fmtDate(preview.date, loc)}</p>}
         </div>)}

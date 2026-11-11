@@ -13,7 +13,7 @@ interface Full extends TaskRow {
   description: string; startDate: string | null; estimateMinutes: number | null; visibility: string; waitsForId: string | null; waitsForTitle: string | null;
   recurrence: { every: number; unit: string; until?: string | null } | null; tags: string[]; createdBy: string | null; isWaiting: boolean;
   checklist: { id: string; text: string; done: boolean }[]; notes: { id: string; body: string; userName: string | null; createdAt: string; audience: "internal" | "client" }[];
-  timeEntries: { id: string; workDate: string; minutes: number; description: string; billable: boolean; status: string; userName: string }[];
+  timeEntries: { id: string; workDate: string; minutes: number; description: string; userName: string }[];
   subtasks: { id: string; title: string; status: string }[]; viewers: { id: string; name: string }[];
   kind: "normal" | "continuous" | "daily"; startTime: string | null; dueTime: string | null; remindEveryDays: number | null; lastCheckedOn: string | null;
 }
@@ -153,7 +153,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
           {pendingHere.map((sg) => (
             <div key={sg.id} className="mb-1 flex items-center gap-2"><span>{minLabel(sg.minutes)} · {fmtDate(sg.startedAt, loc)}</span><span className="flex-1" />
               <button className="btn !py-1 text-xs" onClick={() => setLog({ segmentId: sg.id, minutes: sg.minutes, title: t!.title, clientId: t!.clientId, clientName: t!.clientName })}>{l("Saisir", "Log")}</button>
-              <button className="btn btn-danger !py-1 text-xs" onClick={() => void act(async () => { await api(`/api/tasks/segments/${sg.id}`, { method: "DELETE" }); await acts.refresh(); })}>{l("Ignorer", "Drop")}</button></div>))}
+              </div>))}
         </div>
       )}
       <fieldset disabled={!editable} className="min-w-0 border-0 p-0">
@@ -236,7 +236,6 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
           <div className="flex flex-col gap-2">
             <button className="btn btn-primary" onClick={() => void act(async () => { setClosing(false); if (runHere) setLog(await acts.stop()); else if (pendingHere[0]) setLog({ segmentId: pendingHere[0].id, minutes: pendingHere[0].minutes, title: t!.title, clientId: t!.clientId, clientName: t!.clientName }); })}>{l("Saisir le temps maintenant", "Log the time now")}</button>
             <button className="btn" onClick={() => void act(async () => { if (runHere) await acts.stop(); closeOk.current = true; setClosing(false); await save(); })}>{l("Terminer et saisir le temps plus tard", "Complete and log the time later")}</button>
-            <button className="btn btn-danger" onClick={() => void act(async () => { if (runHere) await acts.cancel(); await api(`/api/tasks/${taskId}/segments/discard`, { body: {} }); await acts.refresh(); closeOk.current = true; setClosing(false); await save(); })}>{l("Terminer sans saisir de temps", "Complete without logging time")}</button>
             <button className="btn" onClick={() => setClosing(false)}>{l("Annuler", "Cancel")}</button>
           </div>
         </Modal>

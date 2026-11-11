@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CircleDot, Plus, Search } from "lucide-react";
+import { Check, CircleDot, Plus, Search, Zap } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fmtDate, todayISO, useL, useLocale } from "../../lib/l";
 import { Chip, Empty, Toolbar, useClients, useUsers } from "../../components/kit";
 import { PageHeader } from "../../components/ui";
 import TaskDialog from "./TaskDialog";
+import AutoTaskRules from "./AutoTaskRules";
 
 export interface TaskRow {
   id: string; title: string; status: "todo" | "taken" | "doing" | "blocked" | "done"; priority: "low" | "normal" | "high" | "urgent"; assigneeId: string | null; assigneeName: string | null;
@@ -30,6 +31,7 @@ export default function TasksPage() {
   // Links (the meeting gauges, a person's count) arrive with their filters in the address.
   const [f, setF] = useState({ q: "", assignee: params.get("assignee") ?? "", status: params.get("status") ?? "open", client: params.get("client") ?? "", priority: "", due: params.get("due") ?? "" });
   const [dialog, setDialog] = useState<{ id: string | null } | null>(null);
+  const [rules, setRules] = useState(false);
   const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
 
   useEffect(() => { const o = params.get("open"); if (o) { setDialog({ id: o }); setParams({}, { replace: true }); } }, [params, setParams]);
@@ -45,7 +47,7 @@ export default function TasksPage() {
   return (
     <>
       <PageHeader title={l("Tâches", "Tasks")} subtitle={l("Toutes les tâches de l'équipe", "All the team's tasks")}
-        actions={can("tasks.edit", "tasks.manage", "command.pipeline.edit") && <button className="btn btn-primary" onClick={() => setDialog({ id: null })}><Plus size={16} />{l("Nouvelle tâche", "New task")}</button>} />
+        actions={<>{can("tasks.automation.manage") && <button className="btn" onClick={() => setRules(true)}><Zap size={16} />{l("Automatisation", "Automation")}</button>}{can("tasks.edit", "tasks.manage", "command.pipeline.edit") && <button className="btn btn-primary" onClick={() => setDialog({ id: null })}><Plus size={16} />{l("Nouvelle tâche", "New task")}</button>}</>} />
       <Toolbar>
         <div className="relative min-w-[200px] flex-1"><Search size={15} className="pointer-events-none absolute left-3 top-3 text-muted" /><input className="input !pl-9" placeholder={l("Rechercher…", "Search…")} value={f.q} onChange={(e) => set("q", e.target.value)} /></div>
         <select className="input !w-auto" value={f.status} onChange={(e) => set("status", e.target.value)} aria-label="status">
@@ -73,6 +75,7 @@ export default function TasksPage() {
           </table>
         )}
       </div>
+      {rules && <AutoTaskRules onClose={() => setRules(false)} />}
       {dialog && <TaskDialog taskId={dialog.id} onClose={() => setDialog(null)} />}
     </>
   );

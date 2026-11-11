@@ -8,6 +8,7 @@ import { buildApp } from "./app.ts";
 import { bootstrap } from "./bootstrap.ts";
 import { reminderTick } from "./routes/mailing.ts";
 import { autoTaskTick } from "./lib/autoTasks.ts";
+import { refreshContractBilling } from "./lib/contractBilling.ts";
 import { quickbooksTick } from "./routes/quickbooks.ts";
 
 async function main() {
@@ -32,6 +33,9 @@ async function main() {
   // Tasks the tax follow-up creates by itself (taxes, DAS, payroll, year-end, T4/RL-1): checked at start and every hour.
   void autoTaskTick().catch((err) => console.error("[auto-tasks]", err));
   setInterval(() => void autoTaskTick().catch((err) => console.error("[auto-tasks]", err)), 60 * 60_000).unref();
+
+  // Contract and fixed-fee charges that have come due become to-bill lines (pending approval), once each: checked hourly.
+  setInterval(() => void refreshContractBilling().catch((err) => console.error("[contract-billing]", err)), 60 * 60_000).unref();
 
   setInterval(() => void quickbooksTick().catch((err) => console.error("[quickbooks]", err)), 15 * 60_000).unref();
 

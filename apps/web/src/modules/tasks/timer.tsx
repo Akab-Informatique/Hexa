@@ -10,7 +10,7 @@ import { Modal } from "../../components/ui";
 
 export interface Running { taskId: string; title: string; clientId: string | null; clientName: string | null; startedAt: string }
 export interface TimerState { running: Running | null; pendingCount: number; pendingMinutes: number; now: string }
-export interface Stopped { segmentId: string; taskId?: string; minutes: number; title: string; clientId: string | null; clientName: string | null }
+export interface Stopped { segmentId: string; entryId?: string; taskId?: string; minutes: number; title: string; clientId: string | null; clientName: string | null }
 export interface Pending { id: string; taskId: string; startedAt: string; minutes: number; title: string; clientId: string | null; clientName: string | null }
 
 const AUTO_KEY = "hexa.timer.auto";
@@ -56,13 +56,14 @@ export function useTimerActions() {
 export function LogTimeDialog({ seg, onClose }: { seg: Stopped; onClose: () => void }) {
   const l = useL();
   const { refresh } = useTimerActions();
-  const [desc, setDesc] = useState("");
+  const [desc, setDesc] = useState(seg.title); // the entry already exists in the timesheet (draft); this only refines it
   const [minutes, setMinutes] = useState(String(Math.min(1440, seg.minutes)));
   const [billable, setBillable] = useState(Boolean(seg.clientId));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const codes: Record<string, [string, string]> = {
-    timesheet_locked: ["Votre feuille de temps de cette semaine est déjà envoyée. Le temps reste à saisir.", "This week's timesheet is already sent. The time stays pending."],
+    timesheet_locked: ["Cette entrée n'est plus modifiable (semaine envoyée ou approuvée). Le temps reste dans votre feuille de temps.", "This entry can no longer be edited (week sent or approved). The time stays in your timesheet."],
+    day_total_exceeded: ["Le total de cette journée dépasserait 24 h.", "The total for this day would exceed 24 h."],
     already_logged: ["Ce temps est déjà saisi.", "This time is already logged."],
   };
   const save = async () => {
@@ -72,14 +73,11 @@ export function LogTimeDialog({ seg, onClose }: { seg: Stopped; onClose: () => v
       await refresh(); onClose();
     } catch (e) { const c = errMsg(e, "Error"); setError(codes[c] ? l(...codes[c]!) : c); } finally { setBusy(false); }
   };
-  const drop = async () => {
-    if (!window.confirm(l("Ne pas saisir ce temps ? Il sera abandonné.", "Do not log this time? It will be dropped."))) return;
-    await api(`/api/tasks/segments/${seg.segmentId}`, { method: "DELETE" }); await refresh(); onClose();
-  };
   const valid = desc.trim().length > 0 && Number(minutes) >= 1 && Number(minutes) <= 1440;
   return (
-    <Modal title={l("Saisir le temps", "Log the time")} onClose={onClose}>
+    <Modal title={l("Temps enregistré", "Time recorded")} onClose={onClose}>
       <p className="mb-3 text-sm text-muted">{seg.title}{seg.clientName ? ` · ${seg.clientName}` : ""} · <b className="text-[var(--fg)]">{minLabel(seg.minutes)}</b></p>
+      <p className="mb-3 text-xs text-muted">{l("Ce temps est déjà dans votre feuille de temps (brouillon). Vous pouvez préciser la description, la durée et la facturation.", "This time is already in your timesheet (draft). You can refine the description, duration and billing.")}</p>
       <label className="mb-3 block"><span className="label">{l("Qu'avez-vous fait ?", "What did you do?")}</span><textarea className="input min-h-[84px]" autoFocus value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={l("Brève description du travail", "Short description of the work")} maxLength={1000} /></label>
       <div className="mb-3 grid grid-cols-2 gap-3">
         <label className="block"><span className="label">{l("Minutes", "Minutes")}</span><input className="input" type="number" min={1} max={1440} value={minutes} onChange={(e) => setMinutes(e.target.value)} /></label>
@@ -87,8 +85,8 @@ export function LogTimeDialog({ seg, onClose }: { seg: Stopped; onClose: () => v
       </div>
       {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
       <div className="flex flex-wrap justify-between gap-2">
-        <button className="btn btn-danger" onClick={() => void drop()}>{l("Ne pas saisir", "Do not log")}</button>
-        <div className="flex gap-2"><button className="btn" onClick={onClose}>{l("Plus tard", "Later")}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={() => void save()}>{l("Enregistrer", "Save")}</button></div>
+        <span />
+        <div className="flex gap-2"><button className="btn" onClick={onClose}>{l("Fermer", "Close")}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={() => void save()}>{l("Enregistrer", "Save")}</button></div>
       </div>
     </Modal>
   );

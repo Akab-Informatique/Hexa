@@ -65,6 +65,7 @@ export const MODULES: ModuleDef[] = [
       p("tasks.view", "Voir les tâches", "View tasks"),
       p("tasks.edit", "Modifier les tâches", "Edit tasks"),
       p("tasks.manage", "Gérer toutes les tâches", "Manage all tasks"),
+      p("tasks.automation.manage", "Gérer les tâches automatiques", "Manage automatic tasks"),
     ],
   },
   {
