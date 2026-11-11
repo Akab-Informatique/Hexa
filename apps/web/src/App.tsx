@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AuthProvider } from "./lib/auth";
@@ -8,36 +8,46 @@ import { NAV } from "./modules/registry";
 import Login from "./pages/Login";
 import AppShell from "./layouts/AppShell";
 import AdminLayout from "./admin/AdminLayout";
-import UsersPage from "./admin/UsersPage";
-import GroupsPage from "./admin/GroupsPage";
-import { AuditPage, IntegrationPage, TenantPage } from "./admin/InfoPages";
-import DashboardsPage from "./modules/team/DashboardsPage";
-import MeetingPage from "./modules/team/MeetingPage";
-import ConnectPage from "./modules/mytools/ConnectPage";
-import TimesheetPage from "./modules/mytools/TimesheetPage";
-import ExpensesPage from "./modules/mytools/ExpensesPage";
-import TimeTypesPage from "./admin/TimeTypesPage";
-import ClassesPage from "./admin/ClassesPage";
-import ContractsPage from "./modules/accounting/ContractsPage";
-import ServicesPage from "./modules/accounting/ServicesPage";
-import { KbPage, ProceduresPage } from "./modules/mytools/KnowledgePages";
-import BoardPage from "./modules/command/BoardPage";
-import DocsPage from "./modules/command/DocsPage";
-import PipelinePage from "./modules/tasks/PipelinePage";
-import TasksPage from "./modules/tasks/TasksPage";
-import ClientsPage from "./modules/clients/ClientsPage";
-import TrackingPage from "./modules/clients/TrackingPage";
-import ClientDetail from "./modules/clients/ClientDetail";
-import InvoicesPage from "./modules/accounting/InvoicesPage";
-import ApprovalsPage from "./modules/accounting/ApprovalsPage";
-import VendorsPage from "./modules/accounting/VendorsPage";
-import HrPage from "./modules/hr/HrPage";
 import ClientShell from "./portal/ClientShell";
-import ClientHome from "./portal/ClientHome";
-import ClientInvoices from "./portal/ClientInvoices";
-import ClientContracts from "./portal/ClientContracts";
-import ClientSettings from "./portal/ClientSettings";
 import SetPassword from "./portal/SetPassword";
+
+// Every page is its own chunk. Access is still checked by the route guards below and by the server; a chunk is just code.
+const UsersPage = lazy(() => import("./admin/UsersPage"));
+const GroupsPage = lazy(() => import("./admin/GroupsPage"));
+const AuditPage = lazy(() => import("./admin/InfoPages").then((m) => ({ default: m.AuditPage })));
+const IntegrationPage = lazy(() => import("./admin/InfoPages").then((m) => ({ default: m.IntegrationPage })));
+const TenantPage = lazy(() => import("./admin/InfoPages").then((m) => ({ default: m.TenantPage })));
+const DashboardsPage = lazy(() => import("./modules/team/DashboardsPage"));
+const MeetingPage = lazy(() => import("./modules/team/MeetingPage"));
+const ConnectPage = lazy(() => import("./modules/mytools/ConnectPage"));
+const TimesheetPage = lazy(() => import("./modules/mytools/TimesheetPage"));
+const ExpensesPage = lazy(() => import("./modules/mytools/ExpensesPage"));
+const TimeTypesPage = lazy(() => import("./admin/TimeTypesPage"));
+const ClassesPage = lazy(() => import("./admin/ClassesPage"));
+const ContractsPage = lazy(() => import("./modules/accounting/ContractsPage"));
+const ServicesPage = lazy(() => import("./modules/accounting/ServicesPage"));
+const KbPage = lazy(() => import("./modules/mytools/KnowledgePages").then((m) => ({ default: m.KbPage })));
+const ProceduresPage = lazy(() => import("./modules/mytools/KnowledgePages").then((m) => ({ default: m.ProceduresPage })));
+const BoardPage = lazy(() => import("./modules/command/BoardPage"));
+const DocsPage = lazy(() => import("./modules/command/DocsPage"));
+const PipelinePage = lazy(() => import("./modules/tasks/PipelinePage"));
+const TasksPage = lazy(() => import("./modules/tasks/TasksPage"));
+const ClientsPage = lazy(() => import("./modules/clients/ClientsPage"));
+const TrackingPage = lazy(() => import("./modules/clients/TrackingPage"));
+const ClientDetail = lazy(() => import("./modules/clients/ClientDetail"));
+const InvoicesPage = lazy(() => import("./modules/accounting/InvoicesPage"));
+const ApprovalsPage = lazy(() => import("./modules/accounting/ApprovalsPage"));
+const VendorsPage = lazy(() => import("./modules/accounting/VendorsPage"));
+const HrPage = lazy(() => import("./modules/hr/HrPage"));
+const ClientHome = lazy(() => import("./portal/ClientHome"));
+const ClientInvoices = lazy(() => import("./portal/ClientInvoices"));
+const ClientContracts = lazy(() => import("./portal/ClientContracts"));
+const ClientSettings = lazy(() => import("./portal/ClientSettings"));
+
+/** Small accessible fallback; sits inside the shell so the menu stays put while a page loads. */
+function Wait({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<div role="status" aria-live="polite" className="glass p-8 text-center text-sm text-muted">…</div>}>{children}</Suspense>;
+}
 
 export default function App() {
   useBranding(); // applies the tenant's colors to the whole app, including the login screen
@@ -52,11 +62,11 @@ export default function App() {
 
 /** Page for each sidebar path. The right check is repeated here so a typed URL is refused too. */
 const PAGES: Record<string, ReactNode> = {
-  "/team": <DashboardsPage />, "/team/meeting": <MeetingPage />,
-  "/my/calendar": <ConnectPage kind="calendar" />, "/my/mail": <ConnectPage kind="mail" />, "/my/timesheet": <TimesheetPage />, "/my/expenses": <ExpensesPage />, "/my/kb": <KbPage />, "/my/procedures": <ProceduresPage />,
-  "/command/board": <BoardPage />, "/command/pipeline": <PipelinePage />,
-  "/clients": <ClientsPage />, "/tracking": <TrackingPage />, "/tasks": <TasksPage />, "/docs": <DocsPage />,
-  "/accounting/invoices": <InvoicesPage />, "/accounting/contracts": <ContractsPage />, "/services": <ServicesPage />, "/accounting/approvals": <ApprovalsPage />, "/accounting/vendors": <VendorsPage />, "/hr": <HrPage />,
+  "/team": <Wait><DashboardsPage /></Wait>, "/team/meeting": <Wait><MeetingPage /></Wait>,
+  "/my/calendar": <Wait><ConnectPage kind="calendar" /></Wait>, "/my/mail": <Wait><ConnectPage kind="mail" /></Wait>, "/my/timesheet": <Wait><TimesheetPage /></Wait>, "/my/expenses": <Wait><ExpensesPage /></Wait>, "/my/kb": <Wait><KbPage /></Wait>, "/my/procedures": <Wait><ProceduresPage /></Wait>,
+  "/command/board": <Wait><BoardPage /></Wait>, "/command/pipeline": <Wait><PipelinePage /></Wait>,
+  "/clients": <Wait><ClientsPage /></Wait>, "/tracking": <Wait><TrackingPage /></Wait>, "/tasks": <Wait><TasksPage /></Wait>, "/docs": <Wait><DocsPage /></Wait>,
+  "/accounting/invoices": <Wait><InvoicesPage /></Wait>, "/accounting/contracts": <Wait><ContractsPage /></Wait>, "/services": <Wait><ServicesPage /></Wait>, "/accounting/approvals": <Wait><ApprovalsPage /></Wait>, "/accounting/vendors": <Wait><VendorsPage /></Wait>, "/hr": <Wait><HrPage /></Wait>,
 };
 
 function Signed({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...k: string[]) => boolean }) {
@@ -75,17 +85,17 @@ function Signed({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...k: str
     <Routes>
       <Route element={<AppShell />}>
         {items.map((i) => <Route key={i.path} path={i.path} element={can(...(Array.isArray(i.permission) ? i.permission : [i.permission])) ? PAGES[i.path] : denied} />)}
-        <Route path="/clients/:id" element={can("clients.view") ? <ClientDetail /> : denied} />
+        <Route path="/clients/:id" element={can("clients.view") ? <Wait><ClientDetail /></Wait> : denied} />
       </Route>
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<Navigate to={adminHome} replace />} />
-        <Route path="users" element={can("admin.users.view") ? <UsersPage /> : denied} />
-        <Route path="groups" element={can("admin.users.view") ? <GroupsPage /> : denied} />
-        <Route path="integrations/:provider" element={can("admin.integrations.view") ? <IntegrationPage /> : denied} />
-        <Route path="tenant" element={can("admin.branding.view") ? <TenantPage /> : denied} />
-        <Route path="time" element={can("admin.time.manage") ? <TimeTypesPage /> : denied} />
-        <Route path="classes" element={can("admin.classes.manage") ? <ClassesPage /> : denied} />
-        <Route path="audit" element={can("admin.audit.view") ? <AuditPage /> : denied} />
+        <Route path="users" element={can("admin.users.view") ? <Wait><UsersPage /></Wait> : denied} />
+        <Route path="groups" element={can("admin.users.view") ? <Wait><GroupsPage /></Wait> : denied} />
+        <Route path="integrations/:provider" element={can("admin.integrations.view") ? <Wait><IntegrationPage /></Wait> : denied} />
+        <Route path="tenant" element={can("admin.branding.view") ? <Wait><TenantPage /></Wait> : denied} />
+        <Route path="time" element={can("admin.time.manage") ? <Wait><TimeTypesPage /></Wait> : denied} />
+        <Route path="classes" element={can("admin.classes.manage") ? <Wait><ClassesPage /></Wait> : denied} />
+        <Route path="audit" element={can("admin.audit.view") ? <Wait><AuditPage /></Wait> : denied} />
       </Route>
       <Route path="*" element={<Navigate to={first?.path ?? "/admin"} replace />} />
     </Routes>
@@ -102,11 +112,11 @@ function ClientSigned({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...
   return (
     <Routes>
       <Route element={<ClientShell />}>
-        <Route index element={can("clientportal.view") ? <ClientHome /> : denied} />
-        <Route path="/invoices" element={can("clientportal.invoices.view") ? <ClientInvoices /> : denied} />
-        <Route path="/contracts" element={can("clientportal.contracts.view") ? <ClientContracts /> : denied} />
-        <Route path="/documents" element={can("clientportal.docs.view") ? <DocsPage /> : denied} />
-        <Route path="/settings" element={<ClientSettings />} />
+        <Route index element={can("clientportal.view") ? <Wait><ClientHome /></Wait> : denied} />
+        <Route path="/invoices" element={can("clientportal.invoices.view") ? <Wait><ClientInvoices /></Wait> : denied} />
+        <Route path="/contracts" element={can("clientportal.contracts.view") ? <Wait><ClientContracts /></Wait> : denied} />
+        <Route path="/documents" element={can("clientportal.docs.view") ? <Wait><DocsPage /></Wait> : denied} />
+        <Route path="/settings" element={<Wait><ClientSettings /></Wait>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { memo, useCallback, useDeferredValue, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
@@ -28,16 +28,17 @@ const T5_TAXABLE = 1.15, T5_FED = 0.1038455, T5_QC = 0.03933;
 const NEXT: Record<Status, Status> = { todo: "done", done: "na", na: "todo", progress: "review", review: "done" };
 const NEXT_YEAREND: Record<Status, Status> = { todo: "progress", progress: "review", review: "done", done: "todo", na: "todo" };
 
-function Cell({ st, onClick, label, disabled, dim, tip }: { st: Status; onClick: () => void; label?: string; disabled?: boolean; dim?: boolean; tip?: string }) {
+// Memoized with primitive props only. Clicks are handled once on <tbody> (see onGridClick), which reads the data-* ids below.
+const Cell = memo(function Cell({ st, label, disabled, dim, tip, c, k, p, i }: { st: Status; label?: string; disabled?: boolean; dim?: boolean; tip?: string; c: string; k: Kind; p: string; i: string }) {
   const l = useL();
   const txt = st === "done" ? "✓" : st === "na" ? "N/A" : st === "progress" ? l("en cours", "in progress") : st === "review" ? l("à vérifier", "to review") : "";
   const color = st === "done" ? "var(--ok)" : st === "progress" ? "var(--warn)" : st === "review" ? "var(--brand)" : "var(--muted)";
   return (
-    <button type="button" aria-label={label} title={tip} disabled={disabled} onClick={onClick}
+    <button type="button" aria-label={label} title={tip} disabled={disabled} data-c={c} data-k={k} data-p={p} data-i={i}
       className={`h-7 min-w-[34px] whitespace-nowrap rounded-md border px-1 text-[11px] ${dim ? "opacity-40" : ""}`}
       style={{ color, borderColor: st === "todo" ? "var(--line)" : color, background: st === "todo" ? "transparent" : "rgb(255 255 255 / .05)" }}>{txt || "·"}</button>
   );
-}
+});
 
 /** The calendar: used on the Suivi fiscal page (all clients) and, with `clientId`, as a client's own tab. */
 export function TrackingView({ clientId }: { clientId?: string }) {
@@ -82,6 +83,15 @@ export function TrackingView({ clientId }: { clientId?: string }) {
     catch { await qc.invalidateQueries({ queryKey: key }); }
   };
   const cycle = (c: string, kind: Kind, period: string, item = "", table = NEXT) => setFiling(c, kind, period, item, table[stOf(c, kind, period, item)]);
+  // One stable click handler for the whole grid; the ref always points at the latest cycle(), so cells never need a new closure.
+  const cycleRef = useRef(cycle);
+  cycleRef.current = cycle;
+  const onGridClick = useCallback((e: React.MouseEvent<HTMLTableSectionElement>) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-k]");
+    if (!b || b.disabled || !e.currentTarget.contains(b)) return;
+    const { c, k, p, i } = b.dataset as { c: string; k: Kind; p: string; i: string };
+    void cycleRef.current(c, k, p, i, k === "yearend" ? NEXT_YEAREND : NEXT);
+  }, []);
   const setSettings = async (c: string, patch: Record<string, unknown>) => {
     patchCache((d) => ({ ...d, clients: d.clients.map((x) => (x.id === c ? { ...x, ...patch, resourceName: "resourceId" in patch ? users.data?.find((u) => u.id === patch.resourceId)?.name ?? null : x.resourceName } : x)) }));
     try { await api(`/api/tracking/${c}/settings`, { method: "PUT", body: patch }); } catch { await qc.invalidateQueries({ queryKey: key }); }
@@ -144,9 +154,9 @@ export function TrackingView({ clientId }: { clientId?: string }) {
               {view === "rl31" && head(<><th className={`${th} text-center`}>RL-31</th></>)}
               {view === "t5" && head(<><th className={th}>T5</th><th className={th}>{l("Imposable", "Taxable")}</th><th className={th}>{l("Crédit féd.", "Fed. credit")}</th><th className={th}>{l("Crédit QC", "QC credit")}</th><th className={`${th} text-center`}>{l("Sommaire", "Summary")}</th></>)}
             </thead>
-            <tbody>
+            <tbody onClick={onGridClick}>
               {rows.map((c) => {
-                const cell = (kind: Kind, period: string, item = "", table = NEXT, dim = false) => <Cell st={stOf(c.id, kind, period, item)} tip={tipOf(c.id, kind, period, item)} disabled={!edit} dim={dim} label={`${c.name} ${period} ${item}`} onClick={() => void cycle(c.id, kind, period, item, table)} />;
+                const cell = (kind: Kind, period: string, item = "", dim = false) => <Cell st={stOf(c.id, kind, period, item)} tip={tipOf(c.id, kind, period, item)} disabled={!edit} dim={dim} label={`${c.name} ${period} ${item}`} c={c.id} k={kind} p={period} i={item} />;
                 return (
                   <tr key={c.id}>
                     {nameCell(c)}
@@ -172,7 +182,7 @@ export function TrackingView({ clientId }: { clientId?: string }) {
                       {MONTHS.flatMap((_, i) => ["fed", "prov", "ccq"].map((it) => <td key={`${i}${it}`} className={`${it === "fed" ? "border-l border-white/10 " : ""}px-0.5 text-center`}>{cell("das", ym(i + 1), it)}</td>))}
                     </>}
                     {view === "tax" && <>
-                      {MONTHS.map((_, i) => <td key={i} className="px-0.5 text-center">{cell("tax", ym(i + 1), "", NEXT, !monthDue(c, i + 1))}</td>)}
+                      {MONTHS.map((_, i) => <td key={i} className="px-0.5 text-center">{cell("tax", ym(i + 1), "", !monthDue(c, i + 1))}</td>)}
                       <td className="text-xs text-muted">{c.taxFrequency === "monthly" ? l("Mensuelle", "Monthly") : c.taxFrequency === "quarterly" ? l("Trimestrielle", "Quarterly") : c.taxFrequency === "annual" ? l("Annuelle", "Annual") : "—"}</td>
                     </>}
                     {view === "payroll" && <>
@@ -183,7 +193,7 @@ export function TrackingView({ clientId }: { clientId?: string }) {
                     </>}
                     {view === "yearend" && <>
                       <td className="text-xs text-muted">{c.fiscalMonth ? l(...MONTHS[c.fiscalMonth - 1]!) : "—"}</td>
-                      {[year - 1, year, year + 1].map((y) => <td key={y} className="text-center">{cell("yearend", String(y), "", NEXT_YEAREND)}</td>)}
+                      {[year - 1, year, year + 1].map((y) => <td key={y} className="text-center">{cell("yearend", String(y))}</td>)}
                     </>}
                     {view === "t4rl1" && ["t4", "t4sum", "rl1", "t4a", "rl1sum", "car", "cnesst"].map((it) => <td key={it} className="text-center">
                       {it === "t4sum" || it === "rl1sum" ? amount(c.id, "t4rl1", String(year - 1), it) : cell("t4rl1", String(year - 1), it)}</td>)}

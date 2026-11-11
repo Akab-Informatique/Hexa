@@ -23,24 +23,46 @@ export async function linesOf(contractId: string): Promise<BillingLine[]> {
 export async function refreshContractBilling(clientId?: string): Promise<number> {
   const today = todayISO();
   const contracts = (await pool.query(
-    `select k.*, cl.auto_approve_kinds from client_contracts k join clients cl on cl.id = k.client_id where k.status = 'active' and cl.status <> 'inactive' and ($1::uuid is null or k.client_id = $1)`, [clientId ?? null])).rows;
-  let created = 0;
+    `select k.id, k.client_id, k.name, k.billing_period, k.starts_on, k.ends_on, k.billed_through, cl.auto_approve_kinds
+       from client_contracts k join clients cl on cl.id = k.client_id where k.status = 'active' and cl.status <> 'inactive' and ($1::uuid is null or k.client_id = $1)`, [clientId ?? null])).rows;
+  if (!contracts.length) return 0;
+  // Two reads for every contract (instead of one query per contract), then one set-based insert per chunk (instead of one insert per charge).
+  const lineRows = (await pool.query(
+    `select x.contract_id, x.id, x.name, x.kind, x.unit_price_cents, x.quantity, x.added_on, x.ends_on, coalesce(s.taxable, true) as taxable
+       from contract_services x left join services s on s.id = x.service_id where x.contract_id = any($1::uuid[]) order by x.added_on, x.created_at`, [contracts.map((k) => k.id)])).rows;
+  const byContract = new Map<string, BillingLine[]>();
+  for (const x of lineRows) {
+    const l: BillingLine = { id: x.id, name: x.name, kind: x.kind, priceCents: x.unit_price_cents, quantity: Number(x.quantity), addedOn: x.added_on, endsOn: x.ends_on, taxable: x.taxable };
+    const a = byContract.get(x.contract_id);
+    if (a) a.push(l); else byContract.set(x.contract_id, [l]);
+  }
+  const rows: { client: string; sourceId: string; contract: string; description: string; price: string; date: string; status: string; taxable: boolean }[] = [];
   for (const k of contracts) {
-    const lines = await linesOf(k.id);
-    if (!lines.length) continue;
+    const lines = byContract.get(k.id);
+    if (!lines?.length) continue;
     const taxable = new Map(lines.map((l) => [l.id, l.taxable]));
     const charges = chargesFor({ billingPeriod: k.billing_period, startsOn: k.starts_on, endsOn: k.ends_on }, lines, today)
       .filter((ch) => !k.billed_through || ch.date > k.billed_through)
       .filter((ch) => ch.cents > 0);
+    const auto = (k.auto_approve_kinds as string[]).includes("contract");
     for (const ch of charges) {
-      const sourceId = uuidFromKey(chargeKeyText(k.id, ch.lineId, ch.date));
-      const auto = (k.auto_approve_kinds as string[]).includes("contract");
-      const r = await pool.query(
-        `insert into billing_items (client_id, source, source_id, contract_id, description, quantity, unit_price, work_date, status, taxable)
-         values ($1,'contract',$2,$3,$4,1,$5,$6,$7,$8) on conflict do nothing`,
-        [k.client_id, sourceId, k.id, `${k.name} · ${ch.description}${ch.prorated ? ` — prorata ${ch.days}/${ch.periodDays} j` : ""}`.slice(0, 500), centsToDecimal(ch.cents), ch.date, auto ? "approved" : "pending", taxable.get(ch.lineId) ?? true]);
-      created += r.rowCount ?? 0;
+      rows.push({
+        client: k.client_id, sourceId: uuidFromKey(chargeKeyText(k.id, ch.lineId, ch.date)), contract: k.id,
+        description: `${k.name} · ${ch.description}${ch.prorated ? ` — prorata ${ch.days}/${ch.periodDays} j` : ""}`.slice(0, 500),
+        price: centsToDecimal(ch.cents), date: ch.date, status: auto ? "approved" : "pending", taxable: taxable.get(ch.lineId) ?? true,
+      });
     }
+  }
+  let created = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const ch = rows.slice(i, i + 500);
+    const r = await pool.query(
+      `insert into billing_items (client_id, source, source_id, contract_id, description, quantity, unit_price, work_date, status, taxable)
+       select i.client, 'contract', i.source_id, i.contract, i.description, 1, i.price, i.work_date, i.status, i.taxable
+         from unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::text[], $5::numeric[], $6::date[], $7::text[], $8::boolean[]) as i(client, source_id, contract, description, price, work_date, status, taxable)
+       on conflict do nothing`,
+      [ch.map((x) => x.client), ch.map((x) => x.sourceId), ch.map((x) => x.contract), ch.map((x) => x.description), ch.map((x) => x.price), ch.map((x) => x.date), ch.map((x) => x.status), ch.map((x) => x.taxable)]);
+    created += r.rowCount ?? 0;
   }
   return created;
 }

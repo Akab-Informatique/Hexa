@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { compareVersions, VERSION_RE, type UpdaterStatus } from "@hexa/shared";
 import { config } from "./config.ts";
@@ -55,6 +56,13 @@ async function updater<T>(path: string, init?: RequestInit): Promise<T | null> {
 export function buildApp(): Hono<Env> {
   const app = new Hono<Env>();
 
+  // gzip/deflate for API JSON and CSV (the tracking calendar payload goes from ~10 MB to ~0.2 MB). BREACH needs a secret and attacker-chosen
+  // text in the same compressed body: no API response here reflects request input next to a secret (no CSRF tokens exist, writes are protected by
+  // the origin check, and the session lives in an HttpOnly cookie header, never in a body). To stay safe by default, responses that can carry
+  // secrets or one-time material (sign-in/2FA setup, integration credentials, OAuth flows) are never compressed.
+  const NO_COMPRESS = /^\/api\/(auth|admin\/integrations|microsoft|accounting\/quickbooks|update)(\/|$)/;
+  const gzip = compress();
+  app.use("/api/*", (c, next) => (NO_COMPRESS.test(c.req.path) ? next() : gzip(c, next)));
   app.use("/api/*", sameOriginWrites);
   app.use("/api/*", loadAuth);
 
