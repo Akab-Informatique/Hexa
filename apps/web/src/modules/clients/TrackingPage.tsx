@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { useL } from "../../lib/l";
+import { useL, useLocale } from "../../lib/l";
 import { Empty, Toolbar, useUsers } from "../../components/kit";
 import { PageHeader } from "../../components/ui";
 
@@ -15,7 +15,7 @@ interface TClient {
   resourceId: string | null; resourceName: string | null; resourceLabel: string; fiscalMonth: number | null; booksThrough: string | null; checkFrequency: string; dasFiler: string;
   payrollPeriod: string; payrollSystem: string; payrollNote: string;
 }
-interface Filing { clientId: string; kind: Kind; period: string; item: string; status: Exclude<Status, "todo">; amount: string | number | null; note: string }
+interface Filing { clientId: string; kind: Kind; period: string; item: string; status: Status; prevStatus?: string; amount: string | number | null; note: string; updatedByName?: string | null; updatedAt?: string | null }
 interface Data { year: number; clients: TClient[]; filings: Filing[] }
 type View = "clients" | "das" | "tax" | "payroll" | "yearend" | "t4rl1" | "rl31" | "t5";
 
@@ -24,15 +24,23 @@ const pad = (n: number) => String(n).padStart(2, "0");
 // Quebec dividend factors from the firm's T5 sheet: taxable amount, federal credit, Quebec credit.
 const T5_TAXABLE = 1.15, T5_FED = 0.1038455, T5_QC = 0.03933;
 
+/** Hover text: who last changed a box and when ("Décoché par Emmy · 11 nov. 2026 15:04"). */
+export function changeTip(l: (fr: string, en: string) => string, locale: string, status: string, by?: string | null, at?: string | null): string | undefined {
+  if (!by && !at) return undefined;
+  const what = status === "todo" ? l("Décoché par", "Unchecked by") : status === "done" ? l("Coché par", "Checked by") : status === "na" ? l("Marqué N/A par", "Marked N/A by") : l("Modifié par", "Changed by");
+  const when = at ? new Date(at).toLocaleString(locale, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  return `${what} ${by ?? "—"}${when ? ` · ${when}` : ""}`;
+}
+
 const NEXT: Record<Status, Status> = { todo: "done", done: "na", na: "todo", progress: "review", review: "done" };
 const NEXT_YEAREND: Record<Status, Status> = { todo: "progress", progress: "review", review: "done", done: "todo", na: "todo" };
 
-function Cell({ st, onClick, label, disabled, dim }: { st: Status; onClick: () => void; label?: string; disabled?: boolean; dim?: boolean }) {
+function Cell({ st, onClick, label, disabled, dim, tip }: { st: Status; onClick: () => void; label?: string; disabled?: boolean; dim?: boolean; tip?: string }) {
   const l = useL();
   const txt = st === "done" ? "✓" : st === "na" ? "N/A" : st === "progress" ? l("en cours", "in progress") : st === "review" ? l("à vérifier", "to review") : "";
   const color = st === "done" ? "var(--ok)" : st === "progress" ? "var(--warn)" : st === "review" ? "var(--brand)" : "var(--muted)";
   return (
-    <button type="button" aria-label={label} disabled={disabled} onClick={onClick}
+    <button type="button" aria-label={label} title={tip} disabled={disabled} onClick={onClick}
       className={`h-7 min-w-[34px] whitespace-nowrap rounded-md border px-1 text-[11px] ${dim ? "opacity-40" : ""}`}
       style={{ color, borderColor: st === "todo" ? "var(--line)" : color, background: st === "todo" ? "transparent" : "rgb(255 255 255 / .05)" }}>{txt || "·"}</button>
   );
@@ -41,7 +49,8 @@ function Cell({ st, onClick, label, disabled, dim }: { st: Status; onClick: () =
 /** The calendar: used on the Suivi fiscal page (all clients) and, with `clientId`, as a client's own tab. */
 export function TrackingView({ clientId }: { clientId?: string }) {
   const l = useL();
-  const { can } = useAuth();
+  const { can, me } = useAuth();
+  const loc = useLocale();
   const qc = useQueryClient();
   const users = useUsers();
   const edit = can("clients.tracking.edit");
@@ -58,13 +67,14 @@ export function TrackingView({ clientId }: { clientId?: string }) {
     return m;
   }, [data.data]);
   const get = (c: string, kind: Kind, period: string, item = "") => map.get(`${c}|${kind}|${period}|${item}`);
+  const tipOf = (c: string, kind: Kind, period: string, item = "") => { const f = get(c, kind, period, item); return f ? changeTip(l, loc, f.status, f.updatedByName, f.updatedAt) : undefined; };
   const stOf = (c: string, kind: Kind, period: string, item = ""): Status => get(c, kind, period, item)?.status ?? "todo";
 
   const patchCache = (fn: (d: Data) => Data) => qc.setQueryData<Data>(key, (d) => (d ? fn(d) : d));
   const setFiling = async (c: string, kind: Kind, period: string, item: string, status: Status, amount?: number | null) => {
     const prev = get(c, kind, period, item);
-    const next: Filing = { clientId: c, kind, period, item, status: status === "todo" ? "progress" : status, amount: amount !== undefined ? amount : prev?.amount ?? null, note: prev?.note ?? "" };
-    patchCache((d) => ({ ...d, filings: [...d.filings.filter((f) => !(f.clientId === c && f.kind === kind && f.period === period && f.item === item)), ...(status === "todo" && next.amount == null ? [] : [next])] }));
+    const next: Filing = { clientId: c, kind, period, item, status, prevStatus: prev?.status ?? "todo", amount: amount !== undefined ? amount : prev?.amount ?? null, note: prev?.note ?? "", updatedByName: me.user?.name ?? null, updatedAt: new Date().toISOString() };
+    patchCache((d) => ({ ...d, filings: [...d.filings.filter((f) => !(f.clientId === c && f.kind === kind && f.period === period && f.item === item)), next] }));
     try { await api(`/api/tracking/${c}/filing`, { method: "PUT", body: { kind, period, item, status, amount: next.amount === null ? null : Number(next.amount), note: next.note } }); }
     catch { await qc.invalidateQueries({ queryKey: key }); }
   };
@@ -77,10 +87,10 @@ export function TrackingView({ clientId }: { clientId?: string }) {
   const monthDue = (c: TClient, m: number) => c.taxFrequency !== "quarterly" || [1, 4, 7, 10].includes(m);
   const views: [View, string][] = [["clients", l("Dossiers", "Files")], ["das", "DAS"], ["tax", l("Taxes", "Taxes")], ["payroll", l("Paie", "Payroll")], ["yearend", l("Fin d'année", "Year-end")], ["t4rl1", "T4 / RL-1"], ["rl31", "RL-31"], ["t5", "T5"]];
   const sel = "input !w-auto !py-1 text-xs";
-  const th = "px-2 py-1 text-left text-xs font-medium text-muted";
+  const th = "px-2 py-2 text-left text-[13px] font-semibold text-fg border-b border-white/10 whitespace-nowrap";
   const num = (v: unknown) => (v === null || v === undefined || v === "" ? "" : String(v));
   const Amount = ({ c, kind, period, item }: { c: string; kind: Kind; period: string; item: string }) => (
-    <input className="input !w-24 !py-1 text-right text-xs" inputMode="decimal" disabled={!edit} defaultValue={num(get(c, kind, period, item)?.amount)} key={`${c}${kind}${period}${item}${num(get(c, kind, period, item)?.amount)}`}
+    <input className="input !w-24 !py-1 text-right text-xs" title={tipOf(c, kind, period, item)} inputMode="decimal" disabled={!edit} defaultValue={num(get(c, kind, period, item)?.amount)} key={`${c}${kind}${period}${item}${num(get(c, kind, period, item)?.amount)}`}
       onBlur={(e) => { const v = e.target.value.trim().replace(",", "."); const n = v === "" ? null : Number(v); if (n !== null && Number.isNaN(n)) return; if ((n ?? null) !== (get(c, kind, period, item)?.amount == null ? null : Number(get(c, kind, period, item)?.amount))) void setFiling(c, kind, period, item, n === null ? "todo" : stOf(c, kind, period, item) === "todo" ? "progress" : stOf(c, kind, period, item), n); }} />
   );
   const Name = ({ c }: { c: TClient }) => (clientId ? null : <td className="whitespace-nowrap px-2 py-1 font-medium"><Link to={`/clients/${c.id}`} className="no-underline hover:underline">{c.name}</Link></td>);
@@ -111,11 +121,11 @@ export function TrackingView({ clientId }: { clientId?: string }) {
 
       <div className="glass overflow-x-auto p-2">
         {rows.length === 0 ? <Empty>{l("Aucun client.", "No clients.")}</Empty> : (
-          <table className="grid">
+          <table className="grid trk">
             <thead>
               {view === "clients" && <Head><th className={th}>{l("Ressource", "Resource")}</th><th className={th}>{l("Fin d'année", "Year-end")}</th><th className={th}>{l("Tenue de livres faite jusqu'au", "Books done through")}</th><th className={th}>{l("Fréquence de vérification", "Check frequency")}</th><th className={th}>{l("Vérifié", "Checked")} {year}</th></Head>}
-              {view === "das" && <><tr>{!clientId && <th className={th} rowSpan={2}>{l("Client", "Client")}</th>}<th className={th} rowSpan={2}>{l("Qui déclare", "Filed by")}</th>{MONTHS.map((m, i) => <th key={i} colSpan={3} className="border-l border-white/10 px-2 py-1 text-center text-xs font-medium text-muted">{l(...m)}</th>)}</tr>
-                <tr>{MONTHS.flatMap((_, i) => ["Féd", "QC", "CCQ"].map((s) => <th key={`${i}${s}`} className={`${s === "Féd" ? "border-l border-white/10 " : ""}px-1 text-center text-[10px] font-normal text-muted`}>{s}</th>))}</tr></>}
+              {view === "das" && <><tr>{!clientId && <th className={th} rowSpan={2}>{l("Client", "Client")}</th>}<th className={th} rowSpan={2}>{l("Qui déclare", "Filed by")}</th>{MONTHS.map((m, i) => <th key={i} colSpan={3} className="border-l border-white/10 border-b px-2 py-2 text-center text-[13px] font-semibold text-fg">{l(...m)}</th>)}</tr>
+                <tr>{MONTHS.flatMap((_, i) => ["Féd", "QC", "CCQ"].map((s) => <th key={`${i}${s}`} className={`${s === "Féd" ? "border-l border-white/10 " : ""}px-1 pb-1 text-center text-[11px] font-medium text-fg/80`}>{s}</th>))}</tr></>}
               {view === "tax" && <Head>{MONTHS.map((m, i) => <th key={i} className={`${th} text-center`}>{l(...m)}</th>)}<th className={th}>{l("Fréquence", "Frequency")}</th></Head>}
               {view === "payroll" && <Head><th className={th}>{l("Période", "Period")}</th><th className={`${th} text-center`}>{l("Paies", "Payroll")}</th><th className={`${th} text-center`}>DAS</th><th className={`${th} text-center`}>CCQ</th><th className={`${th} text-center`}>T4 / RL-1</th><th className={th}>{l("Système", "System")}</th><th className={th}>{l("Info / spécification", "Info / notes")}</th></Head>}
               {view === "yearend" && <Head><th className={th}>{l("Fin d'année", "Year-end")}</th>{[year - 1, year, year + 1].map((y) => <th key={y} className={`${th} text-center`}>{y}</th>)}</Head>}
@@ -125,7 +135,7 @@ export function TrackingView({ clientId }: { clientId?: string }) {
             </thead>
             <tbody>
               {rows.map((c) => {
-                const cell = (kind: Kind, period: string, item = "", table = NEXT, dim = false) => <Cell st={stOf(c.id, kind, period, item)} disabled={!edit} dim={dim} label={`${c.name} ${period} ${item}`} onClick={() => void cycle(c.id, kind, period, item, table)} />;
+                const cell = (kind: Kind, period: string, item = "", table = NEXT, dim = false) => <Cell st={stOf(c.id, kind, period, item)} tip={tipOf(c.id, kind, period, item)} disabled={!edit} dim={dim} label={`${c.name} ${period} ${item}`} onClick={() => void cycle(c.id, kind, period, item, table)} />;
                 return (
                   <tr key={c.id}>
                     <Name c={c} />

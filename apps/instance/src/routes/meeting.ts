@@ -297,16 +297,19 @@ meetingRoutes.get("/tracking", requirePermission("clients.tracking.view", "clien
        from clients c left join client_tracking t on t.client_id = c.id left join users u on u.id = t.resource_id
       where c.status = 'active' order by lower(c.name)`)).rows;
   const periods = months.map((x) => x.period);
-  const filings = (await pool.query("select client_id, kind, period, item, status from client_filings where kind in ('das','tax') and period = any($1::text[])", [periods])).rows;
+  const filings = (await pool.query("select f.client_id, f.kind, f.period, f.item, f.status, f.prev_status, f.updated_at as at, u.name as by from client_filings f left join users u on u.id = f.updated_by where f.kind in ('das','tax') and f.period = any($1::text[])", [periods])).rows;
   const years = [...new Set(periods.map((p) => p.slice(0, 4)))];
   const taxTracked = new Set((await pool.query("select distinct client_id from client_filings where kind = 'tax' and left(period, 4) = any($1::text[])", [years])).rows.map((r) => r.client_id));
-  const st = (id: string, kind: string, period: string, item: string) => filings.find((f) => f.client_id === id && f.kind === kind && f.period === period && f.item === item)?.status ?? "todo";
+  const st = (id: string, kind: string, period: string, item: string) => {
+    const f = filings.find((x) => x.client_id === id && x.kind === kind && x.period === period && x.item === item);
+    return { status: f?.status ?? "todo", prev: f?.prev_status ?? "", by: f?.by ?? null, at: f?.at ?? null };
+  };
   return c.json({
     months: months.map((mo) => ({
       ...mo,
       das: clients.filter((k) => k.das_filer).map((k) => ({ clientId: k.id, name: k.name, resource: k.resource, filer: k.das_filer, fed: st(k.id, "das", mo.period, "fed"), prov: st(k.id, "das", mo.period, "prov"), ccq: st(k.id, "das", mo.period, "ccq") })),
       tax: clients.filter((k) => k.tax_frequency === "monthly" || (k.tax_frequency === "quarterly" && [1, 4, 7, 10].includes(Number(mo.period.slice(5)))) || (!k.tax_frequency && taxTracked.has(k.id)))
-        .map((k) => ({ clientId: k.id, name: k.name, resource: k.resource, status: st(k.id, "tax", mo.period, "") })),
+        .map((k) => ({ clientId: k.id, name: k.name, resource: k.resource, ...st(k.id, "tax", mo.period, "") })),
     })),
   });
 });

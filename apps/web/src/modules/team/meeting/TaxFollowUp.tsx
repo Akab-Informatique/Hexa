@@ -3,10 +3,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
 import { useAuth } from "../../../lib/auth";
 import { fmtDate, useL, useLocale } from "../../../lib/l";
+import { changeTip } from "../../clients/TrackingPage";
 
 type St = "todo" | "done" | "na" | "progress" | "review";
-interface Das { clientId: string; name: string; resource: string; filer: string; fed: St; prov: St; ccq: St }
-interface Tax { clientId: string; name: string; resource: string; status: St }
+interface Box { status: St; prev: string; by: string | null; at: string | null }
+interface Das { clientId: string; name: string; resource: string; filer: string; fed: Box; prov: Box; ccq: Box }
+interface Tax extends Box { clientId: string; name: string; resource: string }
 interface Month { due: string; period: string; dasDue: string; taxDue: string; das: Das[]; tax: Tax[] }
 
 const NEXT: Record<St, St> = { todo: "done", done: "na", na: "todo", progress: "done", review: "done" };
@@ -37,7 +39,7 @@ export function TaxFollowUp() {
       </div>
       <div className="grid gap-5 lg:grid-cols-2">
         {q.data.months.map((m, idx) => {
-          const dasOpen = m.das.filter((d) => [d.fed, d.prov, d.ccq].some(open) && d.filer !== "them");
+          const dasOpen = m.das.filter((d) => [d.fed, d.prov, d.ccq].some((b) => open(b.status)) && d.filer !== "them");
           const taxOpen = m.tax.filter((t) => open(t.status));
           return (
             <div key={m.due}>
@@ -49,8 +51,8 @@ export function TaxFollowUp() {
                     <li key={d.clientId} className="flex items-center justify-between gap-2">
                       <span className="min-w-0 truncate"><Link to={`/clients/${d.clientId}`} className="no-underline hover:underline">{d.name}</Link>{d.resource && <span className="text-xs text-muted"> · {d.resource}</span>}</span>
                       <span className="flex shrink-0 gap-1">
-                        {(["fed", "prov", "ccq"] as const).filter((k) => k !== "ccq" || d.filer !== "them" || d.ccq !== "na").map((k) => (
-                          <button key={k} type="button" disabled={!edit} onClick={() => void set(d.clientId, "das", m.period, k, d[k])} className="h-6 rounded-md border px-1.5 text-[11px]" style={chip(d[k])}>{k === "fed" ? "Féd" : k === "prov" ? "QC" : "CCQ"} {mark(d[k])}</button>
+                        {(["fed", "prov", "ccq"] as const).filter((k) => k !== "ccq" || d.filer !== "them" || d.ccq.status !== "na").map((k) => (
+                          <button key={k} type="button" title={changeTip(l, loc, d[k].status, d[k].by, d[k].at)} disabled={!edit} onClick={() => void set(d.clientId, "das", m.period, k, d[k].status)} className="h-6 rounded-md border px-1.5 text-[11px]" style={chip(d[k].status)}>{k === "fed" ? "Féd" : k === "prov" ? "QC" : "CCQ"} {mark(d[k].status)}</button>
                         ))}
                       </span>
                     </li>
@@ -63,7 +65,7 @@ export function TaxFollowUp() {
                   {taxOpen.map((t) => (
                     <li key={t.clientId} className="flex items-center justify-between gap-2">
                       <span className="min-w-0 truncate"><Link to={`/clients/${t.clientId}`} className="no-underline hover:underline">{t.name}</Link>{t.resource && <span className="text-xs text-muted"> · {t.resource}</span>}</span>
-                      <button type="button" disabled={!edit} onClick={() => void set(t.clientId, "tax", m.period, "", t.status)} className="h-6 shrink-0 rounded-md border px-2 text-[11px]" style={chip(t.status)}>{l("Fait", "Done")}</button>
+                      <button type="button" title={changeTip(l, loc, t.status, t.by, t.at)} disabled={!edit} onClick={() => void set(t.clientId, "tax", m.period, "", t.status)} className="h-6 shrink-0 rounded-md border px-2 text-[11px]" style={chip(t.status)}>{l("Fait", "Done")}</button>
                     </li>
                   ))}
                 </ul>

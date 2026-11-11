@@ -147,8 +147,14 @@ select.input option:checked { background: color-mix(in oklab, var(--brand) 45%, 
 }
 .nav-item.upcoming { opacity: .5; }
 
-table.grid { width: 100%; border-collapse: collapse; font-size: 14px; }
+/* Tailwind's .grid would turn the table into a CSS grid and the header and body columns would never line up. */
+table.grid { display: table; width: 100%; border-collapse: collapse; font-size: 14px; }
 table.grid th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); }
+/* Headers follow their column: .text-center on a <th> now wins over the default left alignment. */
+table.grid th.text-center { text-align: center; }
+table.grid th.text-right { text-align: right; }
+table.grid.trk th { color: var(--fg); font-weight: 600; font-size: 13px; padding: 10px 8px; white-space: nowrap; }
+table.grid.trk td { padding: 8px; }
 table.grid td { padding: 11px 12px; border-bottom: 1px solid rgb(255 255 255 / 0.06); vertical-align: middle; }
 table.grid tr:hover td { background: rgb(255 255 255 / 0.03); }
 

@@ -42,8 +42,9 @@ trackingRoutes.get("/", VIEW, async (c) => {
        from clients c left join client_tracking t on t.client_id = c.id left join users u on u.id = t.resource_id
       where c.status <> 'inactive' and ($1::uuid is null or c.id = $1) order by lower(c.name)`, [client ?? null]);
   const filings = await pool.query(
-    `select client_id, kind, period, item, status, amount, note from client_filings
-      where ($1::uuid is null or client_id = $1) and (period like $2 || '%' or kind = 'yearend')`, [client ?? null, String(year)]);
+    `select f.client_id, f.kind, f.period, f.item, f.status, f.prev_status, f.amount, f.note, f.updated_at, u.name as updated_by_name
+       from client_filings f left join users u on u.id = f.updated_by
+      where ($1::uuid is null or f.client_id = $1) and (f.period like $2 || '%' or f.kind = 'yearend')`, [client ?? null, String(year)]);
   return c.json({ year, clients: camelRows(clients), filings: camelRows(filings) });
 });
 
@@ -66,13 +67,17 @@ trackingRoutes.put("/:id/filing", EDIT, async (c) => {
   if (!isUuid(id)) return c.json({ error: "not found" }, 404);
   const d = await body(c, Filing);
   const note = d.note ?? "";
-  if (d.status === "todo" && !note && d.amount == null) {
-    await pool.query("delete from client_filings where client_id = $1 and kind = $2 and period = $3 and item = $4", [id, d.kind, d.period, d.item]);
-  } else {
+  const prev = (await pool.query("select status, amount, note from client_filings where client_id = $1 and kind = $2 and period = $3 and item = $4", [id, d.kind, d.period, d.item])).rows[0];
+  const from = prev?.status ?? "todo";
+  // An unticked box keeps its row (status "todo") so the last person to touch it is still known.
+  if (prev || d.status !== "todo" || d.amount != null || note) {
     await pool.query(
-      `insert into client_filings (client_id, kind, period, item, status, amount, note, updated_by) values ($1,$2,$3,$4,$5,$6,$7,$8)
-       on conflict (client_id, kind, period, item) do update set status = excluded.status, amount = excluded.amount, note = excluded.note, updated_by = excluded.updated_by, updated_at = now()`,
-      [id, d.kind, d.period, d.item, d.status === "todo" ? "progress" : d.status, d.amount ?? null, note, auth(c).user.id]);
+      `insert into client_filings (client_id, kind, period, item, status, prev_status, amount, note, updated_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       on conflict (client_id, kind, period, item) do update set status = excluded.status, prev_status = client_filings.status, amount = excluded.amount, note = excluded.note, updated_by = excluded.updated_by, updated_at = now()`,
+      [id, d.kind, d.period, d.item, d.status, from, d.amount ?? null, note, auth(c).user.id]);
+    if (from !== d.status || Number(prev?.amount ?? 0) !== Number(d.amount ?? 0)) {
+      await pool.query("insert into client_filing_log (client_id, kind, period, item, from_status, to_status, user_id) values ($1,$2,$3,$4,$5,$6,$7)", [id, d.kind, d.period, d.item, from, d.status, auth(c).user.id]);
+    }
   }
   await audit("tracking.filing", { userId: auth(c).user.id, target: `${d.kind} ${d.period} ${d.item}`.trim() });
   return c.json({ ok: true });
