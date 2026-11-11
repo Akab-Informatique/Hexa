@@ -4,12 +4,31 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { unzipSync, strFromU8 } from "fflate";
 
-const CONSOLE_PORT = 8080;
+// Another app on the machine may already hold a port (e.g. camera software on 8080): take the next free one.
+const inUse = (port) =>
+  new Promise((resolve) => {
+    const s = net.connect({ port, host: "127.0.0.1" });
+    s.once("connect", () => { s.destroy(); resolve(true); });
+    s.once("error", () => resolve(false));
+  });
+async function freePort(preferred, avoid = []) {
+  for (let p = preferred; p < preferred + 50; p++) {
+    if (!avoid.includes(p) && !(await inUse(p))) {
+      if (p !== preferred) console.log(`[dev] port ${preferred} is taken, using ${p}`);
+      return p;
+    }
+  }
+  throw new Error(`no free port near ${preferred}`);
+}
+
+const CONSOLE_PORT = await freePort(8080);
+const SITE_PORT = await freePort(8081, [CONSOLE_PORT]);
 const INSTANCE_PORT = 3000;
 const auth = "Basic " + Buffer.from("admin:admin").toString("base64");
 const children = [];
@@ -103,13 +122,13 @@ http.createServer((req, res) => {
   const js = req.url === "/config.js";
   res.writeHead(200, { "content-type": js ? "text/javascript" : "text/html; charset=utf-8" });
   res.end(fs.readFileSync(js ? "apps/site/config.js" : "apps/site/index.html"));
-}).listen(8081, "127.0.0.1");
+}).listen(SITE_PORT, "127.0.0.1");
 await waitFor("http://localhost:5173/", "web app");
 
 console.log(`
 [dev] ready
   web app:  http://localhost:5173   sign in: ${get("INITIAL_ADMIN_EMAIL")} / ${get("INITIAL_ADMIN_PASSWORD")}  (first login forces a new password)
-  site:     http://localhost:8081   (marketing page; firm id "demo")
+  site:     http://localhost:${SITE_PORT}   (marketing page; firm id "demo")
   console:  http://localhost:${CONSOLE_PORT}   (admin / admin)
   api:      http://localhost:${INSTANCE_PORT}
 `);
