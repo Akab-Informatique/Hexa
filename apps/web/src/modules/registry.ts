@@ -1,4 +1,4 @@
-import { BookOpen, Briefcase, CalendarDays, CheckSquare, Clock, FileText, FolderOpen, Inbox, LayoutDashboard, ListChecks, Megaphone, Receipt, Truck, UserCog, Users, Workflow, Wrench, ClipboardCheck, Landmark, Wallet, Package, FileSignature, type LucideIcon } from "lucide-react";
+import { BookOpen, Briefcase, CalendarCheck, CalendarDays, CheckSquare, Clock, FileText, FolderOpen, Inbox, LayoutDashboard, ListChecks, Megaphone, Receipt, Truck, UserCog, Users, Workflow, Wrench, ClipboardCheck, Landmark, Wallet, Package, FileSignature, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   path: string;
@@ -31,6 +31,7 @@ export const NAV: NavSection[] = [
   ] },
   { key: "management", labelKey: "nav.management", icon: Briefcase, items: [
     { path: "/clients", labelKey: "nav.clients_all", icon: Briefcase, permission: "clients.view" },
+    { path: "/tracking", labelKey: "nav.tracking", icon: CalendarCheck, permission: ["clients.tracking.view", "clients.tracking.edit"] },
     { path: "/tasks", labelKey: "nav.tasks_all", icon: CheckSquare, permission: ["tasks.view", "command.pipeline.view"] },
     { path: "/services", labelKey: "nav.services_catalogue", icon: Package, permission: ["services.view", "services.manage"] },
     { path: "/docs", labelKey: "nav.docs_sharepoint", icon: FolderOpen, permission: ["docs.view", "docs.edit", "docs.manage"] },

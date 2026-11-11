@@ -26,6 +26,7 @@ import DocsPage from "./modules/command/DocsPage";
 import PipelinePage from "./modules/tasks/PipelinePage";
 import TasksPage from "./modules/tasks/TasksPage";
 import ClientsPage from "./modules/clients/ClientsPage";
+import TrackingPage from "./modules/clients/TrackingPage";
 import ClientDetail from "./modules/clients/ClientDetail";
 import InvoicesPage from "./modules/accounting/InvoicesPage";
 import ApprovalsPage from "./modules/accounting/ApprovalsPage";
@@ -54,7 +55,7 @@ const PAGES: Record<string, ReactNode> = {
   "/team": <DashboardsPage />, "/team/meeting": <MeetingPage />,
   "/my/calendar": <ConnectPage kind="calendar" />, "/my/mail": <ConnectPage kind="mail" />, "/my/timesheet": <TimesheetPage />, "/my/expenses": <ExpensesPage />, "/my/kb": <KbPage />, "/my/procedures": <ProceduresPage />,
   "/command/board": <BoardPage />, "/command/pipeline": <PipelinePage />,
-  "/clients": <ClientsPage />, "/tasks": <TasksPage />, "/docs": <DocsPage />,
+  "/clients": <ClientsPage />, "/tracking": <TrackingPage />, "/tasks": <TasksPage />, "/docs": <DocsPage />,
   "/accounting/invoices": <InvoicesPage />, "/accounting/contracts": <ContractsPage />, "/services": <ServicesPage />, "/accounting/approvals": <ApprovalsPage />, "/accounting/vendors": <VendorsPage />, "/hr": <HrPage />,
 };
 

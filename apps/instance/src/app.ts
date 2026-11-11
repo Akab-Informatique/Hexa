@@ -11,6 +11,7 @@ import { loadAuth, requireReady, sameOriginWrites, type Env } from "./auth/sessi
 import { authRoutes } from "./routes/auth.ts";
 import { adminRoutes } from "./routes/admin.ts";
 import { clientRoutes } from "./routes/clients.ts";
+import { trackingRoutes } from "./routes/tracking.ts";
 import { taskRoutes } from "./routes/tasks.ts";
 import { teamRoutes } from "./routes/team.ts";
 import { myToolsRoutes } from "./routes/mytools.ts";
@@ -83,6 +84,7 @@ export function buildApp(): Hono<Env> {
   app.route("/api/clients", portalAdminRoutes);
   app.route("/api/portal", portalRoutes);
   app.route("/api/clients", clientRoutes);
+  app.route("/api/tracking", trackingRoutes);
   app.route("/api/pipeline", pipelineRoutes);
   app.route("/api/microsoft", microsoftRoutes);
   app.route("/api/tasks", taskTimerRoutes);

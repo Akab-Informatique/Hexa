@@ -22,7 +22,7 @@ export const en: Dict = {
     mytools: "My tools", mytools_calendar: "Calendar", mytools_mail: "Inbox", mytools_timesheet: "Timesheet", mytools_expenses: "Expenses", mytools_kb: "Knowledge base", mytools_procedures: "Procedures",
     command: "Command center", command_board: "Message board", command_pipeline: "Pipeline",
     tasks_all: "Tasks",
-    management: "Management", docs_sharepoint: "Documentation", services_catalogue: "Services", accounting_contracts: "Contracts", clients_all: "Clients",
+    management: "Management", docs_sharepoint: "Documentation", services_catalogue: "Services", accounting_contracts: "Contracts", clients_all: "Clients", tracking: "Tax follow-up",
     accounting: "Internal accounting", accounting_invoices: "Invoices", accounting_approvals: "Work to bill", accounting_vendors: "Vendors and payments",
     hr_staff: "Human resources",
     upcomingTitle: "This section is coming soon", upcomingText: "The module is planned and its access rights are already defined. It will arrive in an upcoming version.",

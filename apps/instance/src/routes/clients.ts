@@ -49,7 +49,7 @@ const BCOLS: Record<string, string> = { billingEmail: "billing_email", termsDays
 // ------------------------------------------------------------------ Static lookups (before /:id)
 clientRoutes.get("/classes", requirePermission("clients.view"), async (c) => c.json(camelRows(await pool.query("select * from client_classes order by position, key"))));
 
-const TABS = ["info", "contacts", "contracts", "tasks", "invoices", "billing"];
+const TABS = ["info", "contacts", "contracts", "tasks", "invoices", "billing", "tracking"];
 clientRoutes.get("/tab-order", requirePermission("clients.view"), async (c) => {
   const saved = (await getSetting<string[]>("crm.tabOrder")) ?? [];
   // A tab the saved order does not name goes at the end.

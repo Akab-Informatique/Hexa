@@ -8,6 +8,7 @@ import { useAuth } from "../../lib/auth";
 import { fmtDate, money, useL, useLocale } from "../../lib/l";
 import { Chip, confirmDo, Empty, errMsg, FormDialog, Tabs, type FieldDef } from "../../components/kit";
 import { Modal, PageHeader } from "../../components/ui";
+import { TrackingView } from "./TrackingPage";
 import { ClassChip, clientFields, freqLabel, statusTone, type ClientClass } from "./ClientsPage";
 import { viewLabel, viewTone } from "../accounting/InvoiceDialog";
 import { ContractWindow, NewContractDialog, codeText } from "./ContractWindow";
@@ -21,7 +22,7 @@ interface Detail {
   contacts: Contact[]; contracts: Contract[]; children: { id: string; name: string }[]; [k: string]: unknown;
 }
 interface InvoiceRow { id: string; number: string; status: string; view: string; total: number; balance: number; issueDate: string; dueDate: string }
-type Tab = "info" | "contacts" | "contracts" | "tasks" | "invoices" | "billing";
+type Tab = "info" | "contacts" | "contracts" | "tasks" | "invoices" | "billing" | "tracking";
 
 export default function ClientDetail() {
   const { id = "" } = useParams();
@@ -43,13 +44,13 @@ export default function ClientDetail() {
   const refresh = async () => { await qc.invalidateQueries({ queryKey: ["client", id] }); await qc.invalidateQueries({ queryKey: ["clients"] }); };
 
   const allowed: Record<Tab, boolean> = {
-    info: true, contacts: can("clients.contacts.view"), contracts: can("clients.contracts.view"), tasks: can("tasks.view", "command.pipeline.view"), invoices: invoiceRight, billing: billingRight,
+    info: true, contacts: can("clients.contacts.view"), contracts: can("clients.contracts.view"), tasks: can("tasks.view", "command.pipeline.view"), invoices: invoiceRight, billing: billingRight, tracking: can("clients.tracking.view", "clients.tracking.edit"),
   };
   const labels: Record<Tab, string> = {
     info: l("Infos", "Info"), contacts: `${l("Contacts", "Contacts")}${c ? ` (${c.contacts.length})` : ""}`, contracts: `${l("Contrats", "Contracts")}${c ? ` (${c.contracts.length})` : ""}`,
-    tasks: l("Tâches", "Tasks"), invoices: l("Factures", "Invoices"), billing: l("Facturation", "Invoicing"),
+    tasks: l("Tâches", "Tasks"), invoices: l("Factures", "Invoices"), billing: l("Facturation", "Invoicing"), tracking: l("Suivi fiscal", "Tax follow-up"),
   };
-  const ordered = (order.data?.order ?? (["info", "contacts", "contracts", "tasks", "invoices", "billing"] as Tab[])).filter((k) => allowed[k]);
+  const ordered = (order.data?.order ?? (["info", "contacts", "contracts", "tasks", "invoices", "billing", "tracking"] as Tab[])).filter((k) => allowed[k]);
   // The first tab of the shared order is the one a client page opens on.
   const active = (tab && ordered.includes(tab) ? tab : ordered[0] ?? "info") as Tab;
 
@@ -104,6 +105,8 @@ export default function ClientDetail() {
           </section>
         </div>
       )}
+
+      {active === "tracking" && <TrackingView clientId={id} />}
 
       {active === "contacts" && (
         <section>

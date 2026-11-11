@@ -3,6 +3,7 @@ import { PageHeader } from "../../components/ui";
 import { Points } from "./meeting/Points";
 import { WeekPlanner } from "./meeting/WeekPlanner";
 import { Brief, Gauges, Projects, Trends } from "./meeting/Extras";
+import { TaxFollowUp } from "./meeting/TaxFollowUp";
 
 /**
  * Weekly team meeting, in the reference's order: points and the week planner side by side, the week ahead,
@@ -16,6 +17,7 @@ export default function MeetingPage() {
       <div className="space-y-4">
         <div className="grid items-start gap-4 lg:grid-cols-2"><Points /><WeekPlanner /></div>
         <Brief />
+        <TaxFollowUp />
         <Gauges />
         <Projects />
         <Trends />

@@ -88,6 +88,8 @@ export const MODULES: ModuleDef[] = [
       p("clients.contracts.edit", "Modifier les contrats", "Edit contracts"),
       p("clients.users.manage", "Gérer les accès portail des clients", "Manage client portal access"),
       p("clients.billing.manage", "Modifier la facturation des clients (courriel, délais, taux, forfaits)", "Edit client billing (email, terms, rates, packages)"),
+      p("clients.tracking.view", "Voir le suivi fiscal des clients", "View the clients' tax follow-up"),
+      p("clients.tracking.edit", "Modifier le suivi fiscal des clients", "Edit the clients' tax follow-up"),
       p("clients.layout.manage", "Régler l'ordre des onglets du dossier client", "Set the order of the client page tabs"),
     ],
   },

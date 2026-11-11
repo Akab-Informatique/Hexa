@@ -279,3 +279,34 @@ meetingRoutes.get("/trends", async (c) => {
   }
   return c.json({ weeks, rows: out });
 });
+
+// ------------------------------------------------------------------ Tax follow-up for this month and next
+// What the weekly meeting reviews: DAS (due the 15th) and taxes (due at month end) for the period that ends the month
+// before each due month, from the tax follow-up calendar. A client is listed when it has that duty (filer / frequency).
+meetingRoutes.get("/tracking", requirePermission("clients.tracking.view", "clients.tracking.edit"), async (c) => {
+  const today = todayISO();
+  const y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7));
+  const ym = (yy: number, mm: number) => { const d = new Date(Date.UTC(yy, mm - 1, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
+  const months = [0, 1].map((i) => {
+    const due = ym(y, m + i), period = ym(y, m + i - 1);
+    const [dy, dm] = due.split("-").map(Number) as [number, number];
+    return { due, period, dasDue: `${due}-15`, taxDue: `${due}-${String(new Date(Date.UTC(dy, dm, 0)).getUTCDate()).padStart(2, "0")}` };
+  });
+  const clients = (await pool.query(
+    `select c.id, c.name, c.tax_frequency, coalesce(t.das_filer,'') as das_filer, coalesce(nullif(u.name,''), t.resource_label, '') as resource
+       from clients c left join client_tracking t on t.client_id = c.id left join users u on u.id = t.resource_id
+      where c.status = 'active' order by lower(c.name)`)).rows;
+  const periods = months.map((x) => x.period);
+  const filings = (await pool.query("select client_id, kind, period, item, status from client_filings where kind in ('das','tax') and period = any($1::text[])", [periods])).rows;
+  const years = [...new Set(periods.map((p) => p.slice(0, 4)))];
+  const taxTracked = new Set((await pool.query("select distinct client_id from client_filings where kind = 'tax' and left(period, 4) = any($1::text[])", [years])).rows.map((r) => r.client_id));
+  const st = (id: string, kind: string, period: string, item: string) => filings.find((f) => f.client_id === id && f.kind === kind && f.period === period && f.item === item)?.status ?? "todo";
+  return c.json({
+    months: months.map((mo) => ({
+      ...mo,
+      das: clients.filter((k) => k.das_filer).map((k) => ({ clientId: k.id, name: k.name, resource: k.resource, filer: k.das_filer, fed: st(k.id, "das", mo.period, "fed"), prov: st(k.id, "das", mo.period, "prov"), ccq: st(k.id, "das", mo.period, "ccq") })),
+      tax: clients.filter((k) => k.tax_frequency === "monthly" || (k.tax_frequency === "quarterly" && [1, 4, 7, 10].includes(Number(mo.period.slice(5)))) || (!k.tax_frequency && taxTracked.has(k.id)))
+        .map((k) => ({ clientId: k.id, name: k.name, resource: k.resource, status: st(k.id, "tax", mo.period, "") })),
+    })),
+  });
+});

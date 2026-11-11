@@ -21,7 +21,7 @@ export const fr = {
     mytools: "Mes outils", mytools_calendar: "Calendrier", mytools_mail: "Boîte de réception", mytools_timesheet: "Feuille de temps", mytools_expenses: "Dépenses", mytools_kb: "Base de connaissances", mytools_procedures: "Procédures",
     command: "Centre de commande", command_board: "Babillard", command_pipeline: "Pipeline",
     tasks_all: "Tâches",
-    management: "Gestion", docs_sharepoint: "Documentation", services_catalogue: "Services", accounting_contracts: "Contrats", clients_all: "Clients",
+    management: "Gestion", docs_sharepoint: "Documentation", services_catalogue: "Services", accounting_contracts: "Contrats", clients_all: "Clients", tracking: "Suivi fiscal",
     accounting: "Comptabilité interne", accounting_invoices: "Factures", accounting_approvals: "Travail à facturer", accounting_vendors: "Fournisseurs et paiements",
     hr_staff: "Ressources humaines",
     upcomingTitle: "Cette section s'en vient", upcomingText: "Le module est prévu et ses droits d'accès sont déjà définis. Il sera disponible dans une prochaine version.",
