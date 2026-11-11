@@ -8,7 +8,7 @@ import { useAuth } from "../../lib/auth";
 import { fmtDate, money, useL, useLocale } from "../../lib/l";
 import { Chip, confirmDo, Empty, errMsg, FormDialog, Tabs, type FieldDef } from "../../components/kit";
 import { Modal, PageHeader } from "../../components/ui";
-import { ClassChip, clientFields, statusTone, type ClientClass } from "./ClientsPage";
+import { ClassChip, clientFields, freqLabel, statusTone, type ClientClass } from "./ClientsPage";
 import { viewLabel, viewTone } from "../accounting/InvoiceDialog";
 import { ContractWindow, NewContractDialog, codeText } from "./ContractWindow";
 import type { TaskRow } from "../tasks/TasksPage";
@@ -82,9 +82,14 @@ export default function ClientDetail() {
         <div className="grid gap-4 md:grid-cols-2">
           <section className="glass p-5">
             <dl className="space-y-2 text-sm">
-              {([["email", l("Courriel", "Email")], ["phone", l("Téléphone", "Phone")], ["website", l("Site web", "Website")], ["businessNumber", l("Numéro d'entreprise", "Business number")], ["fiscalYearEnd", l("Fin d'exercice", "Fiscal year end")]] as const).map(([k, label]) => (
+              {([["email", l("Courriel", "Email")], ["phone", l("Téléphone", "Phone")], ["website", l("Site web", "Website")], ["businessNumber", l("Numéro d'entreprise (NE)", "Business number (NE)")], ["identificationNumber", l("Numéro d'identification (NI)", "Identification number (NI)")], ["neq", "NEQ"], ["ccq", "CCQ"], ["rbq", "RBQ"], ["fiscalYearEnd", l("Fin d'exercice", "Fiscal year end")], ["software", l("Logiciel utilisé", "Software used")]] as const).map(([k, label]) => (
                 <div key={k} className="flex justify-between gap-3"><dt className="text-muted">{label}</dt><dd>{String(c[k] ?? "") || "—"}</dd></div>
               ))}
+              {([["tax", l("Taxes", "Taxes")], ["das", "DAS"]] as const).map(([p, label]) => {
+                const fr = freqLabel(String(c[`${p}Frequency`] ?? ""));
+                const txt = [fr && l(...fr), String(c[`${p}Date`] ?? "")].filter(Boolean).join(" · ");
+                return <div key={p} className="flex justify-between gap-3"><dt className="text-muted">{label}</dt><dd>{txt || "—"}</dd></div>;
+              })}
               <div className="flex justify-between gap-3"><dt className="text-muted">{l("Courriel de facturation", "Billing email")}</dt><dd>{c.billingEmail || <span style={{ color: "var(--danger)" }}>{l("Aucun", "None")}</span>}</dd></div>
               <div className="flex items-center justify-between gap-3"><dt className="text-muted">{l("Classification", "Classification")}</dt>
                 <dd>{can("clients.edit") ? <select className="input !w-auto !py-1" value={c.classKey ?? ""} onChange={(e) => void run(() => api(`/api/clients/${id}`, { method: "PATCH", body: { classKey: e.target.value || null } }))}><option value="">—</option>{classes.data?.map((k) => <option key={k.key} value={k.key}>{l(k.labelFr, k.labelEn)}</option>)}</select> : <ClassChip fr={c.classLabelFr} en={c.classLabelEn} color={c.classColor} />}</dd></div>
@@ -156,7 +161,7 @@ export default function ClientDetail() {
 
       {dialog?.kind === "client" && (
         <FormDialog title={l("Modifier le client", "Edit client")} fields={clientFields().filter((f) => can("clients.manage") || f.name !== "status")} wide initial={c as Record<string, unknown>}
-          onSubmit={async (v) => { const keep = ["name", "legalName", "status", "businessNumber", "email", "phone", "website", "fiscalYearEnd", "address", "city", "province", "postalCode", "notes"]; const body = Object.fromEntries(Object.entries(v).filter(([k]) => keep.includes(k) && (k !== "status" || can("clients.manage")))); await api(`/api/clients/${id}`, { method: "PATCH", body }); await refresh(); }}
+          onSubmit={async (v) => { const keep = clientFields().filter((f) => f.type !== "section").map((f) => f.name); const body = Object.fromEntries(Object.entries(v).filter(([k]) => keep.includes(k) && (k !== "status" || can("clients.manage")))); await api(`/api/clients/${id}`, { method: "PATCH", body }); await refresh(); }}
           onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === "contact" && (

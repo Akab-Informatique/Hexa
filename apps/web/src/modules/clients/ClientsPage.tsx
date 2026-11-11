@@ -22,21 +22,42 @@ export function ClassChip({ fr, en, color }: { fr: string | null; en: string | n
   return <span className="chip" style={{ borderColor: color ?? undefined, color: color ?? undefined }}>{l(fr, en ?? fr)}</span>;
 }
 
-export const clientFields = (): FieldDef[] => [
-  { name: "name", label: ["Nom", "Name"], required: true },
+const FREQ = [
+  { value: "monthly", label: ["Mensuelle", "Monthly"] as [string, string] }, { value: "quarterly", label: ["Trimestrielle", "Quarterly"] as [string, string] },
+  { value: "annual", label: ["Annuelle", "Annual"] as [string, string] },
+];
+export const freqLabel = (k: string) => FREQ.find((f) => f.value === k)?.label;
+
+/** Fields follow the firm's "Fiche d'information client". `creating` adds the contact-person field (edited on the Contacts tab afterwards). */
+export const clientFields = (creating = false): FieldDef[] => [
+  { name: "s1", label: ["Informations générales", "General information"], type: "section" },
+  { name: "name", label: ["Nom de la compagnie", "Company name"], required: true },
   { name: "legalName", label: ["Raison sociale", "Legal name"] },
   { name: "status", label: ["Statut", "Status"], type: "select", required: true, options: [
     { value: "active", label: ["Actif", "Active"] }, { value: "prospect", label: ["Prospect", "Prospect"] }, { value: "inactive", label: ["Inactif", "Inactive"] }] },
-  { name: "businessNumber", label: ["Numéro d'entreprise (NEQ/NE)", "Business number"] },
+  ...(creating ? [{ name: "contactName", label: ["Personne à contacter", "Contact person"] } as FieldDef] : []),
+  { name: "phone", label: ["Numéro de téléphone", "Phone number"] },
   { name: "email", label: ["Courriel", "Email"], type: "email" },
-  { name: "phone", label: ["Téléphone", "Phone"] },
   { name: "website", label: ["Site web", "Website"] },
-  { name: "fiscalYearEnd", label: ["Fin d'exercice", "Fiscal year end"], placeholder: "12-31" },
   { name: "address", label: ["Adresse", "Address"], span: 2 },
   { name: "city", label: ["Ville", "City"] },
   { name: "province", label: ["Province", "Province"] },
   { name: "postalCode", label: ["Code postal", "Postal code"] },
-  { name: "notes", label: ["Notes", "Notes"], type: "textarea" },
+  { name: "s2", label: ["Identification de l'entreprise", "Business identification"], type: "section" },
+  { name: "businessNumber", label: ["Numéro d'entreprise (NE)", "Business number (NE)"] },
+  { name: "identificationNumber", label: ["Numéro d'identification (NI)", "Identification number (NI)"] },
+  { name: "neq", label: ["NEQ", "NEQ"] },
+  { name: "ccq", label: ["CCQ", "CCQ"] },
+  { name: "rbq", label: ["RBQ", "RBQ"] },
+  { name: "s3", label: ["Informations fiscales", "Tax information"], type: "section" },
+  { name: "taxFrequency", label: ["Fréquence des taxes", "Tax filing frequency"], type: "select", options: FREQ },
+  { name: "taxDate", label: ["Date des taxes", "Tax due date"], placeholder: "ex. 15 / 03-31" },
+  { name: "dasFrequency", label: ["Fréquence des DAS", "DAS frequency"], type: "select", options: FREQ },
+  { name: "dasDate", label: ["Date des DAS", "DAS due date"], placeholder: "ex. 15 / 03-31" },
+  { name: "fiscalYearEnd", label: ["Date de fin d'année financière", "Fiscal year end"], placeholder: "12-31" },
+  { name: "software", label: ["Logiciel utilisé", "Software used"] },
+  { name: "s4", label: ["Notes", "Notes"], type: "section" },
+  { name: "notes", label: ["Informations additionnelles", "Additional information"], type: "textarea" },
 ];
 
 export const statusTone = (s: string) => (s === "active" ? "ok" : s === "prospect" ? "warn" : "off") as "ok" | "warn" | "off";
@@ -108,7 +129,7 @@ export default function ClientsPage() {
         </div>
       </div>
       {creating && (
-        <FormDialog title={l("Nouveau client", "New client")} fields={clientFields()} initial={{ status: "active" }} wide
+        <FormDialog title={l("Nouveau client", "New client")} fields={clientFields(true)} initial={{ status: "active" }} wide
           onSubmit={async (v) => { const r = await api<{ id: string }>("/api/clients", { body: v }); await qc.invalidateQueries({ queryKey: ["clients"] }); await qc.invalidateQueries({ queryKey: ["dir-clients"] }); nav(`/clients/${r.id}`); }}
           onClose={() => setCreating(false)} />
       )}

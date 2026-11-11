@@ -28,6 +28,11 @@ const ClientInput = z.object({
   businessNumber: Str.optional(), fiscalYearEnd: Str.optional(), phone: Str.optional(), email: Str.optional(), website: Str.optional(),
   address: Str.optional(), city: Str.optional(), province: Str.optional(), postalCode: Str.optional(), notes: z.string().max(5000).optional(),
   classKey: z.string().max(40).nullable().optional(),
+  identificationNumber: Str.optional(), neq: Str.optional(), ccq: Str.optional(), rbq: Str.optional(),
+  taxFrequency: z.enum(["", "monthly", "quarterly", "annual"]).optional(), taxDate: Str.optional(),
+  dasFrequency: z.enum(["", "monthly", "quarterly", "annual"]).optional(), dasDate: Str.optional(),
+  software: Str.optional(),
+  contactName: Str.optional(), // create only: becomes the client's primary contact
 });
 const BillingInput = z.object({
   billingEmail: z.string().max(200).optional(), termsDays: z.number().int().min(0).max(365).nullable().optional(), poRequired: z.boolean().optional(),
@@ -36,6 +41,8 @@ const BillingInput = z.object({
 const COLS: Record<string, string> = {
   name: "name", legalName: "legal_name", parentId: "parent_id", status: "status", businessNumber: "business_number", fiscalYearEnd: "fiscal_year_end",
   phone: "phone", email: "email", website: "website", address: "address", city: "city", province: "province", postalCode: "postal_code", notes: "notes", classKey: "class_key",
+  identificationNumber: "identification_number", neq: "neq", ccq: "ccq", rbq: "rbq", taxFrequency: "tax_frequency", taxDate: "tax_date",
+  dasFrequency: "das_frequency", dasDate: "das_date", software: "software",
 };
 const BCOLS: Record<string, string> = { billingEmail: "billing_email", termsDays: "terms_days", poRequired: "po_required", autoApproveKinds: "auto_approve_kinds", invoiceNotes: "invoice_notes" };
 
@@ -83,11 +90,17 @@ clientRoutes.get("/", requirePermission("clients.view"), async (c) => {
 clientRoutes.post("/", requirePermission("clients.edit"), async (c) => {
   const d = await body(c, ClientInput);
   const r = await pool.query(
-    `insert into clients (name, legal_name, parent_id, status, business_number, fiscal_year_end, phone, email, website, address, city, province, postal_code, notes, class_key, created_by)
-     values ($1, coalesce($2,''), $3, coalesce($4,'active'), coalesce($5,''), coalesce($6,''), coalesce($7,''), coalesce($8,''), coalesce($9,''), coalesce($10,''), coalesce($11,''), coalesce($12,''), coalesce($13,''), coalesce($14,''), $15, $16)
+    `insert into clients (name, legal_name, parent_id, status, business_number, fiscal_year_end, phone, email, website, address, city, province, postal_code, notes, class_key, created_by,
+       identification_number, neq, ccq, rbq, tax_frequency, tax_date, das_frequency, das_date, software)
+     values ($1, coalesce($2,''), $3, coalesce($4,'active'), coalesce($5,''), coalesce($6,''), coalesce($7,''), coalesce($8,''), coalesce($9,''), coalesce($10,''), coalesce($11,''), coalesce($12,''), coalesce($13,''), coalesce($14,''), $15, $16,
+       coalesce($17,''), coalesce($18,''), coalesce($19,''), coalesce($20,''), coalesce($21,''), coalesce($22,''), coalesce($23,''), coalesce($24,''), coalesce($25,''))
      returning id`,
-    [d.name, d.legalName, d.parentId ?? null, d.status, d.businessNumber, d.fiscalYearEnd, d.phone, d.email, d.website, d.address, d.city, d.province, d.postalCode, d.notes, d.classKey ?? null, auth(c).user.id],
+    [d.name, d.legalName, d.parentId ?? null, d.status, d.businessNumber, d.fiscalYearEnd, d.phone, d.email, d.website, d.address, d.city, d.province, d.postalCode, d.notes, d.classKey ?? null, auth(c).user.id,
+      d.identificationNumber, d.neq, d.ccq, d.rbq, d.taxFrequency, d.taxDate, d.dasFrequency, d.dasDate, d.software],
   );
+  if (d.contactName?.trim()) {
+    await pool.query("insert into client_contacts (client_id, name, email, phone, is_primary) values ($1, $2, $3, $4, true)", [r.rows[0].id, d.contactName.trim(), d.email ?? "", d.phone ?? ""]);
+  }
   await audit("client.created", { userId: auth(c).user.id, target: d.name });
   return c.json({ id: r.rows[0].id }, 201);
 });

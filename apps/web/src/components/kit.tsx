@@ -14,7 +14,7 @@ export const useIntegrations = () => useQuery({ queryKey: ["dir-integrations"], 
 export const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
 // ---------- Generic form ----------
-export type FieldType = "text" | "textarea" | "number" | "date" | "select" | "checkbox" | "email" | "url" | "client" | "user";
+export type FieldType = "text" | "textarea" | "number" | "date" | "select" | "checkbox" | "email" | "url" | "client" | "user" | "section";
 export interface FieldDef {
   name: string; label: [string, string]; type?: FieldType; required?: boolean; span?: 1 | 2; placeholder?: string; step?: string;
   options?: { value: string; label: [string, string] | string }[]; rows?: number; hint?: [string, string];
@@ -30,6 +30,7 @@ export function FormFields({ fields, values, onChange }: { fields: FieldDef[]; v
       {fields.map((f) => {
         const v = values[f.name];
         const label = l(...f.label);
+        if (f.type === "section") return <h3 key={f.name} className="mb-3 mt-2 border-b border-white/10 pb-1 text-xs font-semibold uppercase tracking-wide text-muted sm:col-span-2">{label}</h3>;
         let input: ReactNode;
         if (f.type === "textarea") input = <textarea className="input" rows={f.rows ?? 3} required={f.required} placeholder={f.placeholder} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />;
         else if (f.type === "checkbox") input = <label className="flex items-center gap-2 py-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={Boolean(v)} onChange={(e) => set(f.name, e.target.checked)} />{label}</label>;
