@@ -13,7 +13,7 @@ type Kind = "das" | "tax" | "payroll" | "yearend" | "t4rl1" | "rl31" | "t5" | "v
 interface TClient {
   id: string; name: string; status: string; taxFrequency: string; dasFrequency: string; software: string;
   resourceId: string | null; resourceName: string | null; resourceLabel: string; fiscalMonth: number | null; booksThrough: string | null; checkFrequency: string; dasFiler: string;
-  payrollPeriod: string; payrollSystem: string; payrollNote: string;
+  payrollPeriod: string; payrollSystem: string; payrollNote: string; t4On: boolean; rl1On: boolean; t4aOn: boolean;
 }
 interface Filing { clientId: string; kind: Kind; period: string; item: string; status: Status; prevStatus?: string; amount: string | number | null; note: string; updatedByName?: string | null; updatedAt?: string | null }
 interface Data { year: number; clients: TClient[]; filings: Filing[] }
@@ -56,6 +56,14 @@ export function TrackingView({ clientId }: { clientId?: string }) {
   const edit = can("clients.tracking.edit");
   const [year, setYear] = useState(new Date().getFullYear());
   const [view, setView] = useState<View>(clientId ? "das" : "clients");
+  const [running, setRunning] = useState(false);
+  const [autoMsg, setAutoMsg] = useState("");
+  const runAuto = async () => {
+    setRunning(true);
+    try { const r = await api<{ count: number }>("/api/tracking/auto-tasks/run", { method: "POST", body: {} }); setAutoMsg(r.count ? l(`${r.count} tâche(s) créée(s).`, `${r.count} task(s) created.`) : l("Rien de nouveau à créer.", "Nothing new to create.")); await qc.invalidateQueries({ queryKey: ["tasks"] }); }
+    catch { setAutoMsg(l("Échec de la création.", "Could not create.")); } finally { setRunning(false); }
+  };
+  const [other, setOther] = useState<string | null>(null); // client whose "Qui déclare" is being typed ("Autre")
   const [q, setQ] = useState("");
   const [resource, setResource] = useState("");
   const key = ["tracking", year, clientId ?? "all"];
@@ -84,6 +92,8 @@ export function TrackingView({ clientId }: { clientId?: string }) {
     try { await api(`/api/tracking/${c}/settings`, { method: "PUT", body: patch }); } catch { await qc.invalidateQueries({ queryKey: key }); }
   };
 
+  const BUILTIN_FILERS = ["", "us", "them", "them_ccq_us"];
+  const customFilers = [...new Set((data.data?.clients ?? []).map((c) => c.dasFiler).filter((f) => !BUILTIN_FILERS.includes(f)))].sort();
   const monthDue = (c: TClient, m: number) => c.taxFrequency !== "quarterly" || [1, 4, 7, 10].includes(m);
   const views: [View, string][] = [["clients", l("Dossiers", "Files")], ["das", "DAS"], ["tax", l("Taxes", "Taxes")], ["payroll", l("Paie", "Payroll")], ["yearend", l("Fin d'année", "Year-end")], ["t4rl1", "T4 / RL-1"], ["rl31", "RL-31"], ["t5", "T5"]];
   const sel = "input !w-auto !py-1 text-xs";
@@ -115,6 +125,12 @@ export function TrackingView({ clientId }: { clientId?: string }) {
           </select>
         </>}
       </Toolbar>
+      {!clientId && edit && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-muted">
+          <button type="button" className="btn !py-1.5 text-xs" disabled={running} onClick={() => void runAuto()}>{l("Créer les tâches automatiques maintenant", "Create the automatic tasks now")}</button>
+          <span>{autoMsg || l("Créées seules : taxes, DAS, paie, fin d'année, T4/RL-1 (vérifié chaque heure).", "Created automatically: taxes, DAS, payroll, year-end, T4/RL-1 (checked hourly).")}</span>
+        </div>
+      )}
       <div className="glass-flat mb-3 inline-flex flex-wrap p-0.5 text-sm" role="tablist">
         {views.map(([k, label]) => <button key={k} role="tab" aria-selected={view === k} className={`rounded-lg px-3 py-1.5 ${view === k ? "bg-white/10 font-medium" : "text-muted"}`} onClick={() => setView(k)}>{label}</button>)}
       </div>
@@ -123,11 +139,11 @@ export function TrackingView({ clientId }: { clientId?: string }) {
         {rows.length === 0 ? <Empty>{l("Aucun client.", "No clients.")}</Empty> : (
           <table className="grid trk">
             <thead>
-              {view === "clients" && <Head><th className={th}>{l("Ressource", "Resource")}</th><th className={th}>{l("Fin d'année", "Year-end")}</th><th className={th}>{l("Tenue de livres faite jusqu'au", "Books done through")}</th><th className={th}>{l("Fréquence de vérification", "Check frequency")}</th><th className={th}>{l("Vérifié", "Checked")} {year}</th></Head>}
+              {view === "clients" && <Head><th className={th}>{l("Ressource", "Resource")}</th><th className={th}>{l("Fin d'année", "Year-end")}</th><th className={th}>{l("Tenue de livres faite jusqu'au", "Books done through")}</th><th className={th}>{l("Fréquence de vérification", "Check frequency")}</th><th className={th}>{l("Vérifié", "Checked")} {year}</th><th className={`${th} text-center`}>T4</th><th className={`${th} text-center`}>RL-1</th><th className={`${th} text-center`}>T4A</th></Head>}
               {view === "das" && <><tr>{!clientId && <th className={th} rowSpan={2}>{l("Client", "Client")}</th>}<th className={th} rowSpan={2}>{l("Qui déclare", "Filed by")}</th>{MONTHS.map((m, i) => <th key={i} colSpan={3} className="border-l border-white/10 border-b px-2 py-2 text-center text-[13px] font-semibold text-fg">{l(...m)}</th>)}</tr>
                 <tr>{MONTHS.flatMap((_, i) => ["Féd", "QC", "CCQ"].map((s) => <th key={`${i}${s}`} className={`${s === "Féd" ? "border-l border-white/10 " : ""}px-1 pb-1 text-center text-[11px] font-medium text-fg/80`}>{s}</th>))}</tr></>}
               {view === "tax" && <Head>{MONTHS.map((m, i) => <th key={i} className={`${th} text-center`}>{l(...m)}</th>)}<th className={th}>{l("Fréquence", "Frequency")}</th></Head>}
-              {view === "payroll" && <Head><th className={th}>{l("Période", "Period")}</th><th className={`${th} text-center`}>{l("Paies", "Payroll")}</th><th className={`${th} text-center`}>DAS</th><th className={`${th} text-center`}>CCQ</th><th className={`${th} text-center`}>T4 / RL-1</th><th className={th}>{l("Système", "System")}</th><th className={th}>{l("Info / spécification", "Info / notes")}</th></Head>}
+              {view === "payroll" && <Head><th className={th}>{l("Période", "Period")}</th><th className={`${th} text-center`}>{l("Paies", "Payroll")}</th><th className={th}>{l("Système", "System")}</th><th className={th}>{l("Info / spécification", "Info / notes")}</th></Head>}
               {view === "yearend" && <Head><th className={th}>{l("Fin d'année", "Year-end")}</th>{[year - 1, year, year + 1].map((y) => <th key={y} className={`${th} text-center`}>{y}</th>)}</Head>}
               {view === "t4rl1" && <Head>{["T4", l("Sommaire T4", "T4 summary"), "RL-1", "T4A", l("Sommaire RL-1", "RL-1 summary"), l("Avantage auto", "Car benefit"), "CNESST"].map((h) => <th key={h} className={`${th} text-center`}>{h}</th>)}</Head>}
               {view === "rl31" && <Head><th className={`${th} text-center`}>RL-31</th></Head>}
@@ -145,9 +161,19 @@ export function TrackingView({ clientId }: { clientId?: string }) {
                       <td><input type="date" className={sel} disabled={!edit} value={c.booksThrough?.slice(0, 10) ?? ""} onChange={(e) => void setSettings(c.id, { booksThrough: e.target.value || null })} /></td>
                       <td><select className={sel} disabled={!edit} value={c.checkFrequency} onChange={(e) => void setSettings(c.id, { checkFrequency: e.target.value })}><option value="">{l("Aucun", "None")}</option><option value="monthly">{l("1 mois", "1 month")}</option><option value="quarterly">{l("Trimestriel", "Quarterly")}</option><option value="semiannual">{l("6 mois", "6 months")}</option><option value="annual">{l("Annuel", "Annual")}</option></select></td>
                       <td className="text-center">{cell("verify", String(year))}</td>
+                      {(["t4On", "rl1On", "t4aOn"] as const).map((k) => <td key={k} className="text-center"><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" disabled={!edit} checked={c[k]} aria-label={`${c.name} ${k}`} onChange={(e) => void setSettings(c.id, { [k]: e.target.checked })} /></td>)}
                     </>}
                     {view === "das" && <>
-                      <td><select className={sel} disabled={!edit} value={c.dasFiler} onChange={(e) => void setSettings(c.id, { dasFiler: e.target.value })}><option value="">—</option><option value="us">{l("Nous", "Us")}</option><option value="them">{l("Eux", "Them")}</option><option value="them_ccq_us">{l("Eux – CCQ nous", "Them – CCQ us")}</option></select></td>
+                      <td>{other === c.id ? (
+                        <input autoFocus className="input !w-36 !py-1 text-xs" placeholder={l("Nouvelle option…", "New option…")} onKeyDown={(e) => { if (e.key === "Escape") setOther(null); if (e.key === "Enter") e.currentTarget.blur(); }}
+                          onBlur={(e) => { const v = e.target.value.trim(); setOther(null); if (v) void setSettings(c.id, { dasFiler: v }); }} />
+                      ) : (
+                        <select className={sel} disabled={!edit} value={c.dasFiler} onChange={(e) => { if (e.target.value === "__other") setOther(c.id); else void setSettings(c.id, { dasFiler: e.target.value }); }}>
+                          <option value="">—</option><option value="us">{l("Nous", "Us")}</option><option value="them">{l("Eux", "Them")}</option><option value="them_ccq_us">{l("Eux – CCQ nous", "Them – CCQ us")}</option>
+                          {customFilers.map((f) => <option key={f} value={f}>{f}</option>)}
+                          {edit && <option value="__other">{l("Autre…", "Other…")}</option>}
+                        </select>
+                      )}</td>
                       {MONTHS.flatMap((_, i) => ["fed", "prov", "ccq"].map((it) => <td key={`${i}${it}`} className={`${it === "fed" ? "border-l border-white/10 " : ""}px-0.5 text-center`}>{cell("das", ym(i + 1), it)}</td>))}
                     </>}
                     {view === "tax" && <>
@@ -156,7 +182,7 @@ export function TrackingView({ clientId }: { clientId?: string }) {
                     </>}
                     {view === "payroll" && <>
                       <td><select className={sel} disabled={!edit} value={c.payrollPeriod} onChange={(e) => void setSettings(c.id, { payrollPeriod: e.target.value })}><option value="">—</option><option value="weekly">{l("Hebdomadaire", "Weekly")}</option><option value="biweekly">{l("Aux 2 semaines", "Biweekly")}</option><option value="semimonthly">{l("Bimensuelle", "Semi-monthly")}</option><option value="monthly">{l("Mensuelle", "Monthly")}</option></select></td>
-                      {["paies", "das", "ccq", "t4"].map((it) => <td key={it} className="text-center">{cell("payroll", String(year), it)}</td>)}
+                      <td className="text-center">{cell("payroll", String(year), "paies")}</td>
                       <td><input className="input !py-1 text-xs" disabled={!edit} defaultValue={c.payrollSystem} key={`s${c.id}${c.payrollSystem}`} onBlur={(e) => e.target.value !== c.payrollSystem && void setSettings(c.id, { payrollSystem: e.target.value })} /></td>
                       <td><input className="input !min-w-[260px] !py-1 text-xs" disabled={!edit} defaultValue={c.payrollNote} key={`n${c.id}${c.payrollNote}`} onBlur={(e) => e.target.value !== c.payrollNote && void setSettings(c.id, { payrollNote: e.target.value })} /></td>
                     </>}

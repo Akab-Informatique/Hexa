@@ -28,6 +28,7 @@ const TaskInput = z.object({
   tags: z.array(z.string().max(40)).max(20).optional(), viewerIds: z.array(z.string().uuid()).optional(),
   kind: z.enum(["normal", "continuous", "daily"]).optional(), startTime: z.string().regex(/^\d{1,2}:\d{2}$/).nullable().optional(), dueTime: z.string().regex(/^\d{1,2}:\d{2}$/).nullable().optional(),
   remindEveryDays: z.number().int().min(1).max(365).nullable().optional(),
+  checklist: z.array(z.string().trim().min(1).max(500)).max(100).optional(), // bullet points given when the task is created
 });
 const COLS: Record<string, string> = {
   title: "title", description: "description", status: "status", priority: "priority", assigneeId: "assignee_id", clientId: "client_id",
@@ -102,6 +103,7 @@ taskRoutes.post("/", requirePermission(...EDIT), async (c) => {
      d.estimateMinutes ?? null, d.visibility, d.parentId ?? null, d.waitsForId ?? null, d.recurrence ? JSON.stringify(d.recurrence) : null, d.tags],
   );
   const id = r.rows[0].id as string;
+  for (const [i, text] of (d.checklist ?? []).entries()) await pool.query("insert into task_checklist (task_id, text, position) values ($1, $2, $3)", [id, text, i]);
   if (d.viewerIds?.length) for (const v of d.viewerIds) await pool.query("insert into task_viewers values ($1, $2) on conflict do nothing", [id, v]);
   if (d.kind || d.startTime || d.dueTime || d.remindEveryDays) {
     // A continuous task comes back every n days (a week by default); a daily one never has a due day.
@@ -115,13 +117,15 @@ taskRoutes.get("/:id", requirePermission(...VIEW), async (c) => {
   if (!isUuid(id)) return c.json({ error: "not found" }, 404);
   const r = await pool.query(`${SELECT} where t.id = $2 and ${VISIBLE}`, [auth(c).user.id, id]);
   if (!r.rows[0]) return c.json({ error: "not found" }, 404);
-  const [checklist, notes, subtasks, viewers] = await Promise.all([
+  const [checklist, notes, subtasks, viewers, time] = await Promise.all([
     pool.query("select * from task_checklist where task_id = $1 order by position, id", [id]),
     pool.query("select n.*, u.name as user_name from task_notes n left join users u on u.id = n.user_id where n.task_id = $1 order by n.created_at", [id]),
     pool.query("select id, title, status, assignee_id, due_date from tasks s where s.parent_id = $2 and (s.visibility = 'team' or s.created_by = $1 or s.assignee_id = $1) order by s.created_at", [auth(c).user.id, id]),
     pool.query("select u.id, u.name from task_viewers v join users u on u.id = v.user_id where v.task_id = $1", [id]),
+    // Everyone's time entries on this task, newest first.
+    pool.query("select e.id, e.work_date, e.minutes, e.description, e.billable, e.status, u.name as user_name from timesheet_entries e join users u on u.id = e.user_id where e.task_id = $1 order by e.work_date desc, e.created_at desc", [id]),
   ]);
-  return c.json({ ...camel(r.rows[0]), checklist: camelRows(checklist), notes: camelRows(notes), subtasks: camelRows(subtasks), viewers: viewers.rows });
+  return c.json({ ...camel(r.rows[0]), checklist: camelRows(checklist), notes: camelRows(notes), subtasks: camelRows(subtasks), viewers: viewers.rows, timeEntries: camelRows(time) });
 });
 
 async function loadForEdit(c: Parameters<typeof can>[0], id: string) {
@@ -239,7 +243,7 @@ taskRoutes.post("/:id/notes", requirePermission(...VIEW), async (c) => {
   const id = c.req.param("id");
   const visible = await pool.query("select 1 from tasks t where t.id = $2 and " + VISIBLE, [auth(c).user.id, id]);
   if (!visible.rowCount) return c.json({ error: "not found" }, 404);
-  const { body: text } = await body(c, z.object({ body: z.string().min(1).max(5000) }));
-  await pool.query("insert into task_notes (task_id, user_id, body) values ($1, $2, $3)", [id, auth(c).user.id, text]);
+  const { body: text, audience } = await body(c, z.object({ body: z.string().min(1).max(5000), audience: z.enum(["internal", "client"]).default("internal") }));
+  await pool.query("insert into task_notes (task_id, user_id, body, audience) values ($1, $2, $3, $4)", [id, auth(c).user.id, text, audience]);
   return c.json({ ok: true }, 201);
 });

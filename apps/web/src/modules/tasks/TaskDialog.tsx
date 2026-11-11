@@ -12,7 +12,8 @@ import { autoStartPref, clock, LogTimeDialog, minLabel, setAutoStartPref, useEla
 interface Full extends TaskRow {
   description: string; startDate: string | null; estimateMinutes: number | null; visibility: string; waitsForId: string | null; waitsForTitle: string | null;
   recurrence: { every: number; unit: string; until?: string | null } | null; tags: string[]; createdBy: string | null; isWaiting: boolean;
-  checklist: { id: string; text: string; done: boolean }[]; notes: { id: string; body: string; userName: string | null; createdAt: string }[];
+  checklist: { id: string; text: string; done: boolean }[]; notes: { id: string; body: string; userName: string | null; createdAt: string; audience: "internal" | "client" }[];
+  timeEntries: { id: string; workDate: string; minutes: number; description: string; billable: boolean; status: string; userName: string }[];
   subtasks: { id: string; title: string; status: string }[]; viewers: { id: string; name: string }[];
   kind: "normal" | "continuous" | "daily"; startTime: string | null; dueTime: string | null; remindEveryDays: number | null; lastCheckedOn: string | null;
 }
@@ -31,7 +32,9 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [newItem, setNewItem] = useState("");
+  const [draftItems, setDraftItems] = useState<string[]>([]); // bullet points of a task not saved yet
   const [newNote, setNewNote] = useState("");
+  const [audience, setAudience] = useState<"internal" | "client">("internal");
   const [viewerIds, setViewerIds] = useState<string[] | null>(null);
 
   // The timer: starts by itself when a task is opened (unless switched off), keeps running when this window is closed.
@@ -86,6 +89,13 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
     { name: "recUntil", label: ["Jusqu'au", "Until"], type: "date" },
   ];
 
+  // Pasting several lines adds one point per line.
+  const addItems = async () => {
+    const lines = newItem.split(/\r?\n/).map((x) => x.replace(/^[\s•*-]+/, "").trim()).filter(Boolean);
+    if (!lines.length) return;
+    if (taskId) await act(async () => { for (const text of lines) await api(`/api/tasks/${taskId}/checklist`, { body: { text } }); setNewItem(""); });
+    else { setDraftItems([...draftItems, ...lines]); setNewItem(""); }
+  };
   const save = async () => {
     const v = form as Record<string, unknown>;
     // Completing a task with time not yet entered: ask what to do with it.
@@ -99,6 +109,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
       tags: String(v.tags ?? "").split(",").map((s) => s.trim()).filter(Boolean),
       recurrence: v.recEvery ? { every: Number(v.recEvery), unit: v.recUnit, until: v.recUntil || null } : null,
       viewerIds: v.visibility === "selected" ? selViewers : [],
+      ...(taskId ? {} : { checklist: [...draftItems, ...(newItem.trim() ? [newItem.trim()] : [])] }),
     };
     try {
       if (taskId) await api(`/api/tasks/${taskId}`, { method: "PATCH", body }); else await api("/api/tasks", { body });
@@ -146,7 +157,29 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
         </div>
       )}
       <fieldset disabled={!editable} className="min-w-0 border-0 p-0">
-        <FormFields fields={fields} values={form} onChange={setValues} />
+        <FormFields fields={fields.slice(0, 2)} values={form} onChange={setValues} />
+        <div className="mb-4">
+          <h3 className="mb-2 text-sm font-semibold">{l("Points à faire", "Bullet points")}{t ? ` (${t.checklist.filter((c) => c.done).length}/${t.checklist.length})` : draftItems.length ? ` (${draftItems.length})` : ""}</h3>
+          <ul className="mb-2 space-y-1">
+            {t ? t.checklist.map((c) => (
+              <li key={c.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={c.done} disabled={!editable} onChange={(e) => void act(() => api(`/api/tasks/checklist/${c.id}`, { method: "PATCH", body: { done: e.target.checked } }))} />
+                <span className={c.done ? "text-muted line-through" : ""}>{c.text}</span>
+                {editable && <button type="button" className="ml-auto text-muted hover:text-danger" onClick={() => void act(() => api(`/api/tasks/checklist/${c.id}`, { method: "DELETE" }))} aria-label="delete"><Trash2 size={13} /></button>}
+              </li>
+            )) : draftItems.map((text, i) => (
+              <li key={i} className="flex items-center gap-2 text-sm"><span className="text-muted">•</span><span>{text}</span>
+                <button type="button" className="ml-auto text-muted hover:text-danger" onClick={() => setDraftItems(draftItems.filter((_, j) => j !== i))} aria-label="delete"><Trash2 size={13} /></button></li>
+            ))}
+          </ul>
+          {editable && (
+            <div className="flex gap-2">
+              <input className="input" placeholder={l("Ajouter un point… (Entrée pour valider)", "Add a point… (Enter to add)")} value={newItem} onChange={(e) => setNewItem(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void addItems(); } }} />
+              <button type="button" className="btn" onClick={() => void addItems()} aria-label={l("Ajouter", "Add")}><Plus size={15} /></button>
+            </div>)}
+        </div>
+        <FormFields fields={fields.slice(2)} values={form} onChange={setValues} />
         {form.visibility === "selected" && (
           <div className="mb-4"><span className="label">{l("Personnes qui peuvent voir cette tâche", "People who can see this task")}</span>
             <div className="flex flex-wrap gap-2">{users.data?.map((u) => {
@@ -161,25 +194,13 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
 
       {t && (
         <>
-          <h3 className="mb-2 mt-2 text-sm font-semibold">{l("Liste de vérification", "Checklist")} ({t.checklist.filter((c) => c.done).length}/{t.checklist.length})</h3>
-          <ul className="mb-2 space-y-1">
-            {t.checklist.map((c) => (
-              <li key={c.id} className="flex items-center gap-2 text-sm">
-                <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={c.done} disabled={!editable} onChange={(e) => void act(() => api(`/api/tasks/checklist/${c.id}`, { method: "PATCH", body: { done: e.target.checked } }))} />
-                <span className={c.done ? "text-muted line-through" : ""}>{c.text}</span>
-                {editable && <button className="ml-auto text-muted hover:text-danger" onClick={() => void act(() => api(`/api/tasks/checklist/${c.id}`, { method: "DELETE" }))} aria-label="delete"><Trash2 size={13} /></button>}
-              </li>
-            ))}
-          </ul>
-          {editable && <form className="mb-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (newItem.trim()) void act(async () => { await api(`/api/tasks/${taskId}/checklist`, { body: { text: newItem.trim() } }); setNewItem(""); }); }}>
-            <input className="input" placeholder={l("Ajouter un élément…", "Add an item…")} value={newItem} onChange={(e) => setNewItem(e.target.value)} /><button className="btn"><Plus size={15} /></button></form>}
-
           {t.subtasks.length > 0 && <><h3 className="mb-2 text-sm font-semibold">{l("Sous-tâches", "Sub-tasks")}</h3><ul className="mb-4 space-y-1 text-sm">{t.subtasks.map((s) => <li key={s.id}><Chip tone={s.status === "done" ? "ok" : "off"}>{s.status}</Chip> {s.title}</li>)}</ul></>}
 
           <h3 className="mb-2 text-sm font-semibold">{l("Notes", "Notes")}</h3>
-          <ul className="mb-2 space-y-2">{t.notes.map((n) => <li key={n.id} className="glass-flat p-2.5 text-sm"><div className="mb-0.5 text-xs text-muted">{n.userName} · {fmtDate(n.createdAt, loc)}</div><div className="whitespace-pre-wrap">{n.body}</div></li>)}</ul>
-          <form className="mb-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (newNote.trim()) void act(async () => { await api(`/api/tasks/${taskId}/notes`, { body: { body: newNote.trim() } }); setNewNote(""); }); }}>
-            <input className="input" placeholder={l("Ajouter une note…", "Add a note…")} value={newNote} onChange={(e) => setNewNote(e.target.value)} /><button className="btn"><Plus size={15} /></button></form>
+          <ul className="mb-2 space-y-2">{t.notes.map((n) => <li key={n.id} className="glass-flat p-2.5 text-sm" style={n.audience === "client" ? { borderLeft: "3px solid var(--brand-2)" } : undefined}><div className="mb-0.5 flex items-center gap-2 text-xs text-muted">{n.userName} · {fmtDate(n.createdAt, loc)}<Chip tone={n.audience === "client" ? "warn" : "off"}>{n.audience === "client" ? l("Visible par le client", "Visible to client") : l("Interne", "Internal")}</Chip></div><div className="whitespace-pre-wrap">{n.body}</div></li>)}</ul>
+          <form className="mb-4 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (newNote.trim()) void act(async () => { await api(`/api/tasks/${taskId}/notes`, { body: { body: newNote.trim(), audience } }); setNewNote(""); }); }}>
+            <select className="input !w-auto" value={audience} onChange={(e) => setAudience(e.target.value as "internal" | "client")} aria-label={l("Destinataire du commentaire", "Comment audience")}><option value="internal">{l("Commentaire interne", "Internal comment")}</option><option value="client">{l("Commentaire au client", "Comment to the client")}</option></select>
+            <input className="input min-w-[200px] flex-1" placeholder={audience === "client" ? l("Écrire au client…", "Write to the client…") : l("Ajouter une note interne…", "Add an internal note…")} value={newNote} onChange={(e) => setNewNote(e.target.value)} /><button className="btn"><Plus size={15} /></button></form>
 
           {t.kind === "continuous" && (
             <div className="glass-flat mb-4 flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
@@ -189,6 +210,17 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
 
           <h3 className="mb-2 text-sm font-semibold">{l("Fichiers", "Files")}</h3>
           <Files taskId={taskId!} editable={editable} />
+
+          <h3 className="mb-2 text-sm font-semibold">{l("Temps saisi par l'équipe", "Time logged by the team")}</h3>
+          {!t.timeEntries.length ? <p className="mb-4 text-xs text-muted">{l("Aucune entrée de temps sur cette tâche.", "No time entries on this task.")}</p> : (
+            <div className="mb-4 overflow-x-auto">
+              <table className="w-full text-sm">
+                <tbody>{t.timeEntries.map((e) => (
+                  <tr key={e.id} className="border-b border-white/5 align-top"><td className="py-1.5 pr-3 whitespace-nowrap text-muted">{fmtDate(e.workDate, loc)}</td><td className="py-1.5 pr-3 whitespace-nowrap">{e.userName}</td><td className="py-1.5 pr-3 text-muted">{e.description || "—"}</td><td className="py-1.5 whitespace-nowrap text-right">{minLabel(e.minutes)}</td></tr>
+                ))}</tbody>
+                <tfoot><tr><td colSpan={3} className="pt-2 text-right text-xs text-muted">{l("Total", "Total")}</td><td className="pt-2 text-right font-semibold whitespace-nowrap">{minLabel(t.timeEntries.reduce((a, e) => a + e.minutes, 0))}</td></tr></tfoot>
+              </table>
+            </div>)}
         </>
       )}
 

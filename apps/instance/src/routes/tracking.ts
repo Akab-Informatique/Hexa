@@ -4,6 +4,7 @@ import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { auth, body, camelRows, isUuid } from "./util.ts";
+import { runAutoTasks } from "../lib/autoTasks.ts";
 
 // Tax follow-up calendar: which DAS, taxes, payroll, year-end and T4/RL1/RL31/T5 steps are done for each client.
 // A missing row means "to do"; saving a box as "to do" with no note or amount deletes its row.
@@ -15,13 +16,14 @@ const EDIT = requirePermission("clients.tracking.edit");
 const Settings = z.object({
   resourceId: z.string().uuid().nullable().optional(), fiscalMonth: z.number().int().min(1).max(12).nullable().optional(),
   booksThrough: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  checkFrequency: z.enum(["", "monthly", "quarterly", "semiannual", "annual"]).optional(), resourceLabel: z.string().max(100).optional(), dasFiler: z.enum(["", "us", "them", "them_ccq_us"]).optional(),
+  checkFrequency: z.enum(["", "monthly", "quarterly", "semiannual", "annual"]).optional(), resourceLabel: z.string().max(100).optional(), dasFiler: z.string().trim().max(60).optional(),
   payrollPeriod: z.enum(["", "weekly", "biweekly", "semimonthly", "monthly"]).optional(),
+  t4On: z.boolean().optional(), rl1On: z.boolean().optional(), t4aOn: z.boolean().optional(),
   payrollSystem: z.string().max(100).optional(), payrollNote: z.string().max(1000).optional(),
 });
 const COLS: Record<keyof z.infer<typeof Settings>, string> = {
   resourceId: "resource_id", resourceLabel: "resource_label", fiscalMonth: "fiscal_month", booksThrough: "books_through", checkFrequency: "check_frequency", dasFiler: "das_filer",
-  payrollPeriod: "payroll_period", payrollSystem: "payroll_system", payrollNote: "payroll_note",
+  payrollPeriod: "payroll_period", t4On: "t4_on", rl1On: "rl1_on", t4aOn: "t4a_on", payrollSystem: "payroll_system", payrollNote: "payroll_note",
 };
 const Filing = z.object({
   kind: z.enum(["das", "tax", "payroll", "yearend", "t4rl1", "rl31", "t5", "verify"]),
@@ -38,7 +40,7 @@ trackingRoutes.get("/", VIEW, async (c) => {
   const clients = await pool.query(
     `select c.id, c.name, c.status, c.tax_frequency, c.das_frequency, c.software,
             t.resource_id, u.name as resource_name, coalesce(t.resource_label,'') as resource_label, t.fiscal_month, t.books_through, coalesce(t.check_frequency,'') as check_frequency,
-            coalesce(t.das_filer,'') as das_filer, coalesce(t.payroll_period,'') as payroll_period, coalesce(t.payroll_system,'') as payroll_system, coalesce(t.payroll_note,'') as payroll_note
+            coalesce(t.das_filer,'') as das_filer, coalesce(t.payroll_period,'') as payroll_period, coalesce(t.payroll_system,'') as payroll_system, coalesce(t.payroll_note,'') as payroll_note, coalesce(t.t4_on,false) as t4_on, coalesce(t.rl1_on,false) as rl1_on, coalesce(t.t4a_on,false) as t4a_on
        from clients c left join client_tracking t on t.client_id = c.id left join users u on u.id = t.resource_id
       where c.status <> 'inactive' and ($1::uuid is null or c.id = $1) order by lower(c.name)`, [client ?? null]);
   const filings = await pool.query(
@@ -81,4 +83,11 @@ trackingRoutes.put("/:id/filing", EDIT, async (c) => {
   }
   await audit("tracking.filing", { userId: auth(c).user.id, target: `${d.kind} ${d.period} ${d.item}`.trim() });
   return c.json({ ok: true });
+});
+
+/** Creates the automatic tasks now (they are also created every hour). With ?dry=1 it only lists what it would create. */
+trackingRoutes.post("/auto-tasks/run", EDIT, async (c) => {
+  const made = await runAutoTasks({ dry: c.req.query("dry") === "1" });
+  if (c.req.query("dry") !== "1") await audit("tracking.auto_tasks", { userId: auth(c).user.id, target: `${made.length} tasks` });
+  return c.json({ count: made.length, tasks: made.map((p) => ({ clientId: p.clientId, rule: p.rule, title: p.title, due: p.due, start: p.start, bullets: p.bullets })) });
 });
