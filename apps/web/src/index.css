@@ -103,6 +103,34 @@ body {
 }
 .input:focus { border-color: color-mix(in oklab, var(--brand) 80%, white); box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 30%, transparent); }
 .input::placeholder { color: color-mix(in oklab, var(--muted) 70%, transparent); }
+
+/* Dropdowns: dark rounded list that matches the glass look. Fallback (older browsers) keeps the native list but themed. */
+select.input {
+  appearance: none; cursor: pointer; padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239b99b5' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center;
+}
+select.input option { background: #14121c; color: var(--fg); }
+select.input option:checked { background: color-mix(in oklab, var(--brand) 45%, #14121c); }
+@supports (appearance: base-select) {
+  select.input, select.input::picker(select) { appearance: base-select; }
+  select.input { background-image: none; }
+  select.input { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  select.input::picker-icon { content: "⌄"; font-size: 16px; line-height: 1; color: var(--muted); transition: rotate .2s; }
+  select.input:open::picker-icon { rotate: 180deg; }
+  select.input::picker(select) {
+    margin-top: 6px; padding: 6px; border-radius: 14px; max-height: 320px;
+    background: color-mix(in oklab, var(--brand) 10%, #14121c); color: var(--fg); border: 1px solid color-mix(in oklab, var(--brand) 35%, rgb(255 255 255 / .12));
+    box-shadow: 0 18px 40px rgb(0 0 0 / .55), inset 0 1px 0 rgb(255 255 255 / .06);
+    opacity: 0; transform: translateY(-4px); transition: opacity .15s, transform .15s, overlay .15s allow-discrete, display .15s allow-discrete;
+  }
+  select.input:open::picker(select) { opacity: 1; transform: none; }
+  @starting-style { select.input:open::picker(select) { opacity: 0; transform: translateY(-4px); } }
+  select.input option { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 9px; font-size: 14px; background: transparent; color: var(--fg); cursor: pointer; }
+  select.input option:hover, select.input option:focus-visible { background: rgb(255 255 255 / .08); outline: none; }
+  select.input option:checked { background: color-mix(in oklab, var(--brand) 40%, transparent); }
+  select.input option::checkmark { color: var(--accent, var(--fg)); }
+}
 .label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 99px; font-size: 12px; background: rgb(255 255 255 / 0.08); border: 1px solid var(--line); }
