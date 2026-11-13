@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderOpen, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, FileText, Folder, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fmtDate, money, useL, useLocale } from "../../lib/l";
@@ -74,7 +75,7 @@ function HrFile({ staff, onClose, onChanged }: { staff: Staff; onClose: () => vo
   const l = useL();
   const loc = useLocale();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"profile" | "banks">("profile");
+  const [tab, setTab] = useState<"profile" | "banks" | "docs">("profile");
   const ledger = useQuery({ queryKey: ["hr-ledger", staff.id], queryFn: () => api<Ledger>(`/api/hr/staff/${staff.id}/ledger`), enabled: tab === "banks" });
   const [account, setAccount] = useState<"bank" | "vacation" | "sick">("bank");
   const [mode, setMode] = useState<"hours" | "amount">("hours");
@@ -108,7 +109,7 @@ function HrFile({ staff, onClose, onChanged }: { staff: Staff; onClose: () => vo
 
   return (
     <Modal title={`${l("Dossier RH", "HR file")} · ${staff.name}`} onClose={onClose} wide>
-      <Tabs tabs={[{ key: "profile", label: l("Fiche", "Profile") }, { key: "banks", label: l("Banques et historique", "Banks and history") }]} value={tab} onChange={setTab} />
+      <Tabs tabs={[{ key: "profile", label: l("Fiche", "Profile") }, { key: "banks", label: l("Banques et historique", "Banks and history") }, { key: "docs", label: l("Documents", "Documents") }]} value={tab} onChange={setTab} />
       {tab === "profile" && (
         <>
           <div className="grid gap-x-4 sm:grid-cols-2">
@@ -143,7 +144,97 @@ function HrFile({ staff, onClose, onChanged }: { staff: Staff; onClose: () => vo
                 <td className="text-muted">{r.kind === "accrual" ? l("4 % des vacances de la semaine", "4 % vacation of the week") : r.reason}{r.byName ? ` · ${r.byName}` : ""}</td></tr>))}</tbody></table>
             {ledger.data && !ledger.data.rows.length && <Empty>{l("Aucun mouvement.", "No moves.")}</Empty>}</div>
         </>)}
+      {tab === "docs" && <HrDocs staff={staff} />}
       {error && tab === "profile" && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+    </Modal>
+  );
+}
+
+interface DocItem { name: string; path: string; folder: boolean; size: number; modifiedAt: string | null }
+interface HrLink { driveId: string; path: string }
+const sizeOf = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+
+/** The SharePoint folder tied to an employee: pick it once, then open it right from the HR file. */
+function HrDocs({ staff }: { staff: Staff }) {
+  const l = useL();
+  const loc = useLocale();
+  const qc = useQueryClient();
+  const [pick, setPick] = useState(false);
+  const [sub, setSub] = useState("");
+  const [error, setError] = useState("");
+  const link = useQuery({ queryKey: ["hr-folder", staff.id], queryFn: () => api<HrLink | null>(`/api/docs/hr-folder/${staff.id}`) });
+  const cur = link.data ? (sub ? `${link.data.path}/${sub}` : link.data.path) : "";
+  const list = useQuery({
+    queryKey: ["hr-folder-browse", link.data?.driveId, cur], enabled: Boolean(link.data), retry: false,
+    queryFn: () => api<{ items: DocItem[] }>(`/api/docs/browse?drive=${encodeURIComponent(link.data!.driveId)}&path=${encodeURIComponent(cur)}`),
+  });
+  const refresh = async () => { setSub(""); await qc.invalidateQueries({ queryKey: ["hr-folder", staff.id] }); await qc.invalidateQueries({ queryKey: ["hr-folder-browse"] }); };
+  const parts = sub ? sub.split("/") : [];
+  const url = (drive: string, path: string) => `/api/docs/file?drive=${encodeURIComponent(drive)}&path=${encodeURIComponent(path)}`;
+
+  if (link.isLoading) return null;
+  return (
+    <>
+      {!link.data ? (
+        <div className="glass-flat p-5 text-sm">
+          <FolderOpen className="mb-2 text-brand" size={24} />
+          <p className="font-medium">{l("Aucun dossier associé.", "No folder linked.")}</p>
+          <p className="mt-1 text-muted">{l("Associez le dossier SharePoint de cet employé : ses documents s'ouvriront ici.", "Link this employee's SharePoint folder: their documents will open here.")}</p>
+          <button className="btn btn-primary mt-3" onClick={() => setPick(true)}><FolderOpen size={15} />{l("Choisir un dossier", "Choose a folder")}</button>
+        </div>
+      ) : (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-sm" aria-label="breadcrumb">
+              <button className="rounded px-1.5 py-0.5 font-medium hover:bg-white/10" onClick={() => setSub("")}>{link.data.path.split("/").pop()}</button>
+              {parts.map((c, i) => (<span key={i} className="flex items-center gap-1"><ChevronRight size={14} className="text-muted" /><button className="rounded px-1.5 py-0.5 hover:bg-white/10" onClick={() => setSub(parts.slice(0, i + 1).join("/"))}>{c}</button></span>))}
+            </nav>
+            <Link className="btn !py-1 text-xs no-underline" to={`/docs?lib=${encodeURIComponent(link.data.driveId)}&path=${encodeURIComponent(cur)}`}><ExternalLink size={13} />{l("Ouvrir dans Documentation", "Open in Documentation")}</Link>
+            <button className="btn !py-1 text-xs" onClick={() => setPick(true)}>{l("Changer", "Change")}</button>
+            <button className="btn btn-danger !py-1 text-xs" onClick={() => { if (window.confirm(l("Retirer l'association ? Le dossier SharePoint n'est pas touché.", "Remove the link? The SharePoint folder itself is untouched."))) void api(`/api/docs/hr-folder/${staff.id}`, { method: "DELETE" }).then(refresh).catch((e) => setError(errMsg(e, "Error"))); }}>{l("Retirer", "Unlink")}</button>
+          </div>
+          {list.error && <p role="alert" className="mb-2 text-sm text-danger">{l("Vous n'avez pas accès à ce dossier dans Documentation.", "You do not have access to this folder in Documentation.")}</p>}
+          {list.data && (list.data.items.length === 0 ? <Empty>{l("Dossier vide.", "Empty folder.")}</Empty> : (
+            <div className="max-h-80 overflow-auto"><table className="grid"><thead><tr><th>{l("Nom", "Name")}</th><th>{l("Taille", "Size")}</th><th>{l("Modifié", "Modified")}</th></tr></thead>
+              <tbody>{list.data.items.map((it) => (
+                <tr key={it.path}><td>{it.folder
+                  ? <button className="flex items-center gap-2 font-medium hover:underline" onClick={() => setSub(sub ? `${sub}/${it.name}` : it.name)}><Folder size={16} className="text-brand" />{it.name}</button>
+                  : <a className="flex items-center gap-2 no-underline hover:underline" href={url(link.data!.driveId, it.path)}><FileText size={16} className="text-muted" />{it.name}</a>}</td>
+                  <td className="text-muted">{it.folder ? "" : sizeOf(it.size)}</td><td className="text-muted">{fmtDate(it.modifiedAt, loc)}</td></tr>))}</tbody></table></div>))}
+        </>)}
+      {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
+      {pick && <FolderPicker onClose={() => setPick(false)} onPick={async (drive, path) => { await api(`/api/docs/hr-folder/${staff.id}`, { method: "PUT", body: { drive, path } }); setPick(false); await refresh(); }} />}
+    </>
+  );
+}
+
+/** Walks the SharePoint folders (only those the person can open) and returns the one chosen. */
+function FolderPicker({ onClose, onPick }: { onClose: () => void; onPick: (drive: string, path: string) => Promise<void> }) {
+  const l = useL();
+  const libs = useQuery({ queryKey: ["docs-libs"], queryFn: () => api<{ id: string; name: string }[]>("/api/docs/libraries") });
+  const [lib, setLib] = useState("");
+  const [path, setPath] = useState("");
+  const [error, setError] = useState("");
+  const drive = lib || libs.data?.[0]?.id || "";
+  const q = useQuery({ queryKey: ["hr-pick", drive, path], enabled: Boolean(drive), retry: false, queryFn: () => api<{ items: DocItem[] }>(`/api/docs/browse?drive=${encodeURIComponent(drive)}&path=${encodeURIComponent(path)}`) });
+  const crumbs = path ? path.split("/") : [];
+  return (
+    <Modal title={l("Choisir le dossier SharePoint", "Choose the SharePoint folder")} onClose={onClose}>
+      {libs.data && libs.data.length > 1 && <div className="mb-2 flex flex-wrap gap-2">{libs.data.map((x) => <button key={x.id} className={`btn !py-1 text-xs ${x.id === drive ? "btn-primary" : ""}`} onClick={() => { setLib(x.id); setPath(""); }}>{x.name}</button>)}</div>}
+      <nav className="mb-2 flex flex-wrap items-center gap-1 text-sm">
+        <button className="rounded px-1.5 py-0.5 hover:bg-white/10" onClick={() => setPath("")}>{libs.data?.find((x) => x.id === drive)?.name ?? "…"}</button>
+        {crumbs.map((c, i) => (<span key={i} className="flex items-center gap-1"><ChevronRight size={14} className="text-muted" /><button className="rounded px-1.5 py-0.5 hover:bg-white/10" onClick={() => setPath(crumbs.slice(0, i + 1).join("/"))}>{c}</button></span>))}
+      </nav>
+      <div className="glass-flat mb-3 max-h-64 overflow-auto p-1">
+        {q.error && <p className="p-3 text-sm text-danger">{l("Accès refusé.", "Access denied.")}</p>}
+        {q.data && !q.data.items.some((i) => i.folder) && <Empty>{l("Aucun sous-dossier.", "No sub-folders.")}</Empty>}
+        <ul>{q.data?.items.filter((i) => i.folder).map((i) => <li key={i.path}><button className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-white/10" onClick={() => setPath(i.path)}><Folder size={16} className="text-brand" />{i.name}</button></li>)}</ul>
+      </div>
+      {error && <p role="alert" className="mb-2 text-sm text-danger">{error}</p>}
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-xs text-muted">{path ? `/${path}` : l("Choisissez un dossier (pas la racine).", "Choose a folder (not the root).")}</span>
+        <div className="flex gap-2"><button className="btn" onClick={onClose}>{l("Annuler", "Cancel")}</button><button className="btn btn-primary" disabled={!path} onClick={() => void onPick(drive, path).catch((e) => setError(errMsg(e, "Error")))}>{l("Choisir ce dossier", "Choose this folder")}</button></div>
+      </div>
     </Modal>
   );
 }

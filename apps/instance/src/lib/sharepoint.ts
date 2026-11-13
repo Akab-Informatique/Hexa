@@ -118,19 +118,22 @@ function graphProvider(c: Creds): Provider {
 function mockProvider(): Provider {
   const files = new Map<string, { data: ArrayBuffer; type: string }>();
   const folders = new Set<string>();
-  const L = [{ id: "lib-shared", name: "Documents partagés" }, { id: "lib-clients", name: "Dossiers clients" }, { id: "lib-hr", name: "RH (confidentiel)" }];
+  // One library, like a real site: client files and HR are folders inside it, protected by the portal's folder rules.
+  const L = [{ id: "lib-docs", name: "Documents" }];
+  const D = "lib-docs";
   const key = (d: string, p: string) => `${d}::${p}`;
   const text = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
-  for (const d of ["Politiques", "Modèles", "Formation"]) folders.add(key("lib-shared", d));
-  files.set(key("lib-shared", "Politiques/Code de conduite.txt"), { data: text("Code de conduite (exemple)"), type: "text/plain" });
-  files.set(key("lib-shared", "Modèles/Lettre de mission.txt"), { data: text("Lettre de mission (exemple)"), type: "text/plain" });
-  for (const d of ["Acme Corp", "Acme Corp/2025", "Acme Corp/2025/T4", "Boulangerie Dupont", "Boulangerie Dupont/2025"]) folders.add(key("lib-clients", d));
-  files.set(key("lib-clients", "Acme Corp/2025/Bilan.txt"), { data: text("Bilan 2025 (exemple)"), type: "text/plain" });
-  files.set(key("lib-clients", "Boulangerie Dupont/2025/Déclaration TPS-TVQ.txt"), { data: text("Déclaration (exemple)"), type: "text/plain" });
+  const CL = "Dossiers clients", HR = "RH (confidentiel)";
+  for (const d of ["Politiques", "Modèles", "Formation", CL, HR]) folders.add(key(D, d));
+  files.set(key(D, "Politiques/Code de conduite.txt"), { data: text("Code de conduite (exemple)"), type: "text/plain" });
+  files.set(key(D, "Modèles/Lettre de mission.txt"), { data: text("Lettre de mission (exemple)"), type: "text/plain" });
+  for (const d of ["Acme Corp", "Acme Corp/2025", "Acme Corp/2025/T4", "Boulangerie Dupont", "Boulangerie Dupont/2025"]) folders.add(key(D, `${CL}/${d}`));
+  files.set(key(D, `${CL}/Acme Corp/2025/Bilan.txt`), { data: text("Bilan 2025 (exemple)"), type: "text/plain" });
+  files.set(key(D, `${CL}/Boulangerie Dupont/2025/Déclaration TPS-TVQ.txt`), { data: text("Déclaration (exemple)"), type: "text/plain" });
   // The demo profile of the tenant adds one folder per sample client, so each demo tenant looks different.
-  for (const c of PROFILES[process.env.SEED_PROFILE ?? ""]?.clients ?? []) { folders.add(key("lib-clients", c.name)); folders.add(key("lib-clients", `${c.name}/${new Date().getFullYear() - 1}`)); }
-  for (const d of ["Dossiers employés", "Évaluations"]) folders.add(key("lib-hr", d));
-  files.set(key("lib-hr", "Évaluations/Gabarit.txt"), { data: text("Gabarit d'évaluation"), type: "text/plain" });
+  for (const c of PROFILES[process.env.SEED_PROFILE ?? ""]?.clients ?? []) { folders.add(key(D, `${CL}/${c.name}`)); folders.add(key(D, `${CL}/${c.name}/${new Date().getFullYear() - 1}`)); }
+  for (const d of ["Dossiers employés", "Évaluations"]) folders.add(key(D, `${HR}/${d}`));
+  files.set(key(D, `${HR}/Évaluations/Gabarit.txt`), { data: text("Gabarit d'évaluation"), type: "text/plain" });
   const now = new Date().toISOString();
   return {
     mock: true,

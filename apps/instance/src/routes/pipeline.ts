@@ -90,7 +90,11 @@ pipelineRoutes.get("/day", async (c) => {
   const outlook = own ? await busyBlocks(userId, date) : [];
   events.push(...outlook.map((o) => ({ title: `${o.title}`, start_time: o.start, end_time: o.end })));
   const ws = mins(s.workStart), we = mins(s.workEnd), ls = mins(s.lunchStart), le = mins(s.lunchEnd);
-  const busy = [{ s: ls, e: le, kind: "lunch" as const, title: "" }, ...events.map((e) => ({ s: mins(e.start_time), e: mins(e.end_time), kind: "event" as const, title: e.title as string }))].sort((a, b) => a.s - b.s);
+  const reserved = (await pool.query("select id, title, start_time, end_time from day_blocks where user_id = $1 and day = $2", [userId, date])).rows;
+  const pins = new Map((await pool.query("select task_id, start_time from day_task_pins where user_id = $1 and day = $2", [userId, date])).rows.map((r) => [r.task_id as string, mins(r.start_time as string)]));
+  type Busy = { s: number; e: number; kind: "lunch" | "event" | "reserved"; title: string; id?: string };
+  const busy: Busy[] = [{ s: ls, e: le, kind: "lunch" as const, title: "" }, ...events.map((e): Busy => ({ s: mins(e.start_time), e: mins(e.end_time), kind: "event", title: e.title as string })),
+    ...reserved.map((r): Busy => ({ s: mins(r.start_time), e: mins(r.end_time), kind: "reserved", title: r.title as string, id: r.id as string }))].sort((a, b) => a.s - b.s);
   const overlapIn = (a: number, b: number) => busy.reduce((t, x) => t + Math.max(0, Math.min(b, x.e) - Math.max(a, x.s)), 0);
   const capacity = dayOff ? 0 : Math.max(0, we - ws - overlapIn(ws, we));
 
@@ -98,15 +102,26 @@ pipelineRoutes.get("/day", async (c) => {
   // Lay the items out one after the other; never across lunch or an event; what does not fit is listed apart.
   let cursor = ws;
   if (own && date === todayISO()) cursor = Math.max(ws, Math.ceil(nowMinutesQuebec() / 15) * 15);
-  const blocks: { kind: "task" | "event" | "lunch"; start: string; end: string; title: string | null; taskId?: string; priority?: string; private?: boolean }[] = [];
+  const blocks: { kind: "task" | "event" | "lunch" | "reserved"; start: string; end: string; title: string | null; taskId?: string; priority?: string; private?: boolean; id?: string; pinned?: boolean }[] = [];
   const overflow: typeof items = [];
+  // A task the person moved by hand keeps its place; the others are laid out around it.
+  const placed: Busy[] = [];
+  if (!dayOff) for (const it of items) {
+    const at = pins.get(it.id);
+    if (at === undefined) continue;
+    const start = Math.min(at, 24 * 60 - it.minutes);
+    blocks.push({ kind: "task", start: clock(start), end: clock(start + it.minutes), title: it.title, taskId: it.id, priority: it.priority, private: it.private, pinned: true });
+    placed.push({ s: start, e: start + it.minutes, kind: "event", title: "" });
+  }
+  const avoid = [...busy, ...placed];
   if (dayOff) overflow.push(...items);
   else for (const it of items) {
+    if (pins.has(it.id)) continue;
     let start = Math.max(cursor, it.startTime ? mins(it.startTime) : 0);
-    for (let guard = 0; guard < 20; guard++) { const hit = busy.find((b) => start < b.e && start + it.minutes > b.s); if (!hit) break; start = hit.e; }
+    for (let guard = 0; guard < 40; guard++) { const hit = avoid.find((b) => start < b.e && start + it.minutes > b.s); if (!hit) break; start = hit.e; }
     if (start + it.minutes <= we) { blocks.push({ kind: "task", start: clock(start), end: clock(start + it.minutes), title: it.title, taskId: it.id, priority: it.priority, private: it.private }); cursor = start + it.minutes; } else overflow.push(it);
   }
-  if (!dayOff) for (const b of busy) blocks.push({ kind: b.kind, start: clock(b.s), end: clock(b.e), title: b.kind === "event" ? b.title : null });
+  if (!dayOff) for (const b of busy) blocks.push({ kind: b.kind, start: clock(b.s), end: clock(b.e), title: b.kind === "lunch" ? null : b.title, id: b.id });
   blocks.sort((a, b) => a.start.localeCompare(b.start));
   const planned = items.reduce((t, i) => t + i.minutes, 0);
 
@@ -120,6 +135,50 @@ pipelineRoutes.get("/day", async (c) => {
     items, waiting: waiting.map((r) => ({ id: r.id, title: r.visible ? r.title : null })), blocks, overflow, week,
     source: "rules", nowMinutes: own && date === todayISO() ? nowMinutesQuebec() : null,
   });
+});
+
+// ------------------------------------------------------------------ Reserved blocks and moved tasks (own day only)
+const BlockInput = z.object({ date: Day, start: HHMM, end: HHMM, title: z.string().trim().min(1).max(120) });
+const validSpan = (a: string, b: string) => mins(a) >= 0 && mins(b) <= 24 * 60 && mins(b) - mins(a) >= 5;
+
+pipelineRoutes.post("/blocks", async (c) => {
+  const d = await body(c, BlockInput);
+  if (!validSpan(d.start, d.end)) return c.json({ error: "hours_invalid" }, 400);
+  const r = await pool.query("insert into day_blocks (user_id, day, start_time, end_time, title) values ($1,$2,$3,$4,$5) returning id", [auth(c).user.id, d.date, clock(mins(d.start)), clock(mins(d.end)), d.title]);
+  return c.json({ id: r.rows[0].id }, 201);
+});
+
+pipelineRoutes.patch("/blocks/:id", async (c) => {
+  if (!isUuid(c.req.param("id"))) return c.json({ error: "not found" }, 404);
+  const row = (await pool.query("select start_time, end_time from day_blocks where id = $1 and user_id = $2", [c.req.param("id"), auth(c).user.id])).rows[0];
+  if (!row) return c.json({ error: "not found" }, 404);
+  const d = await body(c, z.object({ start: HHMM, end: HHMM, title: z.string().trim().min(1).max(120) }).partial());
+  const start = d.start ?? row.start_time, end = d.end ?? row.end_time;
+  if (!validSpan(start, end)) return c.json({ error: "hours_invalid" }, 400);
+  await pool.query("update day_blocks set start_time = $2, end_time = $3, title = coalesce($4, title) where id = $1", [c.req.param("id"), clock(mins(start)), clock(mins(end)), d.title ?? null]);
+  return c.json({ ok: true });
+});
+
+pipelineRoutes.delete("/blocks/:id", async (c) => {
+  if (isUuid(c.req.param("id"))) await pool.query("delete from day_blocks where id = $1 and user_id = $2", [c.req.param("id"), auth(c).user.id]);
+  return c.json({ ok: true });
+});
+
+/** Where a task sits in my day. Purely a layout choice for that day: the task itself is not changed. */
+pipelineRoutes.put("/tasks/:id/pin", async (c) => {
+  const id = c.req.param("id");
+  const d = await body(c, z.object({ date: Day, start: HHMM }));
+  if (!isUuid(id) || mins(d.start) < 0 || mins(d.start) >= 24 * 60) return c.json({ error: "invalid" }, 400);
+  const t = (await pool.query(`select 1 from tasks t where t.id = $2 and ${VISIBLE}`, [auth(c).user.id, id])).rows[0];
+  if (!t) return c.json({ error: "not found" }, 404);
+  await pool.query("insert into day_task_pins (user_id, day, task_id, start_time) values ($1,$2,$3,$4) on conflict (user_id, day, task_id) do update set start_time = excluded.start_time", [auth(c).user.id, d.date, id, clock(mins(d.start))]);
+  return c.json({ ok: true });
+});
+
+pipelineRoutes.delete("/tasks/:id/pin", async (c) => {
+  const date = c.req.query("date") ?? "";
+  if (isUuid(c.req.param("id")) && Day.safeParse(date).success) await pool.query("delete from day_task_pins where user_id = $1 and day = $2 and task_id = $3", [auth(c).user.id, date, c.req.param("id")]);
+  return c.json({ ok: true });
 });
 
 // ------------------------------------------------------------------ Continuous tasks and files

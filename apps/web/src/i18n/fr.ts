@@ -19,7 +19,7 @@ export const fr = {
   nav: {
     team: "Équipe", team_dashboard: "Tableau de bord", team_meeting: "Rencontre d'équipe",
     mytools: "Mes outils", mytools_calendar: "Calendrier", mytools_mail: "Boîte de réception", mytools_timesheet: "Feuille de temps", mytools_expenses: "Dépenses", mytools_kb: "Base de connaissances", mytools_procedures: "Procédures",
-    command: "Centre de commande", command_board: "Babillard", command_pipeline: "Pipeline",
+    command: "Centre de commande", command_board: "Babillard", command_pipeline: "Opérations",
     tasks_all: "Tâches",
     management: "Gestion", docs_sharepoint: "Documentation", services_catalogue: "Services", accounting_contracts: "Contrats", clients_all: "Clients", tracking: "Suivi fiscal",
     accounting: "Comptabilité interne", accounting_invoices: "Factures", accounting_approvals: "Travail à facturer", accounting_vendors: "Fournisseurs et paiements",

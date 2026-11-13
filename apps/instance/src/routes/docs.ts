@@ -144,7 +144,92 @@ docsRoutes.delete("/item", async (c) => {
   await p.remove(drive, path);
   // Rules that pointed at a deleted folder would silently apply to a new folder of the same name.
   await pool.query("delete from doc_access where drive_id = $1 and (lower(path) = lower($2) or lower(path) like lower($2) || '/%')", [drive, path]);
+  await pool.query("delete from doc_shortcuts where drive_id = $1 and (lower(path) = lower($2) or lower(path) like lower($2) || '/%')", [drive, path]);
   await audit("docs.deleted", { userId: auth(c).user.id, target: `${drive}/${path}` });
+  return c.json({ ok: true });
+});
+
+// ------------------------------------------------------------------ Shortcuts to folders (shown above the files)
+// A shortcut only points at a folder; it never grants access, so it is hidden from anyone the folder rules exclude.
+docsRoutes.get("/shortcuts", async (c) => {
+  const a = auth(c);
+  const r = await pool.query(
+    "select id, user_id, drive_id, path, label from doc_shortcuts where user_id is null or user_id = $1 order by user_id is null desc, lower(label)", [a.user.id]);
+  const all = sees(c);
+  const byDrive = new Map<string, Rule[]>();
+  const out = [];
+  for (const x of r.rows) {
+    if (!all) {
+      if (!byDrive.has(x.drive_id)) byDrive.set(x.drive_id, await myRules(c, x.drive_id));
+      if (!levelOn(byDrive.get(x.drive_id)!, x.path)) continue;
+    }
+    out.push({ id: x.id, driveId: x.drive_id, path: x.path, label: x.label, shared: x.user_id === null });
+  }
+  return c.json(out);
+});
+
+docsRoutes.post("/shortcuts", async (c) => {
+  const p = await provider();
+  const d = await body(c, z.object({ drive: z.string().min(1), path: z.string().default(""), label: z.string().trim().max(80).optional(), shared: z.boolean().default(false) }));
+  const path = cleanPath(d.path);
+  await assertDrive(p, d.drive);
+  if (d.shared && !canManageAccess(c)) throw new SpError(403, "forbidden");
+  await need(c, d.drive, path, false);
+  if (path) {
+    const parent = path.split("/").slice(0, -1).join("/");
+    const leaf = path.split("/").pop()!.toLowerCase();
+    if (!(await p.list(d.drive, parent)).some((i) => i.folder && i.name.toLowerCase() === leaf)) throw new SpError(404, "folder not found");
+  }
+  const lib = (await p.libraries()).find((l) => l.id === d.drive)!;
+  const label = d.label || (path ? path.split("/").pop()! : lib.name);
+  const owner = d.shared ? null : auth(c).user.id;
+  const r = await pool.query(
+    `insert into doc_shortcuts (user_id, drive_id, path, label) values ($1,$2,$3,$4)
+     on conflict (coalesce(user_id, '00000000-0000-0000-0000-000000000000'::uuid), drive_id, lower(path)) do update set label = excluded.label returning id`,
+    [owner, d.drive, path, label]);
+  return c.json({ id: r.rows[0].id });
+});
+
+docsRoutes.delete("/shortcuts/:id", async (c) => {
+  const row = (await pool.query("select user_id from doc_shortcuts where id::text = $1", [c.req.param("id")])).rows[0];
+  if (!row) return c.json({ ok: true });
+  const mine = row.user_id === auth(c).user.id;
+  if (!mine && !(row.user_id === null && canManageAccess(c))) return c.json({ error: "forbidden" }, 403);
+  await pool.query("delete from doc_shortcuts where id::text = $1", [c.req.param("id")]);
+  return c.json({ ok: true });
+});
+
+// ------------------------------------------------------------------ HR folder of an employee (pointer only)
+docsRoutes.get("/hr-folder/:userId", async (c) => {
+  if (!can(c, "hr.manage")) return c.json({ error: "forbidden" }, 403);
+  const r = (await pool.query("select drive_id, path from hr_folders where user_id::text = $1", [c.req.param("userId")])).rows[0];
+  return c.json(r ? { driveId: r.drive_id, path: r.path } : null);
+});
+
+docsRoutes.put("/hr-folder/:userId", async (c) => {
+  if (!can(c, "hr.manage")) return c.json({ error: "forbidden" }, 403);
+  const p = await provider();
+  const d = await body(c, z.object({ drive: z.string().min(1), path: z.string().min(1) }));
+  const path = cleanPath(d.path);
+  if (!path) throw new SpError(400, "choose a folder");
+  await assertDrive(p, d.drive);
+  await need(c, d.drive, path, false); // you can only point at a folder you can open yourself
+  const parent = path.split("/").slice(0, -1).join("/");
+  const leaf = path.split("/").pop()!.toLowerCase();
+  if (!(await p.list(d.drive, parent)).some((i) => i.folder && i.name.toLowerCase() === leaf)) throw new SpError(404, "folder not found");
+  const u = await pool.query("select 1 from users where id::text = $1 and kind = 'staff'", [c.req.param("userId")]);
+  if (!u.rowCount) throw new SpError(404, "unknown user");
+  await pool.query(
+    `insert into hr_folders (user_id, drive_id, path, updated_by) values ($1,$2,$3,$4)
+     on conflict (user_id) do update set drive_id = excluded.drive_id, path = excluded.path, updated_by = excluded.updated_by, updated_at = now()`,
+    [c.req.param("userId"), d.drive, path, auth(c).user.id]);
+  await audit("hr.folder_set", { userId: auth(c).user.id, target: `${c.req.param("userId")} ${d.drive}/${path}` });
+  return c.json({ ok: true });
+});
+
+docsRoutes.delete("/hr-folder/:userId", async (c) => {
+  if (!can(c, "hr.manage")) return c.json({ error: "forbidden" }, 403);
+  await pool.query("delete from hr_folders where user_id::text = $1", [c.req.param("userId")]);
   return c.json({ ok: true });
 });
 

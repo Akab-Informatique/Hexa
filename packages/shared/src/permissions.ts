@@ -54,9 +54,9 @@ export const MODULES: ModuleDef[] = [
       p("command.board.post", "Publier un message", "Post a message"),
       p("command.board.email", "Envoyer un message par courriel", "Email a message"),
       p("command.board.manage", "Gérer le babillard", "Manage the message board"),
-      p("command.pipeline.view", "Voir le pipeline", "View the pipeline"),
-      p("command.pipeline.edit", "Modifier ses tâches du pipeline", "Edit own pipeline tasks"),
-      p("command.pipeline.manage", "Gérer le pipeline de l'équipe", "Manage the team pipeline"),
+      p("command.pipeline.view", "Voir les opérations", "View operations"),
+      p("command.pipeline.edit", "Modifier ses tâches des opérations", "Edit own operations tasks"),
+      p("command.pipeline.manage", "Gérer les opérations de l'équipe", "Manage the team operations"),
     ],
   },
   {

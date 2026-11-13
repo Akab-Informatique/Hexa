@@ -60,46 +60,4 @@ commandRoutes.delete("/board/:id", requirePermission("command.board.post", "comm
   return c.json({ ok: true });
 });
 
-// =============================== Documentation (SharePoint links) ===============================
-const DocInput = z.object({
-  title: z.string().min(1).max(200), url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), "http(s) only"),
-  description: z.string().max(1000).optional(), category: z.string().max(80).optional(), clientId: z.string().uuid().nullable().optional(),
-});
-
-commandRoutes.get("/docs", requirePermission("docs.view", "docs.edit", "docs.manage"), async (c) => {
-  const q = (c.req.query("q") ?? "").trim();
-  const client = c.req.query("client");
-  const r = await pool.query(
-    `select d.*, cl.name as client_name from doc_links d left join clients cl on cl.id = d.client_id
-      where ($1 = '' or d.title ilike '%'||$1||'%' or d.description ilike '%'||$1||'%') and ($2::uuid is null or d.client_id = $2)
-      order by d.category, lower(d.title)`,
-    [q, client && /^[0-9a-f-]{36}$/i.test(client) ? client : null],
-  );
-  return c.json(camelRows(r));
-});
-
-commandRoutes.post("/docs", requirePermission("docs.edit", "docs.manage"), async (c) => {
-  const d = await body(c, DocInput);
-  const r = await pool.query("insert into doc_links (title, url, description, category, client_id, created_by) values ($1, $2, coalesce($3,''), coalesce($4,'Général'), $5, $6) returning id", [d.title, d.url, d.description, d.category, d.clientId ?? null, auth(c).user.id]);
-  return c.json({ id: r.rows[0].id }, 201);
-});
-
-commandRoutes.patch("/docs/:id", requirePermission("docs.edit", "docs.manage"), async (c) => {
-  const row = (await pool.query("select created_by from doc_links where id = $1", [c.req.param("id")])).rows[0];
-  if (!row) return c.json({ error: "not found" }, 404);
-  if (row.created_by !== auth(c).user.id && !can(c, "docs.manage")) return c.json({ error: "forbidden" }, 403);
-  const d = await body(c, DocInput.partial());
-  const { sets, values } = buildUpdate(d, { title: "title", url: "url", description: "description", category: "category", clientId: "client_id" }, 2);
-  if (sets.length) await pool.query(`update doc_links set ${sets.join(", ")} where id = $1`, [c.req.param("id"), ...values]);
-  return c.json({ ok: true });
-});
-
-commandRoutes.delete("/docs/:id", requirePermission("docs.edit", "docs.manage"), async (c) => {
-  const row = (await pool.query("select created_by from doc_links where id = $1", [c.req.param("id")])).rows[0];
-  if (!row) return c.json({ ok: true });
-  if (row.created_by !== auth(c).user.id && !can(c, "docs.manage")) return c.json({ error: "forbidden" }, 403);
-  await pool.query("delete from doc_links where id = $1", [c.req.param("id")]);
-  return c.json({ ok: true });
-});
-
 void camel; void open; void seal; void config;

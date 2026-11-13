@@ -64,7 +64,7 @@ function MicrosoftPanel() {
         <li>{l("Chaque personne connecte son propre compte Microsoft 365 depuis Mes outils › Calendrier ou Boîte de réception. Rien n'est lu pour les autres.", "Each person connects their own Microsoft 365 account from My tools › Calendar or Inbox. Nothing is read for anyone else.")}</li>
         <li>{l("Permissions déléguées à donner à l'application Entra : User.Read, Calendars.Read, Mail.Read (et offline_access). Lecture seule.", "Delegated permissions to give the Entra app: User.Read, Calendars.Read, Mail.Read (and offline_access). Read only.")}</li>
         <li>{l("Pour SharePoint (Documentation) : la permission d'application Sites.ReadWrite.All avec consentement administrateur.", "For SharePoint (Documentation): the application permission Sites.ReadWrite.All with admin consent.")}</li>
-        <li>{l("Les événements Outlook d'une personne retirent leurs heures de sa journée dans Pipeline.", "A person's Outlook events take their hours off their day in Pipeline.")}</li></ul>
+        <li>{l("Les événements Outlook d'une personne retirent leurs heures de sa journée dans Opérations.", "A person's Outlook events take their hours off their day in Operations.")}</li></ul>
       <RedirectHint uri={q.data?.redirectUri ?? null} />
     </div>
   );

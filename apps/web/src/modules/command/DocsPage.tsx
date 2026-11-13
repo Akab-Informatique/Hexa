@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Download, FileText, Folder, FolderLock, FolderPlus, Library as LibraryIcon, Shield, Trash2, Upload, Users } from "lucide-react";
+import { ChevronRight, Download, FileText, Folder, FolderLock, FolderPlus, Library as LibraryIcon, Pin, Shield, Star, Trash2, Upload, Users, X } from "lucide-react";
 import { ApiError, api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fmtDate, useL, useLocale } from "../../lib/l";
@@ -11,6 +11,7 @@ import { Modal, PageHeader } from "../../components/ui";
 interface Status { configured: boolean; mock: boolean; canManageAccess: boolean; canWrite: boolean }
 interface Lib { id: string; name: string }
 interface Item { name: string; path: string; folder: boolean; size: number; modifiedAt: string | null }
+interface Shortcut { id: string; driveId: string; path: string; label: string; shared: boolean }
 interface Browse { level: "manage" | "edit" | "view" | "path"; canWrite: boolean; items: Item[] }
 interface Rule { id: string; driveId: string; driveName: string; path: string; principalType: "user" | "group"; principalId: string; principalName: string | null; level: "view" | "edit" }
 
@@ -71,7 +72,8 @@ function Files({ libs, drive, path, go, canAccess }: { libs: Lib[]; drive: strin
     queryKey: ["docs-browse", drive, path], enabled: Boolean(drive), retry: false,
     queryFn: () => api<Browse>(`/api/docs/browse?drive=${encodeURIComponent(drive)}&path=${encodeURIComponent(path)}`),
   });
-  const refresh = () => qc.invalidateQueries({ queryKey: ["docs-browse"] });
+  const shortcuts = useQuery({ queryKey: ["docs-shortcuts"], queryFn: () => api<Shortcut[]>("/api/docs/shortcuts") });
+  const refresh = async () => { await qc.invalidateQueries({ queryKey: ["docs-browse"] }); await qc.invalidateQueries({ queryKey: ["docs-shortcuts"] }); };
   const run = async (fn: () => Promise<unknown>) => { setError(""); setBusy(true); try { await fn(); await refresh(); } catch (e) { setError(errMsg(e, "Error")); } finally { setBusy(false); } };
   const crumbs = path ? path.split("/") : [];
   const lib = libs.find((x) => x.id === drive);
@@ -83,12 +85,25 @@ function Files({ libs, drive, path, go, canAccess }: { libs: Lib[]; drive: strin
 
   if (!libs.length) return <div className="glass"><Empty>{l("Aucun dossier ne vous est accessible pour le moment. Demandez à un administrateur de vous donner accès.", "No folder is available to you yet. Ask an administrator to give you access.")}</Empty></div>;
 
+  const pinned = (shortcuts.data ?? []).some((s) => s.driveId === drive && s.path.toLowerCase() === path.toLowerCase() && !s.shared);
+  const addShortcut = (shared: boolean) => run(async () => { await api("/api/docs/shortcuts", { body: { drive, path, shared } }); await qc.invalidateQueries({ queryKey: ["docs-shortcuts"] }); });
+  const dropShortcut = (id: string) => run(async () => { await api(`/api/docs/shortcuts/${id}`, { method: "DELETE" }); await qc.invalidateQueries({ queryKey: ["docs-shortcuts"] }); });
+
   return (
     <>
-      <div className="mb-3 flex flex-wrap gap-2">
+      {(shortcuts.data?.length ?? 0) > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2" aria-label={l("Raccourcis", "Shortcuts")}>
+          <Star size={15} className="text-muted" />
+          {shortcuts.data!.map((s) => (
+            <span key={s.id} className="group inline-flex items-center">
+              <button className="btn !py-1 text-xs" title={`${libs.find((x) => x.id === s.driveId)?.name ?? ""}/${s.path}`} onClick={() => go(s.driveId, s.path)}><Folder size={13} className="text-brand" />{s.label}{s.shared && <Pin size={10} className="text-muted" />}</button>
+              {(!s.shared || canAccess) && <button className="ml-0.5 rounded p-1 text-muted opacity-0 hover:text-white group-hover:opacity-100 focus:opacity-100" aria-label={l("Retirer le raccourci", "Remove shortcut")} onClick={() => void dropShortcut(s.id)}><X size={12} /></button>}
+            </span>))}
+        </div>)}
+      {libs.length > 1 && <div className="mb-3 flex flex-wrap gap-2">
         {libs.map((x) => (
           <button key={x.id} className="btn" onClick={() => go(x.id, "")} style={x.id === drive ? { background: "linear-gradient(135deg, color-mix(in oklab, var(--brand) 55%, transparent), color-mix(in oklab, var(--brand-2) 40%, transparent))", color: "#fff" } : undefined}><LibraryIcon size={15} />{x.name}</button>))}
-      </div>
+      </div>}
       <div className="glass p-2">
         <div className="flex flex-wrap items-center gap-2 p-2">
           <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-sm" aria-label="breadcrumb">
@@ -101,6 +116,8 @@ function Files({ libs, drive, path, go, canAccess }: { libs: Lib[]; drive: strin
               <button className="btn btn-primary" disabled={busy} onClick={() => fileInput.current?.click()}><Upload size={15} />{l("Téléverser", "Upload")}</button>
               <input ref={fileInput} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} />
             </>)}
+          {drive && !pinned && <button className="btn" disabled={busy} onClick={() => void addShortcut(false)}><Star size={15} />{l("Raccourci", "Shortcut")}</button>}
+          {drive && canAccess && <button className="btn" disabled={busy} title={l("Visible par tous ceux qui ont accès au dossier", "Visible to everyone who has access to the folder")} onClick={() => void addShortcut(true)}><Pin size={15} />{l("Raccourci partagé", "Shared shortcut")}</button>}
           {canAccess && path && <button className="btn" onClick={() => setAccessFor(path)}><Shield size={15} />{l("Accès", "Access")}</button>}
           {canAccess && !path && drive && <button className="btn" onClick={() => setAccessFor("")}><Shield size={15} />{l("Accès", "Access")}</button>}
         </div>

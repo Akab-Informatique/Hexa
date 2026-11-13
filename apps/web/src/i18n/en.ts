@@ -20,7 +20,7 @@ export const en: Dict = {
   nav: {
     team: "Team", team_dashboard: "Dashboard", team_meeting: "Team meeting",
     mytools: "My tools", mytools_calendar: "Calendar", mytools_mail: "Inbox", mytools_timesheet: "Timesheet", mytools_expenses: "Expenses", mytools_kb: "Knowledge base", mytools_procedures: "Procedures",
-    command: "Command center", command_board: "Message board", command_pipeline: "Pipeline",
+    command: "Command center", command_board: "Message board", command_pipeline: "Operations",
     tasks_all: "Tasks",
     management: "Management", docs_sharepoint: "Documentation", services_catalogue: "Services", accounting_contracts: "Contracts", clients_all: "Clients", tracking: "Tax follow-up",
     accounting: "Internal accounting", accounting_invoices: "Invoices", accounting_approvals: "Work to bill", accounting_vendors: "Vendors and payments",
