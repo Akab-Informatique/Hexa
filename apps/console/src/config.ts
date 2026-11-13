@@ -18,7 +18,9 @@ export const config = {
   secret: () => required("CONSOLE_SECRET"),
   /** Public URL clients use to reach this console (goes into every bundle). */
   publicUrl: (e.PUBLIC_URL ?? "http://localhost:8080").replace(/\/$/, ""),
-  instanceImage: e.INSTANCE_IMAGE ?? "ghcr.io/akab-informatique/hexa-instance",
+  /** Base domain for each client's default address, e.g. "hexa.akab.ca" gives "clienta.hexa.akab.ca". Empty = none. */
+  clientBaseDomain: (e.CLIENT_BASE_DOMAIN ?? "").trim().toLowerCase().replace(/^\.+|\.+$/g, ""),
+  instanceImage: e.INSTANCE_IMAGE ??"ghcr.io/akab-informatique/hexa-instance",
   updaterImage: e.UPDATER_IMAGE ?? "ghcr.io/akab-informatique/hexa-updater",
   /** Read-only GHCR pull credentials handed to each client (optional but needed for private images). */
   ghcrUser: e.GHCR_PULL_USER ?? "",

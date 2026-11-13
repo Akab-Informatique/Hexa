@@ -8,7 +8,9 @@ import { config } from "./config.ts";
 import * as license from "./license.ts";
 import { loadedModules } from "./modules.ts";
 import { pool } from "./db.ts";
-import { loadAuth, requireReady, sameOriginWrites, type Env } from "./auth/session.ts";
+import { licenseGate } from "./licenseGate.ts";
+import { clientIp, loadAuth, requirePermission, requireReady, sameOriginWrites, type Env } from "./auth/session.ts";
+import { audit } from "./auth/access.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { adminRoutes } from "./routes/admin.ts";
 import { clientRoutes } from "./routes/clients.ts";
@@ -65,6 +67,7 @@ export function buildApp(): Hono<Env> {
   app.use("/api/*", (c, next) => (NO_COMPRESS.test(c.req.path) ? next() : gzip(c, next)));
   app.use("/api/*", sameOriginWrites);
   app.use("/api/*", loadAuth);
+  app.use("/api/*", licenseGate); // a suspended or expired license stops the portal (sign-in included), except what shows why
 
   // Public: Docker healthcheck, the updater, and the login screen (needs branding before sign-in).
   app.get("/api/health", async (c) => {
@@ -78,8 +81,9 @@ export function buildApp(): Hono<Env> {
     return c.json({
       version: config.version,
       branding: lic.branding,
+      license: license.publicLicense(), // top level: the suspended screen needs it before anyone signs in
       // Detail only for signed-in users; the login page needs branding and nothing else.
-      ...(a?.stage === "ready" ? { plan: lic.plan, maxUsers: lic.maxUsers, flags: lic.flags, modules: loadedModules, license: license.status() } : {}),
+      ...(a?.stage === "ready" ? { plan: lic.plan, maxUsers: lic.maxUsers, flags: lic.flags, modules: loadedModules } : {}),
     });
   });
 
@@ -128,9 +132,8 @@ export function buildApp(): Hono<Env> {
     await next();
   });
 
-  // ---- Updates (pull model). Only the master administrator may install. ----
-  app.get("/api/update/status", requireReady, async (c) => {
-    if (c.get("auth")!.user.kind !== "staff") return c.json({ error: "forbidden" }, 403);
+  // ---- Updates (pull model, always manual). The master administrator and holders of admin.updates.install may use these. ----
+  app.get("/api/update/status", requirePermission("admin.updates.install"), async (c) => {
     const lic = license.current();
     const target = lic.pinnedVersion;
     const updateAvailable = Boolean(target) && VERSION_RE.test(target) && compareVersions(target, config.version) > 0;
@@ -138,12 +141,13 @@ export function buildApp(): Hono<Env> {
     return c.json({ current: config.version, target, updateAvailable, updater: run, updaterConfigured: Boolean(config.updaterUrl) });
   });
 
-  app.post("/api/update/apply", requireReady, async (c) => {
-    if (!c.get("auth")!.user.isMaster) return c.json({ error: "forbidden" }, 403);
+  app.post("/api/update/apply", requirePermission("admin.updates.install"), async (c) => {
+    const a = c.get("auth")!;
     const target = license.current().pinnedVersion;
     if (!VERSION_RE.test(target) || compareVersions(target, config.version) <= 0) return c.json({ error: "no update available" }, 409);
     const res = await updater<{ accepted?: boolean; error?: string }>("/apply", { method: "POST", body: JSON.stringify({ version: target }) });
     if (!res) return c.json({ error: "updater unreachable" }, 502);
+    if (res.accepted) await audit("update.applied", { userId: a.user.id, target, detail: { from: config.version, to: target }, ip: clientIp(c) });
     return c.json(res, res.accepted ? 202 : 409);
   });
 

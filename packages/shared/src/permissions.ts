@@ -132,6 +132,7 @@ export const MODULES: ModuleDef[] = [
       p("admin.classes.manage", "Gérer les classifications de clients", "Manage client classifications"),
       p("admin.time.manage", "Gérer les types de temps et de dépenses", "Manage time and expense types"),
       p("admin.audit.view", "Voir le journal d'activité", "View the activity log"),
+      p("admin.updates.install", "Installer les mises à jour", "Install updates"),
     ],
   },
   {

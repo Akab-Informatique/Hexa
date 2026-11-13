@@ -1,4 +1,4 @@
-# Your admin console. Run on YOUR server, behind your Nginx (proxy to 127.0.0.1:8080, HTTPS).
+# Your admin console AND the marketing site. Run on YOUR server, behind your Nginx (proxy to 127.0.0.1:8080, HTTPS).
 #   cp .env.example .env  # fill it in
 #   docker compose up -d --build        (from the repo root: -f deploy/console/docker-compose.yml)
 services:
@@ -30,6 +30,27 @@ services:
       PORT: "8080"
     ports:
       - "127.0.0.1:8080:8080"
+
+  # The one-page marketing site, served next to the console. Its settings (config.js) are written from .env at start.
+  # In your proxy (NPM) point your public site name at 127.0.0.1:8081.
+  site:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    environment:
+      CONSOLE_URL: ${PUBLIC_URL:?set PUBLIC_URL}
+      CONTACT_EMAIL: ${SITE_CONTACT_EMAIL:-}
+    volumes:
+      - ../../apps/site:/site-src:ro
+    command:
+      - sh
+      - -c
+      - |
+        cp -r /site-src/. /usr/share/nginx/html/
+        printf 'window.HEXA = { consoleUrl: "%s", contactEmail: "%s" };
+' "$CONSOLE_URL" "$CONTACT_EMAIL" > /usr/share/nginx/html/config.js
+        exec nginx -g 'daemon off;'
+    ports:
+      - "127.0.0.1:8081:80"
 
 volumes:
   console_pgdata:

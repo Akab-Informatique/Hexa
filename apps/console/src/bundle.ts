@@ -6,7 +6,10 @@ import { randomToken } from "./crypto.ts";
 export interface BundleClient {
   id: string;
   name: string;
+  /** Primary address (custom host name when set, else the default). PUBLIC_URL and the nginx file use it. */
   domain: string;
+  /** Default <id>.<CLIENT_BASE_DOMAIN> address, also served by the nginx site. Defaults to `domain`. */
+  defaultDomain?: string;
   pinnedVersion: string;
   appPort: number;
   licenseKey: string;
@@ -44,10 +47,14 @@ const render = (tpl: string, vars: Record<string, string>) =>
 /** Build the zip a client unpacks on their server: compose file, .env, nginx site, install script, README. */
 export function buildBundle(client: BundleClient, opts: BundleOptions): Uint8Array {
   const slug = client.id.replace(/[^a-z0-9]/g, "_");
+  const names = [...new Set([client.domain, client.defaultDomain ?? client.domain])];
   const vars: Record<string, string> = {
     CLIENT_ID: client.id,
     CLIENT_NAME: client.name,
     DOMAIN: client.domain,
+    DEFAULT_DOMAIN: client.defaultDomain ?? client.domain,
+    SERVER_NAMES: names.join(" "),
+    CERTBOT_DOMAINS: names.map((n) => `-d ${n}`).join(" "),
     APP_PORT: String(client.appPort),
     APP_VERSION: client.pinnedVersion,
     INSTANCE_IMAGE: opts.instanceImage,

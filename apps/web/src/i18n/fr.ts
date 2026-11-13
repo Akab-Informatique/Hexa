@@ -39,7 +39,7 @@ export const fr = {
     title: "Administration", back: "Retour à l'application",
     groupAccess: "Utilisateurs et accès", users: "Utilisateurs", groups: "Groupes et accès",
     groupIntegrations: "Intégrations", o365: "Microsoft 365", mailjet: "Mailjet", quickbooks: "QuickBooks", sharepoint: "SharePoint",
-    groupTenant: "Environnement", tenant: "Image de marque et modules", time: "Temps et dépenses", classes: "Classifications de clients", audit: "Journal d'activité",
+    groupTenant: "Environnement", tenant: "Image de marque et modules", time: "Temps et dépenses", classes: "Classifications de clients", audit: "Journal d'activité", updates: "Mises à jour",
     newUser: "Nouvel utilisateur", editUser: "Modifier l'utilisateur", userGroups: "Groupes", userOverrides: "Droits individuels",
     overridesHelp: "Ajustez les droits de cet utilisateur au-delà de ses groupes. « Refuser » l'emporte toujours.",
     tempPassword: "Mot de passe temporaire", tempPasswordHelp: "Communiquez-le à l'utilisateur. Il ne sera plus affiché et devra être changé à la première connexion.",

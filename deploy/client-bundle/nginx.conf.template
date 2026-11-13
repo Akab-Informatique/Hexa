@@ -1,10 +1,11 @@
-# Nginx site for {{CLIENT_NAME}} -> {{DOMAIN}}
+# Optional nginx site for {{CLIENT_NAME}} -> {{SERVER_NAMES}}
+# Only for servers WITHOUT Nginx Proxy Manager. With NPM, add a Proxy Host instead (see README).
 # Copy to /etc/nginx/conf.d/ (or sites-available + symlink), then:  nginx -t && nginx -s reload
-# Get a certificate first, e.g.:  certbot --nginx -d {{DOMAIN}}   (certbot will add the 443 block for you)
+# Get a certificate first, e.g.:  certbot --nginx {{CERTBOT_DOMAINS}}   (certbot will add the 443 block for you)
 
 server {
     listen 80;
-    server_name {{DOMAIN}};
+    server_name {{SERVER_NAMES}};
 
     client_max_body_size 50m;
 

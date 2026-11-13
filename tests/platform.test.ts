@@ -4,6 +4,7 @@ import { compareVersions, VERSION_RE } from "@hexa/shared";
 import { getEnv, setEnv } from "../apps/updater/src/envfile.ts";
 import { decrypt, encrypt } from "../apps/console/src/crypto.ts";
 import { buildBundle, newSecrets } from "../apps/console/src/bundle.ts";
+import { OptionalHost, checkBaseDomain, defaultDomainOf, domainConflict, primaryDomainOf, type DomainRow } from "../apps/console/src/domains.ts";
 
 describe("versions", () => {
   it("orders semver and pre-releases", () => {
@@ -57,6 +58,68 @@ describe("bundle generator", () => {
     expect(env).toContain("Acme\u0027s Portal"); // apostrophe escaped inside single-quoted value
     for (const body of Object.values(zip)) expect(strFromU8(body)).not.toMatch(/\{\{\w+\}\}/);
     expect(strFromU8(zip["hexa-acme/nginx/portal.acme.com.conf"]!)).toContain("127.0.0.1:3100");
+  });
+});
+
+describe("client addresses", () => {
+  const base = "hexa.akab.ca";
+  const acme = { id: "acme", domain: "acme.hexa.akab.ca", customDomain: null };
+  it("derives the default address from the id when the base domain is set", () => {
+    expect(defaultDomainOf({ id: "acme", domain: "ignored.example.com" }, base)).toBe("acme.hexa.akab.ca");
+    expect(primaryDomainOf(acme, base)).toBe("acme.hexa.akab.ca");
+  });
+  it("falls back to the stored domain when no base domain is set", () => {
+    expect(defaultDomainOf({ id: "acme", domain: "portal.acme.com" }, "")).toBe("portal.acme.com");
+    expect(primaryDomainOf({ id: "acme", domain: "portal.acme.com", customDomain: null }, "")).toBe("portal.acme.com");
+  });
+  it("uses the custom domain as primary when set", () => {
+    expect(primaryDomainOf({ ...acme, customDomain: "portail.acme.com" }, base)).toBe("portail.acme.com");
+    expect(defaultDomainOf({ ...acme, customDomain: "portail.acme.com" }, base)).toBe("acme.hexa.akab.ca");
+  });
+  it("accepts bare lowercase host names and normalises case and spaces", () => {
+    expect(OptionalHost.parse(" Portail.Acme.COM ")).toBe("portail.acme.com");
+    expect(OptionalHost.parse("a-b.c1.example.ca")).toBe("a-b.c1.example.ca");
+    expect(OptionalHost.parse("")).toBeNull();
+    expect(OptionalHost.parse(null)).toBeNull();
+  });
+  it("rejects anything that is not a bare host name", () => {
+    for (const bad of ["https://acme.com", "acme.com/path", "acme.com:8443", "localhost", "acme com.ca", "-acme.com", "acme-.com", "acme..com", "1.2.3.4", "acme.com.", "a".repeat(64) + ".com", `${"a".repeat(60)}.${"b".repeat(60)}.${"c".repeat(60)}.${"d".repeat(60)}.${"e".repeat(60)}.ca`,"acme_x.com"]) {
+      expect(OptionalHost.safeParse(bad).success, bad).toBe(false);
+    }
+  });
+  it("refuses a custom name that is another client's address", () => {
+    const others: DomainRow[] = [{ id: "beta", domain: "beta.hexa.akab.ca", customDomain: "portail.beta.com" }];
+    expect(domainConflict("beta.hexa.akab.ca", "custom", others, base)?.code).toBe("domain_reserved");
+    expect(domainConflict("portail.beta.com", "custom", others, base)?.code).toBe("custom_domain_taken");
+    expect(domainConflict("portail.beta.com", "default", others, base)?.code).toBe("domain_taken");
+    expect(domainConflict("beta.hexa.akab.ca", "default", others, base)?.code).toBe("domain_taken");
+    expect(domainConflict("portail.acme.com", "custom", others, base)).toBeNull();
+  });
+  it("refuses a new default address that another client already uses as custom name", () => {
+    const others: DomainRow[] = [{ id: "beta", domain: "beta.hexa.akab.ca", customDomain: "acme.hexa.akab.ca" }];
+    expect(domainConflict("acme.hexa.akab.ca", "default", others, base)?.code).toBe("domain_taken");
+  });
+  it("reserves names under the base domain, unless no base is set", () => {
+    expect(domainConflict("x.hexa.akab.ca", "custom", [], base)?.code).toBe("domain_reserved");
+    expect(domainConflict("x.hexa.akab.ca", "custom", [], "")).toBeNull();
+  });
+  it("refuses an invalid base domain at startup", () => {
+    expect(checkBaseDomain("hexa.akab.ca")).toBe("hexa.akab.ca");
+    expect(checkBaseDomain("")).toBe("");
+    expect(() => checkBaseDomain("https://hexa.akab.ca")).toThrow();
+  });
+  it("points the bundle at the primary address and serves both names in nginx", () => {
+    const zip = unzipSync(
+      buildBundle(
+        { id: "acme", name: "Acme", domain: "portail.acme.com", defaultDomain: "acme.hexa.akab.ca", pinnedVersion: "1.0.0", appPort: 3100, licenseKey: "K", branding: {}, adminEmail: "a@acme.com", initialAdminPassword: "pw-pw-pw-pw-pw-pw", appSecret: "s".repeat(48) },
+        { templatesDir: "deploy/client-bundle", consoleUrl: "https://console.example.com", instanceImage: "i", updaterImage: "u", ghcrUser: "", ghcrToken: "", secrets: newSecrets() },
+      ),
+    );
+    expect(Object.keys(zip)).toContain("hexa-acme/nginx/portail.acme.com.conf");
+    expect(strFromU8(zip["hexa-acme/.env"]!)).toContain("PUBLIC_URL=https://portail.acme.com\n");
+    const nginx = strFromU8(zip["hexa-acme/nginx/portail.acme.com.conf"]!);
+    expect(nginx).toContain("server_name portail.acme.com acme.hexa.akab.ca;");
+    expect(nginx).toContain("certbot --nginx -d portail.acme.com -d acme.hexa.akab.ca");
   });
 });
 

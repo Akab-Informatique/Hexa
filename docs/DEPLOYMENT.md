@@ -96,7 +96,9 @@ Backups: dump the console database nightly (`docker compose exec db pg_dump -U h
 
 ## 2. Deploy the marketing page
 
-It is a folder of static files: `apps/site` (`index.html` + `config.js`). No build step.
+**Easiest: it already runs with the console.** `deploy/console/docker-compose.yml` has a `site` service (nginx) that serves `apps/site` on `127.0.0.1:8081` and writes its `config.js` from your `.env` (`PUBLIC_URL` = your console address, optional `SITE_CONTACT_EMAIL`). So `docker compose up -d --build` in step 1 already started it. In Nginx Proxy Manager add a Proxy Host for your public site name (for example `hexa.akab.ca`) forwarding to `127.0.0.1:8081`, with SSL. Skip the manual copy below.
+
+Manual alternative: it is a folder of static files, `apps/site` (`index.html` + `config.js`). No build step.
 
 1. **Copy it to the server**
    ```bash
@@ -134,7 +136,7 @@ To update the page later: edit the files in `apps/site`, copy them over again.
 1. Open `https://console.akab.ca` and add a client:
    - **Id**: short lowercase slug (`acme`). It is the "firm id" the marketing page asks for. Cannot change later.
    - **Name**: shown as the app name until the firm sets its own
-   - **Domain**: `acme.example.com` (the firm's address, or a subdomain of yours such as `acme.hexa.akab.ca`)
+   - **Domain** (optional): leave empty to get the default `acme.<CLIENT_BASE_DOMAIN>`. Or type the firm's own address (for example `portail.acme.com`), which becomes its custom address. See "Domaine du client" below.
    - **First admin email**: who receives the first master account
    - **Plan, max users, modules**: what the firm bought. Max users is delivered but not yet enforced by the app. (Feature flags and an expiry date exist in the console API but not yet in this form.)
    - **Pinned version**: the release the firm should run (updates are pushed by changing this)
@@ -151,8 +153,9 @@ To update the page later: edit the files in `apps/site`, copy them over again.
    ```
    It logs in to GHCR with the token from the bundle, pulls the images and starts three containers: app, Postgres, updater.
    Check: `curl http://127.0.0.1:<APP_PORT>/api/health`.
-3. **DNS**: point `acme.example.com` to that server.
-4. **Nginx**: copy `nginx/acme.example.com.conf` from the bundle to `/etc/nginx/conf.d/`. If your `nginx.conf` does not have it yet, add once inside `http {}`:
+3. **DNS and HTTPS**: point the primary address (and the default address, if different) to that server. With Nginx Proxy Manager, add one Proxy Host
+   with all names, forwarding to `127.0.0.1:<APP_PORT>`, SSL on. Without NPM (optional): copy `nginx/acme.example.com.conf` from the bundle to `/etc/nginx/conf.d/`.
+   If your `nginx.conf` does not have it yet, add once inside `http {}`:
    ```nginx
    map $http_upgrade $connection_upgrade { default upgrade; '' close; }
    ```
@@ -163,6 +166,19 @@ To update the page later: edit the files in `apps/site`, copy them over again.
    the firm's own Microsoft 365 app (tenant id, client id, secret) and the SharePoint site address, and ticks Enabled. For SharePoint the Entra app needs the
    `Sites.ReadWrite.All` application permission (admin consent). Folder access for staff is then set in Documentation.
 7. **Check from the console**: the fleet view shows the firm's version and last license check once the app has started.
+
+### 3b-bis. Domaine du client (addresses)
+
+Each client has a **default address** and may add a **custom address**. The **primary address** is the custom one when set, otherwise the default. The console shows both in the fleet table.
+
+- **Default address**: `<id>.<CLIENT_BASE_DOMAIN>` (for example `acme.hexa.akab.ca`). Set `CLIENT_BASE_DOMAIN` in the console `.env` (empty = no default, each client needs an explicit domain). It needs a wildcard DNS record `*.hexa.akab.ca` pointing at the server, and either a wildcard certificate or one NPM proxy host per client.
+- **Custom address** (for example `portail.acme.com`), set in the console with **Edit** on the client (empty clears it):
+  1. The client creates a DNS record `CNAME portail.acme.com` pointing to `acme.hexa.akab.ca`.
+  2. In Nginx Proxy Manager, add a Proxy Host with both names (`portail.acme.com` and `acme.hexa.akab.ca`), forwarding to `127.0.0.1:<APP_PORT>`, SSL on (Let's Encrypt).
+  3. Make it the primary address: the bundle's `.env` gets `PUBLIC_URL=https://portail.acme.com`, so download a new bundle, deploy it, and update the redirect addresses in Entra ID and Intuit (section 3d) to the new address.
+- **Clients do not need their own nginx.** The `nginx/*.conf` file in the bundle is optional, only for a server without Nginx Proxy Manager.
+- Names are lowercase host names only (no `https://`, no path). A custom name cannot end with `.<CLIENT_BASE_DOMAIN>` and cannot be used by another client (409).
+- When you first enable `CLIENT_BASE_DOMAIN` on a console that already has clients, their current address becomes the default one. To keep it, set it as the custom address with **Edit** first.
 
 ### 3c. Several tenants on one server
 
@@ -193,11 +209,11 @@ For development there is a local mock of all three (`scripts/mock-services.mjs`,
 **Ship a new version to everyone**
 1. Merge to `main`, then `git tag v0.2.0 && git push origin v0.2.0`. CI builds the images and registers the release.
 2. In the console, change a client's **pinned version** to `0.2.0` (clients can be moved one by one: test on your own first).
-3. In the firm's app a master admin sees **Update available** and presses Update. The updater backs up the database, pulls, restarts, health-checks, and **rolls back
+3. In the firm's app, a master admin or any user holding the **Install updates** right (Admin > Groups or the user's own rights) sees **Update available** (banner + Admin > Updates) and presses Update. Updates are never installed automatically. The updater backs up the database, pulls, restarts, health-checks, and **rolls back
    automatically** if it fails. Backups: last 5, in the `backups` volume.
 
 **Change a firm's branding, modules, flags, plan or user limit**: edit the client in the console. The app picks it up on its next license check (within minutes).
-**Suspend a firm**: the Suspend button on its row; the app stops validating at its next check, after the 72 h offline grace if the console cannot be reached.
+**Suspend a firm**: the Suspend button on its row. At the firm's next license check (within the hour) its portal shows a full-screen "Service suspended" notice and nobody can sign in; the data is kept. Resume brings it back at the next check. If the firm's server simply cannot reach your console, it keeps working for 72 h, then shows "Verification in progress".
 **Rotate a firm's license key**: the Rotate key button, then download the new bundle and deploy it (the running install stops validating until it has the new key).
 **Never** run `docker compose down -v` on a tenant (it deletes the database volume).
 **Backups** to schedule yourself: each tenant's Postgres (`docker compose exec db pg_dump ...`) off-server, plus the console database and `CONSOLE_SECRET`.

@@ -4,10 +4,21 @@ Requirements: a Linux server with Docker + Docker Compose v2, and Nginx.
 
 1. Unzip this folder on the server (for example `/opt/hexa/{{CLIENT_ID}}`).
 2. `sh install.sh`: pulls the images and starts the app, database and updater.
-3. Copy `nginx/{{DOMAIN}}.conf` into your Nginx config, point DNS for `{{DOMAIN}}` at the server,
-   issue a TLS certificate (`certbot --nginx -d {{DOMAIN}}`), then reload Nginx.
+3. Make the address reachable over HTTPS: see **Domaine du client** below.
 4. Open `https://{{DOMAIN}}` and sign in as `{{INITIAL_ADMIN_EMAIL}}` with `INITIAL_ADMIN_PASSWORD` from `.env`.
    You will be asked to change the password and set up two-factor authentication.
+
+## Domaine du client
+Your portal has a **primary address**, which is `https://{{DOMAIN}}` (this is `PUBLIC_URL` in `.env`).
+
+- **Default address**: `{{DEFAULT_DOMAIN}}`. It works as soon as the DNS record and the certificate for it exist
+  (wildcard DNS `*.<base domain>` pointing at your server, and a wildcard certificate or one proxy host per client).
+- **Custom address** (optional, for example `portail.yourfirm.com`): create a DNS record `CNAME` from your name to
+  `{{DEFAULT_DOMAIN}}`. In Nginx Proxy Manager, add a Proxy Host with both names (the custom name and `{{DEFAULT_DOMAIN}}`),
+  forwarding to `127.0.0.1:{{APP_PORT}}`, and enable SSL (Let's Encrypt). Once the custom name works, we set it as your primary address.
+- **Keep `PUBLIC_URL` on the primary address.** Microsoft 365 and QuickBooks sign-ins return to it, so their redirect
+  addresses must match.
+- You do **not** need your own Nginx. The file `nginx/{{DOMAIN}}.conf` is optional and only for a server without Nginx Proxy Manager.
 
 ## Updates
 When a new version is released for you, the app shows an **Update** button. It backs up the database,

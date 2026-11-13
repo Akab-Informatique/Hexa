@@ -102,6 +102,7 @@ run("instance", "apps/instance/src/index.ts", {
   CLIENT_ID: get("CLIENT_ID"),
   LICENSE_KEY: get("LICENSE_KEY"),
   CONSOLE_URL: `http://127.0.0.1:${CONSOLE_PORT}`,
+  LICENSE_CHECK_MINUTES: "0.25", // dev: a suspend shows within seconds
   APP_VERSION: "0.1.0",
   INITIAL_ADMIN_EMAIL: get("INITIAL_ADMIN_EMAIL"),
   INITIAL_ADMIN_PASSWORD: get("INITIAL_ADMIN_PASSWORD"),

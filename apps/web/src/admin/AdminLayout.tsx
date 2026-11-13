@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Cloud, History, Mail, Palette, ShieldCheck, Users, FolderSync, Receipt, Clock, Tags } from "lucide-react";
+import { ArrowLeft, Cloud, History, Mail, Palette, ShieldCheck, Users, FolderSync, Receipt, Clock, Tags, RefreshCw } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { useBranding } from "../lib/theme";
 import { BrandMark, LanguageToggle } from "../components/ui";
@@ -21,6 +21,8 @@ const GROUPS = [
     { to: "/admin/classes", key: "admin.classes", icon: Tags, perm: "admin.classes.manage" },
     { to: "/admin/time", key: "admin.time", icon: Clock, perm: "admin.time.manage" },
     { to: "/admin/audit", key: "admin.audit", icon: History, perm: "admin.audit.view" },
+    // Only the updates right opens this page (no groups.manage fallback).
+    { to: "/admin/updates", key: "admin.updates", icon: RefreshCw, perm: "admin.updates.install", via: [] as string[] },
   ] },
 ];
 
@@ -39,7 +41,7 @@ export default function AdminLayout() {
         <NavLink to="/team" className="nav-item mb-3"><ArrowLeft size={15} /> {t("admin.back")}</NavLink>
         <nav className="flex-1 space-y-4 overflow-auto">
           {GROUPS.map((g) => {
-            const items = g.items.filter((i) => can(i.perm, "admin.groups.manage"));
+            const items = g.items.filter((i) => can(i.perm, ...i.via ?? ["admin.groups.manage"]));
             return items.length ? (
               <div key={g.key}>
                 <div className="mb-1 px-3 text-[11px] font-medium uppercase tracking-wider text-muted">{t(g.key)}</div>

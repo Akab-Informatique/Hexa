@@ -3,9 +3,11 @@ import pg from "pg";
 import { migrate } from "@hexa/shared/migrate";
 import { config } from "./config.ts";
 import { buildApp } from "./app.ts";
+import { checkBaseDomain } from "./domains.ts";
 
 async function main() {
   config.adminPassword(); // fail fast on missing required secrets
+  checkBaseDomain(config.clientBaseDomain);
   if (config.secret().length < 32) throw new Error("CONSOLE_SECRET must be at least 32 characters");
   const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
   const applied = await migrate(pool, config.migrationsDir, "console");

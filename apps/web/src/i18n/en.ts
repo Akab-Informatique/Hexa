@@ -40,7 +40,7 @@ export const en: Dict = {
     title: "Administration", back: "Back to the app",
     groupAccess: "Users and access", users: "Users", groups: "Groups and access",
     groupIntegrations: "Integrations", o365: "Microsoft 365", mailjet: "Mailjet", quickbooks: "QuickBooks", sharepoint: "SharePoint",
-    groupTenant: "Environment", tenant: "Branding and modules", time: "Time and expenses", classes: "Client classifications", audit: "Activity log",
+    groupTenant: "Environment", tenant: "Branding and modules", time: "Time and expenses", classes: "Client classifications", audit: "Activity log", updates: "Updates",
     newUser: "New user", editUser: "Edit user", userGroups: "Groups", userOverrides: "Individual rights",
     overridesHelp: "Adjust this user's rights beyond their groups. \"Deny\" always wins.",
     tempPassword: "Temporary password", tempPasswordHelp: "Give it to the user. It will not be shown again and must be changed at first sign-in.",

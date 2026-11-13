@@ -10,6 +10,8 @@ import AppShell from "./layouts/AppShell";
 import AdminLayout from "./admin/AdminLayout";
 import ClientShell from "./portal/ClientShell";
 import SetPassword from "./portal/SetPassword";
+import SuspendedScreen from "./components/SuspendedScreen";
+import { useLicense } from "./lib/license";
 
 // Every page is its own chunk. Access is still checked by the route guards below and by the server; a chunk is just code.
 const UsersPage = lazy(() => import("./admin/UsersPage"));
@@ -24,6 +26,7 @@ const TimesheetPage = lazy(() => import("./modules/mytools/TimesheetPage"));
 const ExpensesPage = lazy(() => import("./modules/mytools/ExpensesPage"));
 const TimeTypesPage = lazy(() => import("./admin/TimeTypesPage"));
 const ClassesPage = lazy(() => import("./admin/ClassesPage"));
+const UpdatesPage = lazy(() => import("./admin/UpdatesPage"));
 const ContractsPage = lazy(() => import("./modules/accounting/ContractsPage"));
 const ServicesPage = lazy(() => import("./modules/accounting/ServicesPage"));
 const KbPage = lazy(() => import("./modules/mytools/KnowledgePages").then((m) => ({ default: m.KbPage })));
@@ -52,6 +55,8 @@ function Wait({ children }: { children: ReactNode }) {
 export default function App() {
   useBranding(); // applies the tenant's colors to the whole app, including the login screen
   const { pathname } = useLocation();
+  const license = useLicense();
+  if (!license.usable) return <SuspendedScreen />; // suspended, expired or unverified: nothing else is shown, signed in or not
   if (pathname === "/set-password") return <SetPassword />; // opened from the welcome email, before any sign-in
   return (
     <AuthProvider>
@@ -96,6 +101,7 @@ function Signed({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...k: str
         <Route path="time" element={can("admin.time.manage") ? <Wait><TimeTypesPage /></Wait> : denied} />
         <Route path="classes" element={can("admin.classes.manage") ? <Wait><ClassesPage /></Wait> : denied} />
         <Route path="audit" element={can("admin.audit.view") ? <Wait><AuditPage /></Wait> : denied} />
+        <Route path="updates" element={can("admin.updates.install") ? <Wait><UpdatesPage /></Wait> : denied} />
       </Route>
       <Route path="*" element={<Navigate to={first?.path ?? "/admin"} replace />} />
     </Routes>

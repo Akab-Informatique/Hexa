@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, LogOut, Menu, Settings, X } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
+import { useL } from "../lib/l";
+import type { UpdateStatus } from "../admin/UpdatesPage";
 import { useBranding } from "../lib/theme";
 import { visibleNav } from "../modules/registry";
 import { BrandMark, LanguageToggle } from "../components/ui";
@@ -11,15 +14,33 @@ import { TimerBar } from "../modules/tasks/timer";
 
 const OPEN_KEY = "hexa.nav.open";
 const readOpen = (): string[] | null => { try { return JSON.parse(localStorage.getItem(OPEN_KEY) ?? "null"); } catch { return null; } };
+const DISMISS_KEY = "hexa.update.dismissed";
+const readDismissed = (): string | null => { try { return localStorage.getItem(DISMISS_KEY); } catch { return null; } };
 
 export default function AppShell() {
   const { t } = useTranslation();
   const { me, can, logout } = useAuth();
   const brand = useBranding();
+  const l = useL();
   const nav = visibleNav(can);
   const { pathname } = useLocation();
   const [drawer, setDrawer] = useState(false);
   const [open, setOpen] = useState<string[]>(() => readOpen() ?? ["team"]);
+  const canUpdate = can("admin.updates.install");
+  const upd = useQuery({
+    queryKey: ["update-status"],
+    queryFn: () => api<UpdateStatus>("/api/update/status"),
+    enabled: canUpdate,
+    staleTime: 5 * 60_000,
+  });
+  const [dismissed, setDismissed] = useState<string | null>(readDismissed);
+  const updateTarget = canUpdate && upd.data?.updateAvailable ? upd.data.target : null;
+  const showBanner = Boolean(updateTarget && updateTarget !== dismissed);
+  // Dismissal is remembered per version: a newer release shows the banner again.
+  const dismissBanner = () => {
+    try { if (updateTarget) localStorage.setItem(DISMISS_KEY, updateTarget); } catch { /* ignore */ }
+    setDismissed(updateTarget);
+  };
 
   useEffect(() => setDrawer(false), [pathname]);
   // Keep the module that holds the current page expanded.
@@ -99,6 +120,13 @@ export default function AppShell() {
           <BrandMark name={brand.appName} logoUrl={brand.logoUrl} size={28} />
           <span className="font-semibold">{brand.appName}</span>
         </div>
+        {showBanner && (
+          <div className="glass mx-4 mt-1 flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm lg:mx-8">
+            <span className="flex-1">{l(`Une mise à jour (v${updateTarget}) est disponible`, `An update (v${updateTarget}) is available`)}</span>
+            <Link to="/admin/updates" className="font-medium underline">{l("Voir la mise à jour", "View update")}</Link>
+            <button className="btn !p-1.5" onClick={dismissBanner} aria-label={l("Masquer", "Dismiss")}><X size={14} /></button>
+          </div>
+        )}
         <div className="mx-auto max-w-6xl p-4 lg:p-8"><Outlet /></div>
       </main>
       <TimerBar />

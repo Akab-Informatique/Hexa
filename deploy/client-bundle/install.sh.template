@@ -17,4 +17,4 @@ docker compose up -d
 
 echo
 echo "Started. Local address: http://127.0.0.1:${APP_PORT}"
-echo "Next: install nginx/*.conf, get a TLS certificate, and open https://{{DOMAIN}}"
+echo "Next: make https://{{DOMAIN}} reachable over HTTPS (see README, 'Domaine du client'), then open it"

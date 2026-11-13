@@ -238,10 +238,10 @@ ok("staff cannot change billing settings", (await call("PATCH", `/api/clients/${
 ok("billing settings saved", (await call("PATCH", `/api/clients/${ccid}`, { termsDays: 15, poRequired: true, autoApproveKinds: ["contract"] })).status === 200 && (await call("GET", `/api/clients/${ccid}`)).body.termsDays === 15);
 const pg = (await call("GET", "/api/clients?page=1&size=5&sort=contracts&dir=desc")).body;
 ok("paged client list with a total", Array.isArray(pg.rows) && pg.total >= 1 && pg.size === 5);
-ok("tab order is shared and complete", (await call("PUT", "/api/clients/tab-order", { order: ["contracts", "info"] })).status === 200 && (await call("GET", "/api/clients/tab-order")).body.order.join() === "contracts,info,contacts,tasks,invoices,billing");
+ok("tab order is shared and complete", (await call("PUT", "/api/clients/tab-order", { order: ["contracts", "info"] })).status === 200 && (await call("GET", "/api/clients/tab-order")).body.order.join() === "contracts,info,contacts,tasks,invoices,billing,tracking");
 await call("PUT", "/api/clients/tab-order", { order: null });
 const svcName = `SMOKE Tenue de livres ${Date.now()}`;
-const svc = await post("/api/services", { name: svcName, kind: "monthly", price: 100, cost: 40 });
+const svc = await post("/api/services", { name: svcName, type: "recurring", period: "monthly", priceCents: 10000, costCents: 4000 });
 ok("create a service", svc.status === 201);
 ok("cost is hidden from non-managers", (await call("GET", "/api/services", undefined, uc)).body.every((s) => s.costCents === null));
 ok("staff cannot manage services", (await post("/api/services", { name: "x" }, uc)).status === 403);
@@ -254,7 +254,7 @@ ok("add a service from the catalogue", ln.status === 201);
 const cd = (await call("GET", `/api/clients/contracts/${rc.body.id}`)).body;
 ok("first month is prorated by days (22/31 of 100 $)", cd.charges[0].cents === 7097 && cd.charges[0].prorated === true && cd.charges[1].cents === 10000, JSON.stringify(cd.charges.slice(0, 2)));
 ok("monthly figure", cd.monthlyCents === 10000);
-await call("PATCH", `/api/services/${svc.body.id}`, { price: 250 });
+await call("PATCH", `/api/services/${svc.body.id}`, { priceCents: 25000 });
 ok("changing the catalogue price does not move the contract", (await call("GET", `/api/clients/contracts/${rc.body.id}`)).body.monthlyCents === 10000);
 const rb = await post("/api/clients/contracts/refresh-billing", undefined);
 ok("work to bill is made from due charges", rb.body.created >= 1, JSON.stringify(rb.body));
@@ -675,7 +675,8 @@ ok("an ordinary staff user cannot manage portal access", await (async () => {
   return (await call("POST", `/api/clients/${poB}/portal/${poKB}`, {}, l2.cookie)).status === 403;
 })());
 
-// ---- Task timer, statuses and priorities ----
+// ---- Task timer, statuses and priorities (stopping a timer writes a draft timesheet entry at once) ----
+const weekOf = async () => (await call("GET", "/api/time/week")).body.entries;
 const tmClient = (await post("/api/clients", { name: "SMOKE Timer Client" })).body.id;
 const tmA = (await post("/api/tasks", { title: "SMOKE timer A", clientId: tmClient, priority: "high" })).body.id;
 const tmB = (await post("/api/tasks", { title: "SMOKE timer B", clientId: tmClient })).body.id;
@@ -691,33 +692,27 @@ ok("a second timer is refused while one runs", (await post("/api/tasks/timer/sta
 ok("the timer reports itself", (await call("GET", "/api/tasks/timer")).body.running.title === "SMOKE timer A");
 await new Promise((r) => setTimeout(r, 1200));
 const tmStop = (await post("/api/tasks/timer/stop", {})).body;
-ok("stopping gives a pending stretch of at least a minute", tmStop.segmentId && tmStop.minutes >= 1 && tmStop.clientId === tmClient);
-ok("the timer is gone and the stretch waits", (await call("GET", "/api/tasks/timer")).body.running === null && (await call("GET", `/api/tasks/${tmA}/segments`)).body.length === 1);
-ok("logging needs a description", (await post(`/api/tasks/segments/${tmStop.segmentId}/log`, { description: "  " })).status === 400);
+const tmAuto = (await weekOf()).find((e) => e.id === tmStop.entryId);
+ok("stopping writes a draft billable entry on the task and client", tmStop.entryId && tmAuto && tmAuto.taskId === tmA && tmAuto.clientId === tmClient && tmAuto.billable === true && tmAuto.status === "draft" && tmAuto.source === "timer", JSON.stringify(tmAuto));
+ok("the timer is gone", (await call("GET", "/api/tasks/timer")).body.running === null);
 const tmLog = await post(`/api/tasks/segments/${tmStop.segmentId}/log`, { description: "Revue des relevés bancaires", minutes: 15 });
-const tmWeek = (await call("GET", "/api/time/week")).body;
-const tmEntry = tmWeek.entries.find((e) => e.id === tmLog.body.entryId);
-ok("the stretch becomes a billable time entry on the task and client", tmLog.status === 201 && tmEntry && tmEntry.minutes === 15 && tmEntry.taskId === tmA && tmEntry.clientId === tmClient && tmEntry.billable === true && tmEntry.description === "Revue des relevés bancaires" && tmEntry.typeKey === "work", JSON.stringify(tmEntry));
-ok("it cannot be logged twice", (await post(`/api/tasks/segments/${tmStop.segmentId}/log`, { description: "again" })).status === 404 && (await call("GET", `/api/tasks/${tmA}/segments`)).body.length === 0);
+const tmEdited = (await weekOf()).find((e) => e.id === tmStop.entryId);
+ok("the description and minutes can be set afterwards", tmLog.status === 200 && tmEdited.minutes === 15 && tmEdited.description === "Revue des relevés bancaires", JSON.stringify(tmEdited));
+ok("time cannot be dropped from the task, only deleted as a draft entry", (await call("DELETE", `/api/tasks/segments/${tmStop.segmentId}`)).status === 409);
 
-// Later, and dropped
+// Completing a task ends its timer and keeps the time
 await post("/api/tasks/timer/start", { taskId: tmB });
-const tmStop2 = (await post("/api/tasks/timer/stop", {})).body;
-ok("time can wait until later", (await call("GET", "/api/tasks/timer")).body.pendingCount >= 1 && (await call("GET", "/api/tasks/segments/pending")).body.some((p) => p.id === tmStop2.segmentId && p.title === "SMOKE timer B"));
-ok("a stretch can be dropped", (await call("DELETE", `/api/tasks/segments/${tmStop2.segmentId}`)).status === 200 && (await call("GET", `/api/tasks/${tmB}/segments`)).body.length === 0);
+ok("completing a task ends its running timer and keeps the time as an entry", (await call("PATCH", `/api/tasks/${tmB}`, { status: "done" })).status === 200 && (await call("GET", "/api/tasks/timer")).body.running === null && (await weekOf()).some((e) => e.taskId === tmB));
 
-// Closing a task
-await post("/api/tasks/timer/start", { taskId: tmB });
-ok("completing a task ends its running timer and keeps the time pending", (await call("PATCH", `/api/tasks/${tmB}`, { status: "done" })).status === 200 && (await call("GET", "/api/tasks/timer")).body.running === null && (await call("GET", `/api/tasks/${tmB}/segments`)).body.length === 1);
-ok("closing without time drops what is pending", (await post(`/api/tasks/${tmB}/segments/discard`, {})).body.discarded === 1 && (await call("GET", `/api/tasks/${tmB}/segments`)).body.length === 0);
+// No client: never billable. A timer started by mistake leaves nothing.
 const tmC = (await post("/api/tasks", { title: "SMOKE timer no client C" })).body.id;
 await post("/api/tasks/timer/start", { taskId: tmC });
 const tmStopC = (await post("/api/tasks/timer/stop", {})).body;
-const tmLogC = await post(`/api/tasks/segments/${tmStopC.segmentId}/log`, { description: "Interne", minutes: 5, billable: true });
-const tmEntryC = (await call("GET", "/api/time/week")).body.entries.find((e) => e.id === tmLogC.body.entryId);
-ok("time on a task with no client is never billable", tmLogC.status === 201 && tmEntryC.billable === false && tmEntryC.clientId === null);
-await post("/api/tasks/timer/start", { taskId: tmC });
-ok("a timer thrown away leaves nothing", (await post("/api/tasks/timer/cancel", {})).status === 200 && (await call("GET", "/api/tasks/timer")).body.running === null && (await call("GET", `/api/tasks/${tmC}/segments`)).body.length === 0);
+const tmEntryC = (await weekOf()).find((e) => e.id === tmStopC.entryId);
+ok("time on a task with no client is never billable", tmEntryC && tmEntryC.billable === false && tmEntryC.clientId === null);
+const tmD = (await post("/api/tasks", { title: "SMOKE timer mistake D" })).body.id;
+await post("/api/tasks/timer/start", { taskId: tmD });
+ok("a timer started by mistake leaves nothing", (await post("/api/tasks/timer/cancel", {})).body.kept === false && (await call("GET", "/api/tasks/timer")).body.running === null && !(await weekOf()).some((e) => e.taskId === tmD));
 ok("a client user has no timer", [401, 403].includes((await call("GET", "/api/tasks/timer", undefined, poCc)).status) && [401, 403].includes((await post("/api/tasks/timer/start", { taskId: tmA }, poCc)).status));
 
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { addRecurrence, todayISO, addDays, fridayOf, mondayOf } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
+import { stopTimer } from "./taskTimer.ts";
 import { audit } from "../auth/access.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";
 
@@ -180,12 +181,9 @@ taskRoutes.patch("/:id", requirePermission(...EDIT), async (c) => {
     for (const v of d.viewerIds) await pool.query("insert into task_viewers values ($1, $2) on conflict do nothing", [id, v]);
   }
 
-  // Completing a task ends any timer still running on it; the time waits to be logged (nothing is lost, nothing is billed unasked).
+  // Completing a task ends any timer still running on it, like Stop: the time becomes a draft timesheet entry (nothing is lost).
   if (closing) {
-    await pool.query(
-      `with gone as (delete from task_timers where task_id = $1 returning user_id, started_at)
-       insert into task_time_segments (task_id, user_id, started_at, minutes)
-       select $1, user_id, started_at, greatest(1, ceil(extract(epoch from now() - started_at) / 60))::int from gone`, [id]);
+    for (const r of (await pool.query("select user_id from task_timers where task_id = $1", [id])).rows) await stopTimer(r.user_id as string);
   }
 
   // Recurring task: completing it creates the next occurrence (checklist reset, same assignee).

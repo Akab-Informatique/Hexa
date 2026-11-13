@@ -99,7 +99,7 @@ async function makeEntries(db: Db, o: { userId: string; taskId: string; title: s
  * Stops the running timer and turns the stretch into draft entries, all in one transaction (a crash can never leave the
  * timer deleted without its entry). With discardUnder (cancel), a stretch shorter than that many seconds is a mis-click and is dropped.
  */
-async function stopTimer(userId: string, discardUnder = 0) {
+export async function stopTimer(userId: string, discardUnder = 0) {
   const db = await pool.connect();
   try {
     await db.query("begin");

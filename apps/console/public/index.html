@@ -25,6 +25,11 @@
     .actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .muted { color: #64748b; font-size: 12px; }
     #msg { padding: 8px 12px; border-radius: 6px; background: #dbeafe; display: none; margin-bottom: 14px; }
+    dialog { border: 1px solid #cbd5e1; border-radius: 10px; padding: 18px; width: min(460px, 92vw); }
+    dialog::backdrop { background: rgba(15, 23, 42, 0.4); }
+    dialog form { display: block; }
+    dialog label { margin-bottom: 8px; }
+    a { color: #2563eb; }
   </style>
 </head>
 <body>
@@ -45,7 +50,7 @@
       <form id="new">
         <label>ID (slug)<input name="id" required pattern="[a-z][a-z0-9-]{1,30}" /></label>
         <label>Name<input name="name" required /></label>
-        <label>Domain<input name="domain" required placeholder="portal.client.com" /></label>
+        <label>Domain (optional)<input name="domain" placeholder="portal.client.com" /><span class="muted" id="newDomainHint"></span></label>
         <label>First admin email<input name="adminEmail" type="email" required /></label>
         <label>Pinned version<select name="pinnedVersion" class="versions" required></select></label>
         <label>Demo data<select name="seedProfile"><option value="none">None (real firm)</option><option value="accounting">Accounting firm</option><option value="bookkeeping">Bookkeeping practice</option><option value="tax">Tax practice</option></select></label>
@@ -72,6 +77,16 @@
     </section>
   </main>
 
+  <dialog id="editDlg">
+    <form id="editForm">
+      <h2 id="editTitle">Custom domain</h2>
+      <label>Custom domain (empty = none)<input name="customDomain" placeholder="portail.client.com" /></label>
+      <p class="muted" id="editHint"></p>
+      <p class="muted" id="editDefault"></p>
+      <div class="actions" style="margin-top:14px"><button>Save</button><button type="button" class="secondary" id="editCancel">Cancel</button></div>
+    </form>
+  </dialog>
+
   <script>
     const $ = (s) => document.querySelector(s);
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -83,14 +98,35 @@
       if (!r.ok) throw new Error(JSON.stringify(j.error ?? j));
       return j;
     }
+    let baseDomain = "", fleetClients = [], editingId = null;
+    function updateNewHint() {
+      const id = $("#new [name=id]").value.trim();
+      const input = $("#new [name=domain]");
+      if (baseDomain) {
+        input.placeholder = `${id || "<id>"}.${baseDomain}`;
+        $("#newDomainHint").textContent = `Empty = default address ${id || "<id>"}.${baseDomain}. Type a name to use it instead.`;
+      } else {
+        input.placeholder = "portal.client.com";
+        $("#newDomainHint").textContent = "Required: no default base domain is set (CLIENT_BASE_DOMAIN).";
+      }
+    }
+    function openEdit(c) {
+      editingId = c.id;
+      $("#editTitle").textContent = `Custom domain: ${c.name}`;
+      $("#editForm [name=customDomain]").value = c.customDomain ?? "";
+      $("#editHint").textContent = `Le client crée un CNAME vers ${c.defaultDomain}, puis vous ajoutez le nom dans Nginx Proxy Manager.`;
+      $("#editDefault").textContent = `Default address: ${c.defaultDomain}. Primary address (PUBLIC_URL): ${c.domain}.`;
+      $("#editDlg").showModal();
+    }
     async function refresh() {
       const [fleet, releases] = await Promise.all([api("/api/fleet"), api("/api/releases")]);
+      baseDomain = fleet.clientBaseDomain || ""; fleetClients = fleet.clients; updateNewHint();
       $("#latest").textContent = fleet.latestRelease ? "· latest release " + fleet.latestRelease : "";
       $(".versions").innerHTML = releases.map((r) => `<option>${esc(r.version)}</option>`).join("");
       $("#releases").innerHTML = releases.map((r) => `<tr><td><strong>${esc(r.version)}</strong></td><td>${esc(r.channel)}</td><td>${esc(r.notes)}</td></tr>`).join("");
       $("#clients").innerHTML = fleet.clients.map((c) => `
         <tr>
-          <td><strong>${esc(c.name)}</strong><br><span class="muted">${esc(c.id)} · ${esc(c.domain)}</span></td>
+          <td><strong>${esc(c.name)}</strong><br><span class="muted">${esc(c.id)} · <a href="https://${esc(c.domain)}" target="_blank" rel="noopener">${esc(c.domain)}</a>${c.customDomain ? ` · default: ${esc(c.defaultDomain)}` : ""}</span></td>
           <td><span class="pill ${c.status}">${c.status}</span></td>
           <td>${esc(c.lastVersion ?? "—")}${c.behindPinned ? ' <span class="muted">(update pending)</span>' : ""}</td>
           <td><select data-pin="${esc(c.id)}">${releases.map((r) => `<option ${r.version === c.pinnedVersion ? "selected" : ""}>${esc(r.version)}</option>`).join("")}</select></td>
@@ -98,6 +134,7 @@
           <td class="muted">${c.lastSeenAt ? new Date(c.lastSeenAt).toLocaleString() : "never"}</td>
           <td class="actions">
             <button class="secondary" data-bundle="${esc(c.id)}">Bundle</button>
+            <button class="secondary" data-edit="${esc(c.id)}">Edit</button>
             <button class="secondary" data-toggle="${esc(c.id)}" data-active="${c.active}">${c.active ? "Suspend" : "Resume"}</button>
             <button class="danger" data-rotate="${esc(c.id)}">Rotate key</button>
           </td>
@@ -111,6 +148,7 @@
       const t = e.target;
       try {
         if (t.dataset.bundle) location.href = `/api/clients/${t.dataset.bundle}/bundle`;
+        if (t.dataset.edit) openEdit(fleetClients.find((x) => x.id === t.dataset.edit));
         if (t.dataset.toggle) { await api("/api/clients/" + t.dataset.toggle, { method: "PATCH", body: { active: t.dataset.active !== "true" } }); refresh(); }
         if (t.dataset.rotate && confirm("Rotate the license key? The running install stops validating until it receives the new bundle.")) {
           await api(`/api/clients/${t.dataset.rotate}/rotate-key`, { method: "POST" }); say("Key rotated. Download and deploy the new bundle."); }
@@ -125,6 +163,18 @@
         branding: { primaryColor: f.primaryColor, ...(f.logoUrl ? { logoUrl: f.logoUrl } : {}) },
       };
       try { await api("/api/clients", { method: "POST", body }); say("Client created. Use Bundle to download the install package."); e.target.reset(); refresh(); } catch (err) { say(err.message); }
+    };
+    $("#new [name=id]").addEventListener("input", updateNewHint);
+    $("#editCancel").onclick = () => $("#editDlg").close();
+    $("#editForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const v = e.target.customDomain.value.trim();
+      try {
+        await api("/api/clients/" + editingId, { method: "PATCH", body: { customDomain: v || null } });
+        $("#editDlg").close();
+        say(v ? `Custom domain set to ${v}. Download a new bundle and redeploy so PUBLIC_URL matches.` : "Custom domain cleared. Download a new bundle and redeploy so PUBLIC_URL matches.");
+        refresh();
+      } catch (err) { say(err.message); }
     };
     $("#release").onsubmit = async (e) => {
       e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));

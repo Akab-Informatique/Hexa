@@ -13,15 +13,17 @@ import {
 import { config } from "./config.ts";
 import { decrypt, derive, encrypt, randomToken, safeEqual } from "./crypto.ts";
 import { buildBundle, newSecrets } from "./bundle.ts";
+import { OptionalHost, defaultDomainOf, domainConflict, primaryDomainOf, type DomainRow } from "./domains.ts";
 
 const Slug = z.string().regex(/^[a-z][a-z0-9-]{1,30}$/, "lowercase letters, digits, dashes");
 const Version = z.string().regex(VERSION_RE);
-const Domain = z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i);
-
 const ClientInput = z.object({
   id: Slug,
   name: z.string().min(1),
-  domain: Domain,
+  /** Address the client was created with. Optional: defaults to <id>.<CLIENT_BASE_DOMAIN> when that is set. */
+  domain: OptionalHost.optional(),
+  /** Custom host name (client's own DNS CNAMEs to the default address). Empty or null clears it. */
+  customDomain: OptionalHost.optional(),
   adminEmail: z.string().email(),
   plan: z.string().default("standard"),
   maxUsers: z.number().int().positive().nullable().default(null),
@@ -39,12 +41,41 @@ const ClientInput = z.object({
 const ClientPatch = ClientInput.omit({ id: true }).partial().extend({ active: z.boolean().optional() });
 
 type Row = Record<string, any>;
+const base = () => config.clientBaseDomain;
+const toDomainRow = (r: Row): DomainRow => ({ id: r.id, domain: r.domain, customDomain: r.custom_domain ?? null });
+
 const publicClient = (r: Row) => ({
-  id: r.id, name: r.name, domain: r.domain, adminEmail: r.admin_email, plan: r.plan, maxUsers: r.max_users, modules: r.modules,
+  id: r.id, name: r.name, domain: primaryDomainOf(toDomainRow(r), base()), defaultDomain: defaultDomainOf(toDomainRow(r), base()),
+  customDomain: r.custom_domain ?? null, adminEmail: r.admin_email, plan: r.plan, maxUsers: r.max_users, modules: r.modules,
   flags: r.flags, branding: r.branding, pinnedVersion: r.pinned_version, channel: r.channel,
   active: r.active, expiresAt: r.expires_at, appPort: r.app_port, notes: r.notes, createdAt: r.created_at,
   lastSeenAt: r.last_seen_at, lastVersion: r.last_version, lastHealth: r.last_health, lastUserCount: r.last_user_count, seedProfile: r.seed_profile,
 });
+
+/**
+ * Works out the stored `domain` and `customDomain` for a new client. With CLIENT_BASE_DOMAIN set, the default address is
+ * <id>.<base>; a `domain` that differs from it is taken as the custom name. Without a base, `domain` is required.
+ */
+function splitDomains(
+  id: string, domain: string | null, customDomain: string | null,
+): { domain: string; customDomain: string | null } | { status: number; body: Record<string, unknown> } {
+  const def = base() ? `${id}.${base()}` : null;
+  let dom = domain;
+  let custom = customDomain;
+  if (def && dom && dom !== def) {
+    if (custom) return { status: 400, body: { error: "give either domain (taken as the custom name) or customDomain, not both", code: "domain_ambiguous" } };
+    custom = dom;
+    dom = null;
+  }
+  const stored = def ?? dom;
+  if (!stored) return { status: 400, body: { error: "domain is required: CLIENT_BASE_DOMAIN is not set on this console", code: "domain_required" } };
+  if (custom && custom === stored) return { status: 409, body: { error: "customDomain is the same as the default address", code: "custom_same_as_default" } };
+  return { domain: stored, customDomain: custom };
+}
+
+async function otherDomainRows(pool: pg.Pool, id: string): Promise<DomainRow[]> {
+  return (await pool.query("select id, domain, custom_domain from clients where id<>$1", [id])).rows.map(toDomainRow);
+}
 
 export function buildApp(pool: pg.Pool): Hono {
   const app = new Hono();
@@ -77,9 +108,10 @@ export function buildApp(pool: pg.Pool): Hono {
   // (it only reveals a login URL), CORS-open so the static site can call it.
   app.get("/api/tenants/lookup", async (c) => {
     const slug = (c.req.query("slug") ?? "").toLowerCase().trim();
-    const r = /^[a-z][a-z0-9-]{1,30}$/.test(slug) ? await pool.query("select domain, name from clients where id=$1 and active", [slug]) : { rows: [] as Row[] };
+    const r = /^[a-z][a-z0-9-]{1,30}$/.test(slug) ? await pool.query("select * from clients where id=$1 and active", [slug]) : { rows: [] as Row[] };
     c.header("access-control-allow-origin", "*");
-    return r.rows[0] ? c.json({ url: "https://" + r.rows[0].domain, name: r.rows[0].name }) : c.json({ error: "not found" }, 404);
+    const row = r.rows[0] as Row | undefined;
+    return row ? c.json({ url: "https://" + primaryDomainOf(toDomainRow(row), base()), name: row.name }) : c.json({ error: "not found" }, 404);
   });
 
   // CI registers a release after pushing images: POST /api/releases with Bearer RELEASE_TOKEN.
@@ -124,13 +156,19 @@ export function buildApp(pool: pg.Pool): Hono {
     const parsed = ClientInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
     const d = parsed.data;
+    const split = splitDomains(d.id, d.domain ?? null, d.customDomain ?? null);
+    if ("status" in split) return c.json(split.body, split.status as 400 | 409);
+    const others = await otherDomainRows(pool, d.id);
+    const conflict = domainConflict(split.domain, "default", others, base()) ??
+      (split.customDomain ? domainConflict(split.customDomain, "custom", others, base()) : null);
+    if (conflict) return c.json({ error: conflict.message, code: conflict.code }, 409);
     const secret = config.secret();
     try {
       await pool.query(
-        `insert into clients (id,name,domain,plan,max_users,modules,flags,branding,pinned_version,channel,
+        `insert into clients (id,name,domain,custom_domain,plan,max_users,modules,flags,branding,pinned_version,channel,
            license_key_enc,secrets_enc,expires_at,app_port,notes,admin_email,seed_profile)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-        [d.id, d.name, d.domain, d.plan, d.maxUsers, d.modules, d.flags, d.branding, d.pinnedVersion, d.channel,
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        [d.id, d.name, split.domain, split.customDomain, d.plan, d.maxUsers, d.modules, d.flags, d.branding, d.pinnedVersion, d.channel,
          encrypt(randomToken(32), secret), encrypt(JSON.stringify(newSecrets()), secret), d.expiresAt, d.appPort, d.notes, d.adminEmail, d.seedProfile],
       );
     } catch (err) {
@@ -144,14 +182,44 @@ export function buildApp(pool: pg.Pool): Hono {
   app.patch("/api/clients/:id", async (c) => {
     const parsed = ClientPatch.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+    const id = c.req.param("id");
     const map: Record<string, string> = {
-      name: "name", domain: "domain", adminEmail: "admin_email", plan: "plan", maxUsers: "max_users", modules: "modules", flags: "flags",
-      branding: "branding", pinnedVersion: "pinned_version", channel: "channel", expiresAt: "expires_at",
+      name: "name", domain: "domain", customDomain: "custom_domain", adminEmail: "admin_email", plan: "plan", maxUsers: "max_users",
+      modules: "modules", flags: "flags", branding: "branding", pinnedVersion: "pinned_version", channel: "channel", expiresAt: "expires_at",
       appPort: "app_port", notes: "notes", active: "active", seedProfile: "seed_profile",
     };
+    const body: Record<string, any> = { ...parsed.data };
+    if ("domain" in body || "customDomain" in body) {
+      const cur = (await pool.query("select * from clients where id=$1", [id])).rows[0] as Row | undefined;
+      if (!cur) return c.json({ error: "not found" }, 404);
+      const def = base() ? `${id}.${base()}` : null;
+      let domainSet: string | null | undefined = body.domain;
+      let customSet: string | null | undefined = body.customDomain;
+      // With a base domain the default address is derived from the id: a different `domain` is the client's custom name.
+      if (def && domainSet !== undefined) {
+        if (domainSet === null || domainSet === def) domainSet = undefined;
+        else {
+          if (customSet === undefined) customSet = domainSet;
+          domainSet = undefined;
+        }
+      }
+      if (!def && domainSet === null) return c.json({ error: "domain cannot be empty: CLIENT_BASE_DOMAIN is not set", code: "domain_required" }, 400);
+      const nextDomain = domainSet ?? cur.domain;
+      const nextCustom = customSet !== undefined ? customSet : (cur.custom_domain ?? null);
+      if (nextCustom && nextCustom === (def ?? nextDomain)) return c.json({ error: "customDomain is the same as the default address", code: "custom_same_as_default" }, 409);
+      const others = await otherDomainRows(pool, id);
+      const conflict =
+        (domainSet !== undefined && !def ? domainConflict(nextDomain, "default", others, base()) : null) ??
+        (customSet !== undefined && nextCustom ? domainConflict(nextCustom, "custom", others, base()) : null);
+      if (conflict) return c.json({ error: conflict.message, code: conflict.code }, 409);
+      delete body.domain;
+      delete body.customDomain;
+      if (domainSet !== undefined) body.domain = domainSet;
+      if (customSet !== undefined) body.customDomain = customSet;
+    }
     const sets: string[] = [];
-    const values: unknown[] = [c.req.param("id")];
-    for (const [k, v] of Object.entries(parsed.data)) {
+    const values: unknown[] = [id];
+    for (const [k, v] of Object.entries(body)) {
       if (v === undefined) continue;
       values.push(v);
       sets.push(`${map[k]}=$${values.length}`);
@@ -175,7 +243,8 @@ export function buildApp(pool: pg.Pool): Hono {
     const secret = config.secret();
     const zip = buildBundle(
       {
-        id: r.id, name: r.name, domain: r.domain, pinnedVersion: r.pinned_version, appPort: r.app_port,
+        id: r.id, name: r.name, domain: primaryDomainOf(toDomainRow(r), base()), defaultDomain: defaultDomainOf(toDomainRow(r), base()),
+        pinnedVersion: r.pinned_version, appPort: r.app_port,
         licenseKey: decrypt(r.license_key_enc, secret), branding: { appName: r.name, ...r.branding },
         adminEmail: r.admin_email, seedProfile: r.seed_profile, initialAdminPassword: derive(secret, "admin", r.id, 20), appSecret: derive(secret, "app", r.id, 48),
       },
@@ -198,6 +267,7 @@ export function buildApp(pool: pg.Pool): Hono {
     const latest = (releases.rows as Row[]).map((r) => r.version as string).sort(compareVersions).pop() ?? null;
     return c.json({
       latestRelease: latest,
+      clientBaseDomain: base(),
       clients: (clients.rows as Row[]).map((r) => {
         const seen = r.last_seen_at ? Date.now() - new Date(r.last_seen_at).getTime() : null;
         return {
