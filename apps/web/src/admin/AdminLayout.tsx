@@ -1,4 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../lib/api";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, LogOut, Cloud, History, Mail, Palette, ShieldCheck, Users, FolderSync, Receipt, Clock, Tags, RefreshCw } from "lucide-react";
 import { useAuth } from "../lib/auth";
@@ -30,6 +32,11 @@ export default function AdminLayout() {
   const { t } = useTranslation();
   const { can, logout } = useAuth();
   const brand = useBranding();
+  // A dot on "Mises à jour" while a newer version is waiting (only for those who may install it).
+  const badge = useQuery({
+    queryKey: ["update-badge"], enabled: can("admin.updates.install"), staleTime: 60_000, retry: false,
+    queryFn: () => api<{ updateAvailable: boolean; target: string | null }>("/api/update/status"),
+  });
   return (
     <div className="relative flex h-full flex-col lg:flex-row">
       <div className="canvas" />
@@ -47,7 +54,7 @@ export default function AdminLayout() {
                 <div className="mb-1 px-3 text-[11px] font-medium uppercase tracking-wider text-muted">{t(g.key)}</div>
                 {items.map((i) => (
                   <NavLink key={i.to} to={i.to} className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-                    <i.icon size={16} /> <span>{t(i.key)}</span>
+                    <i.icon size={16} /> <span>{t(i.key)}</span>{i.to === "/admin/updates" && badge.data?.updateAvailable && <span className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "var(--warn)", color: "#000" }} title={badge.data.target ?? ""}>{badge.data.target}</span>}
                   </NavLink>
                 ))}
               </div>

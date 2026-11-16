@@ -142,12 +142,23 @@ export function buildApp(): Hono<Env> {
   });
 
   // ---- Updates (pull model, always manual). The master administrator and holders of admin.updates.install may use these. ----
-  app.get("/api/update/status", requirePermission("admin.updates.install"), async (c) => {
+  const updateStatus = async () => {
     const lic = license.current();
     const target = lic.pinnedVersion;
     const updateAvailable = Boolean(target) && VERSION_RE.test(target) && compareVersions(target, config.version) > 0;
     const run = await updater<UpdaterStatus>("/status");
-    return c.json({ current: config.version, target, updateAvailable, updater: run, updaterConfigured: Boolean(config.updaterUrl) });
+    const st = license.status();
+    return { current: config.version, target, updateAvailable, updater: run, updaterConfigured: Boolean(config.updaterUrl), lastCheckedAt: st.lastOkAt ?? null, checkError: st.lastError ?? null };
+  };
+  app.get("/api/update/status", requirePermission("admin.updates.install"), async (c) => c.json(await updateStatus()));
+
+  // "Check now": ask the console right away instead of waiting for the hourly check.
+  let lastManualCheck = 0;
+  app.post("/api/update/check", requirePermission("admin.updates.install"), async (c) => {
+    if (Date.now() - lastManualCheck < 5_000) return c.json({ error: "too many checks" }, 429);
+    lastManualCheck = Date.now();
+    await license.check();
+    return c.json(await updateStatus());
   });
 
   app.post("/api/update/apply", requirePermission("admin.updates.install"), async (c) => {

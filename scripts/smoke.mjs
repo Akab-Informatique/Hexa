@@ -194,6 +194,11 @@ for (const u of ["http://127.0.0.1/", "http://localhost:3000/api/health", "http:
   ok(`logo import refuses ${u}`, (await call("POST", "/api/admin/branding/logo-from-url", { url: u })).status === 400);
 }
 ok("site import needs the branding right", (await call("POST", "/api/admin/branding/from-site", { url: "https://example.com" }, uc)).status === 403 && (await call("POST", "/api/admin/branding/logo-from-url", { url: "https://example.com/a.png" }, uc)).status === 403);
+// "check for updates now"
+const updChk = await call("POST", "/api/update/check", {});
+ok("update check: answers with the current status", updChk.status === 200 && typeof updChk.body.current === "string" && "updateAvailable" in updChk.body && "lastCheckedAt" in updChk.body, JSON.stringify(updChk.body));
+ok("update check: cannot be hammered", (await call("POST", "/api/update/check", {})).status === 429);
+ok("update check: needs the update right", (await call("POST", "/api/update/check", {}, uc)).status === 403);
 // HR folder of an employee
 const hrUrl = `/api/docs/hr-folder/${dUser.body.id}`;
 ok("HR folder: needs the HR right", (await call("PUT", hrUrl, { drive: clientsLib, path: "Dossiers clients/Acme Corp" }, uc)).status === 403);

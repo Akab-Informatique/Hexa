@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, RefreshCw } from "lucide-react";
 import type { UpdaterStatus } from "@hexa/shared";
 import { api } from "../lib/api";
@@ -13,6 +13,8 @@ export interface UpdateStatus {
   updateAvailable: boolean;
   updater: UpdaterStatus | null;
   updaterConfigured: boolean;
+  lastCheckedAt?: string | null;
+  checkError?: string | null;
 }
 
 const POLL_MS = 3000;
@@ -27,6 +29,9 @@ export default function UpdatesPage() {
   const [done, setDone] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkedNote, setCheckedNote] = useState("");
+  const qc = useQueryClient();
 
   const q = useQuery({
     queryKey: ["update-status"],
@@ -73,6 +78,22 @@ export default function UpdatesPage() {
     }
   };
 
+  /** Asks the console right now, so a newly pinned version shows up without waiting for the hourly check. */
+  const checkNow = async () => {
+    setErr(""); setCheckedNote(""); setChecking(true);
+    try {
+      const r = await api<UpdateStatus>("/api/update/check", { method: "POST" });
+      qc.setQueryData(["update-status"], r);
+      await qc.invalidateQueries({ queryKey: ["update-status"] });
+      await qc.invalidateQueries({ queryKey: ["update-badge"] });
+      setCheckedNote(r.checkError
+        ? l("Le serveur de licences n'a pas répondu : ", "The license server did not answer: ") + r.checkError
+        : r.updateAvailable ? l(`Mise à jour trouvée : ${r.target}.`, `Update found: ${r.target}.`) : l("Aucune nouvelle version.", "No new version."));
+    } catch (e) {
+      setErr(e instanceof Error && e.message === "too many checks" ? l("Un instant avant de revérifier.", "Wait a moment before checking again.") : l("Vérification impossible.", "Could not check."));
+    } finally { setChecking(false); }
+  };
+
   const canInstall = Boolean(s?.updateAvailable && s.updaterConfigured && !runningNow && !polling && !done && !busy);
 
   type Tone = "ok" | "warn" | "off" | "danger";
@@ -113,12 +134,21 @@ export default function UpdatesPage() {
           <Chip tone={stateLine.tone}>{stateLine.label}</Chip>
           <span className="text-sm" role="status" aria-live="polite">{stateLine.text}</span>
         </div>
-        <button className="btn btn-primary" disabled={!canInstall} onClick={() => void install()}>
-          {polling || runningNow ? <RefreshCw size={15} className="animate-spin" /> : <Download size={15} />}
-          {l("Installer la mise à jour", "Install update")}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button className="btn" disabled={checking || polling || runningNow} onClick={() => void checkNow()}>
+            <RefreshCw size={15} className={checking ? "animate-spin" : ""} />
+            {checking ? l("Vérification…", "Checking…") : l("Vérifier les mises à jour", "Check for updates")}
+          </button>
+          <button className="btn btn-primary" disabled={!canInstall} onClick={() => void install()}>
+            {polling || runningNow ? <RefreshCw size={15} className="animate-spin" /> : <Download size={15} />}
+            {l("Installer la mise à jour", "Install update")}
+          </button>
+        </div>
       </div>
 
+      {(checkedNote || s?.lastCheckedAt) && (
+        <p className="mt-3 text-xs text-muted" role="status">{checkedNote}{checkedNote && s?.lastCheckedAt ? " · " : ""}{s?.lastCheckedAt ? l("Dernière vérification : ", "Last check: ") + new Date(s.lastCheckedAt).toLocaleString() : ""}</p>
+      )}
       {s?.updater?.step && (polling || runningNow) && <p className="mt-3 text-xs text-muted">{s.updater.step}</p>}
       {err && <p className="mt-3 text-sm" style={{ color: "var(--danger)" }}>{err}</p>}
       {q.isError && !polling && <p className="mt-3 text-sm" style={{ color: "var(--danger)" }}>{l("Impossible de lire l'état des mises à jour.", "Unable to read the update status.")}</p>}
