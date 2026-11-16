@@ -26,9 +26,10 @@ export function AuthProvider({ children }: { children: (ctx: Ctx) => ReactNode }
     refresh: async () => { await qc.invalidateQueries({ queryKey: ["me"] }); },
     can: (...keys) => keys.some((k) => me.rights?.includes(k)),
     logout: async () => {
-      await api("/api/auth/logout", { method: "POST", body: {} });
-      qc.clear();
-      await qc.invalidateQueries({ queryKey: ["me"] });
+      try { await api("/api/auth/logout", { method: "POST", body: {} }); } catch { /* the session may already be gone: still show the sign-in screen */ }
+      // Signed out is set directly: clearing the cache and waiting for "me" to refetch left the app on screen.
+      qc.setQueryData(["me"], { stage: "anonymous" });
+      qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
     },
   };
   if (q.isLoading) return null;

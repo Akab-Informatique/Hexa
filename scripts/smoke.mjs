@@ -166,6 +166,27 @@ ok("set password: too short is refused", (await call("POST", `/api/admin/users/$
 ok("set password: an administrator sets it", (await call("POST", `/api/admin/users/${eu.body.id}/set-password`, { password: "Admin-chosen-pass-2026!", mustChange: false })).status === 200);
 ok("set password: the old one stops working and the new one works", (await euLogin(euNow, "Reset-link-pass-2026!")).status === 401 && (await euLogin(euNow, "Admin-chosen-pass-2026!")).status === 200);
 ok("set password and reset link need the manage right", (await call("POST", `/api/admin/users/${eu.body.id}/set-password`, { password: "Admin-chosen-pass-2026!" }, uc)).status === 403 && (await call("POST", `/api/admin/users/${eu.body.id}/send-reset`, {}, uc)).status === 403);
+// the firm sets its own branding (name, colors, logo)
+const cfgBrand = async () => (await (await fetch(BASE + "/api/config")).json()).branding;
+const baseBrand = await cfgBrand();
+ok("branding: bad color refused", (await call("PUT", "/api/admin/branding", { primaryColor: "red" })).status === 400);
+ok("branding: the firm sets its name and colors", (await call("PUT", "/api/admin/branding", { appName: "SMOKE Firm", primaryColor: "#112233", accentColor: "#445566" })).status === 200);
+const nb = await cfgBrand();
+ok("branding: the app uses them, signed out too", nb.appName === "SMOKE Firm" && nb.primaryColor === "#112233" && nb.accentColor === "#445566");
+const pngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+const putLogo = (body, type, as = cookie) => fetch(BASE + "/api/admin/branding/logo", { method: "PUT", headers: { cookie: as, "content-type": "application/octet-stream", "x-hexa-upload": "1", "x-logo-type": type }, body });
+ok("branding: a logo can be uploaded", (await putLogo(pngBytes, "image/png")).status === 200);
+const logoUrl = (await cfgBrand()).logoUrl;
+const logoRes = await fetch(BASE + (logoUrl ?? "/nope"));
+ok("branding: the logo is served publicly with the right type", /^\/api\/branding\/logo/.test(logoUrl ?? "") && logoRes.status === 200 && logoRes.headers.get("content-type") === "image/png" && (await logoRes.arrayBuffer()).byteLength === pngBytes.length);
+ok("branding: only images are accepted", (await putLogo(Buffer.from("<html>"), "text/html")).status === 400);
+ok("branding: a huge file is refused", (await putLogo(Buffer.alloc(500 * 1024, 1), "image/png")).status === 413);
+ok("branding: it needs the branding right", (await call("PUT", "/api/admin/branding", { appName: "hack" }, uc)).status === 403 && (await putLogo(pngBytes, "image/png", uc)).status === 403);
+await call("DELETE", "/api/admin/branding/logo");
+ok("branding: the logo can be removed", (await fetch(BASE + "/api/branding/logo")).status === 404 && (await cfgBrand()).logoUrl === baseBrand.logoUrl);
+await call("DELETE", "/api/admin/branding");
+const rb2 = await cfgBrand();
+ok("branding: reset gives the supplier's defaults back", rb2.appName === baseBrand.appName && rb2.primaryColor === baseBrand.primaryColor && rb2.accentColor === baseBrand.accentColor);
 // HR folder of an employee
 const hrUrl = `/api/docs/hr-folder/${dUser.body.id}`;
 ok("HR folder: needs the HR right", (await call("PUT", hrUrl, { drive: clientsLib, path: "Dossiers clients/Acme Corp" }, uc)).status === 403);

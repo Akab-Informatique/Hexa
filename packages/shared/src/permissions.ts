@@ -129,6 +129,7 @@ export const MODULES: ModuleDef[] = [
       p("admin.integrations.view", "Voir les intégrations", "View integrations"),
       p("admin.integrations.manage", "Configurer les intégrations", "Configure integrations"),
       p("admin.branding.view", "Voir l'image de marque et les modules", "View branding and modules"),
+      p("admin.branding.manage", "Modifier le nom, les couleurs et le logo", "Change the name, colors and logo"),
       p("admin.classes.manage", "Gérer les classifications de clients", "Manage client classifications"),
       p("admin.time.manage", "Gérer les types de temps et de dépenses", "Manage time and expense types"),
       p("admin.audit.view", "Voir le journal d'activité", "View the activity log"),

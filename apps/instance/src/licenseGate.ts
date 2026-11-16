@@ -8,6 +8,7 @@ import * as license from "./license.ts";
 export const LICENSE_ALLOW_LIST = new Set([
   "/api/health",
   "/api/config",
+  "/api/branding/logo",
   "/api/auth/me",
   "/api/auth/logout",
   "/api/ping",

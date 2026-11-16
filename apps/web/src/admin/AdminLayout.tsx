@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Cloud, History, Mail, Palette, ShieldCheck, Users, FolderSync, Receipt, Clock, Tags, RefreshCw } from "lucide-react";
+import { ArrowLeft, LogOut, Cloud, History, Mail, Palette, ShieldCheck, Users, FolderSync, Receipt, Clock, Tags, RefreshCw } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { useBranding } from "../lib/theme";
 import { BrandMark, LanguageToggle } from "../components/ui";
@@ -28,7 +28,7 @@ const GROUPS = [
 
 export default function AdminLayout() {
   const { t } = useTranslation();
-  const { can } = useAuth();
+  const { can, logout } = useAuth();
   const brand = useBranding();
   return (
     <div className="relative flex h-full flex-col lg:flex-row">
@@ -54,7 +54,7 @@ export default function AdminLayout() {
             ) : null;
           })}
         </nav>
-        <div className="mt-3 px-1"><LanguageToggle /></div>
+        <div className="mt-3 flex items-center justify-between gap-2 px-1"><LanguageToggle /><button className="btn !p-2" onClick={() => void logout()} title={t("common.logout")} aria-label={t("common.logout")}><LogOut size={15} /></button></div>
       </aside>
       <main className="relative z-10 min-w-0 flex-1 overflow-auto"><div className="mx-auto max-w-5xl p-4 lg:p-8"><Outlet /></div></main>
     </div>

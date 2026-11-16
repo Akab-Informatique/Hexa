@@ -1,4 +1,4 @@
-import { LicenseCheckResponseSchema, type LicenseCheckResponse } from "@hexa/shared";
+import { LicenseCheckResponseSchema, type Branding, type LicenseCheckResponse } from "@hexa/shared";
 import { config } from "./config.ts";
 import { getSetting, setSetting } from "./db.ts";
 
@@ -15,10 +15,28 @@ let lastError: string | undefined;
 
 const licensingEnabled = () => Boolean(config.consoleUrl && config.clientId && config.licenseKey);
 
-/** Cached answer from the console (or a permissive default in local dev). */
+/**
+ * The firm's own look. It is white label, so what the firm sets here wins over the supplier's default
+ * (the branding that comes with the license). Empty fields fall back to the supplier's.
+ */
+export type BrandingOverride = Partial<Pick<Branding, "appName" | "primaryColor" | "accentColor" | "logoUrl">>;
+let override: BrandingOverride = {};
+export const brandingOverride = (): BrandingOverride => override;
+export async function setBrandingOverride(o: BrandingOverride): Promise<void> {
+  override = Object.fromEntries(Object.entries(o).filter(([, v]) => typeof v === "string" && v !== "")) as BrandingOverride;
+  await setSetting("branding_override", override);
+}
+const withOverride = (r: LicenseCheckResponse): LicenseCheckResponse => (Object.keys(override).length ? { ...r, branding: { ...r.branding, ...override } } : r);
+
+/** The supplier's branding, before the firm's own changes. */
+export function baseBranding(): Branding {
+  return (cache ? cache.response : LicenseCheckResponseSchema.parse({ valid: !licensingEnabled(), branding: config.fallbackBranding })).branding;
+}
+
+/** Cached answer from the console (or a permissive default in local dev), with the firm's own branding applied. */
 export function current(): LicenseCheckResponse {
-  if (cache) return cache.response;
-  return LicenseCheckResponseSchema.parse({ valid: !licensingEnabled(), branding: config.fallbackBranding });
+  if (cache) return withOverride(cache.response);
+  return withOverride(LicenseCheckResponseSchema.parse({ valid: !licensingEnabled(), branding: config.fallbackBranding }));
 }
 
 /** Maps the console's free-text refusal (see apps/console /api/license/check) to a stable code. */
@@ -53,6 +71,7 @@ export function publicLicense(): { usable: boolean; reason?: LicenseReason } {
 }
 
 export async function loadCached(): Promise<void> {
+  override = (await getSetting<BrandingOverride>("branding_override")) ?? {};
   const stored = await getSetting<{ response: unknown; lastOkAt: number }>("license_cache");
   if (!stored) return;
   const parsed = LicenseCheckResponseSchema.safeParse(stored.response);

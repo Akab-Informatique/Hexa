@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { isKnownPermission, MODULES, permissionsFor, ungrantable } from "@hexa/shared/permissions";
-import { pool } from "../db.ts";
+import { getSetting, pool, setSetting } from "../db.ts";
 import { audit, rightsOf } from "../auth/access.ts";
 import { hashPassword, MIN_PASSWORD, randomToken, sha256, temporaryPassword } from "../auth/crypto.ts";
 import { clientIp, requirePermission, type Env } from "../auth/session.ts";
@@ -245,8 +245,54 @@ adminRoutes.get("/tenant", requirePermission("admin.branding.view"), (c) => {
   const lic = license.current();
   return c.json({
     version: config.version, plan: lic.plan, maxUsers: lic.maxUsers, branding: lic.branding,
+    defaultBranding: license.baseBranding(), brandingOverride: license.brandingOverride(),
     enabledModules: lic.modules, loadedModules, license: license.status(), allStaffRights: permissionsFor("staff").length,
   });
+});
+
+// -------------------- The firm's own branding (white label) --------------------
+const Hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
+const LOGO_MAX = 400 * 1024;
+const BRAND = requirePermission("admin.branding.manage");
+
+adminRoutes.put("/branding", BRAND, async (c) => {
+  const d = z.object({ appName: z.string().trim().max(60).optional(), primaryColor: Hex.optional(), accentColor: Hex.optional() })
+    .safeParse(await c.req.json().catch(() => null));
+  if (!d.success) return c.json({ error: d.error.flatten() }, 400);
+  const cur = license.brandingOverride();
+  await license.setBrandingOverride({ ...cur, appName: d.data.appName ?? cur.appName, primaryColor: d.data.primaryColor ?? cur.primaryColor, accentColor: d.data.accentColor ?? cur.accentColor });
+  await audit("branding.updated", { userId: c.get("auth")!.user.id, detail: Object.keys(d.data), ip: clientIp(c) });
+  return c.json({ ok: true });
+});
+
+adminRoutes.put("/branding/logo", BRAND, async (c) => {
+  const type = (c.req.header("x-logo-type") ?? "").toLowerCase();
+  if (!LOGO_TYPES.has(type)) return c.json({ error: "logo must be a PNG, JPG, WebP or SVG image" }, 400);
+  const data = Buffer.from(await c.req.arrayBuffer());
+  if (!data.length) return c.json({ error: "empty file" }, 400);
+  if (data.length > LOGO_MAX) return c.json({ error: "logo too large (400 KB maximum)" }, 413);
+  await setSetting("branding_logo", { type, b64: data.toString("base64") });
+  await license.setBrandingOverride({ ...license.brandingOverride(), logoUrl: `/api/branding/logo?v=${Date.now()}` });
+  await audit("branding.logo_set", { userId: c.get("auth")!.user.id, ip: clientIp(c) });
+  return c.json({ ok: true });
+});
+
+adminRoutes.delete("/branding/logo", BRAND, async (c) => {
+  await setSetting("branding_logo", null);
+  const { logoUrl: _drop, ...rest } = license.brandingOverride();
+  void _drop;
+  await license.setBrandingOverride(rest);
+  await audit("branding.logo_removed", { userId: c.get("auth")!.user.id, ip: clientIp(c) });
+  return c.json({ ok: true });
+});
+
+/** Back to the supplier's default look. */
+adminRoutes.delete("/branding", BRAND, async (c) => {
+  await setSetting("branding_logo", null);
+  await license.setBrandingOverride({});
+  await audit("branding.reset", { userId: c.get("auth")!.user.id, ip: clientIp(c) });
+  return c.json({ ok: true });
 });
 
 adminRoutes.get("/audit", requirePermission("admin.audit.view"), async (c) => {

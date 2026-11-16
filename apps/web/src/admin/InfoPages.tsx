@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
+import { useL } from "../lib/l";
+import { BrandMark } from "../components/ui";
 import { useAuth } from "../lib/auth";
 import { PageHeader } from "../components/ui";
 import { ProviderPanel } from "./IntegrationPanels";
@@ -54,26 +56,19 @@ export function IntegrationPage() {
   );
 }
 
-interface Tenant { version: string; plan: string; maxUsers: number | null; branding: { appName: string; primaryColor: string; accentColor: string; logoUrl?: string }; enabledModules: string[]; license: { usable: boolean; reason?: string; lastOkAt?: string } }
+interface Brand { appName: string; primaryColor: string; accentColor: string; logoUrl?: string }
+interface Tenant { version: string; plan: string; maxUsers: number | null; branding: Brand; defaultBranding: Brand; brandingOverride: Partial<Brand>; enabledModules: string[]; license: { usable: boolean; reason?: string; lastOkAt?: string } }
 
 export function TenantPage() {
   const { t } = useTranslation();
   const q = useQuery({ queryKey: ["tenant"], queryFn: () => api<Tenant>("/api/admin/tenant") });
   const d = q.data;
   if (!d) return null;
-  const swatch = (c: string) => <span className="inline-block h-5 w-5 rounded-md align-middle" style={{ background: c, boxShadow: `0 0 14px ${c}` }} />;
   return (
     <>
-      <PageHeader title={t("admin.tenant")} subtitle={t("admin.brandingManaged")} />
+      <PageHeader title={t("admin.tenant")} />
       <div className="grid gap-4 md:grid-cols-2">
-        <section className="glass p-5">
-          <h2 className="mb-3 font-semibold">{t("admin.tenantBranding")}</h2>
-          <dl className="space-y-2 text-sm">
-            <div className="flex justify-between"><dt className="text-muted">{t("admin.appName")}</dt><dd>{d.branding.appName}</dd></div>
-            <div className="flex justify-between"><dt className="text-muted">{t("admin.primary")}</dt><dd>{swatch(d.branding.primaryColor)} <code className="ml-1">{d.branding.primaryColor}</code></dd></div>
-            <div className="flex justify-between"><dt className="text-muted">{t("admin.accent")}</dt><dd>{swatch(d.branding.accentColor)} <code className="ml-1">{d.branding.accentColor}</code></dd></div>
-          </dl>
-        </section>
+        <BrandingCard d={d} onChanged={() => { void q.refetch(); }} />
         <section className="glass p-5">
           <h2 className="mb-3 font-semibold">{t("admin.tenantLicense")}</h2>
           <dl className="space-y-2 text-sm">
@@ -108,5 +103,66 @@ export function AuditPage() {
         </table>
       </div>
     </>
+  );
+}
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+/** The firm's own look (white label): name, the two colors and the logo. Left empty, the supplier's defaults apply. */
+function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
+  const l = useL();
+  const qc = useQueryClient();
+  const { can } = useAuth();
+  const manage = can("admin.branding.manage");
+  const [name, setName] = useState(d.branding.appName);
+  const [primary, setPrimary] = useState(d.branding.primaryColor);
+  const [accent, setAccent] = useState(d.branding.accentColor);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const valid = HEX.test(primary) && HEX.test(accent) && name.trim().length > 0;
+  const overridden = Object.keys(d.brandingOverride).length > 0;
+  const refresh = async () => { await qc.invalidateQueries({ queryKey: ["config"] }); onChanged(); };
+  const run = async (fn: () => Promise<unknown>, done: string) => {
+    setError(""); setMsg(""); setBusy(true);
+    try { await fn(); await refresh(); setMsg(done); } catch (e) { setError(e instanceof ApiError ? e.message : "Error"); } finally { setBusy(false); }
+  };
+  const upload = (f: File) => run(async () => {
+    const res = await fetch("/api/admin/branding/logo", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/octet-stream", "x-hexa-upload": "1", "x-logo-type": f.type }, body: f });
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+  }, l("Logo enregistré.", "Logo saved."));
+  const color = (label: string, v: string, set: (x: string) => void) => (
+    <label className="block"><span className="label">{label}</span>
+      <div className="flex items-center gap-2">
+        <input type="color" className="h-10 w-12 cursor-pointer rounded border border-white/15 bg-transparent p-0.5" value={HEX.test(v) ? v : "#000000"} disabled={!manage} onChange={(e) => set(e.target.value)} aria-label={label} />
+        <input className="input font-mono" value={v} maxLength={7} disabled={!manage} onChange={(e) => set(e.target.value)} aria-invalid={!HEX.test(v)} />
+      </div></label>);
+  return (
+    <section className="glass p-5">
+      <h2 className="mb-1 font-semibold">{l("Image de marque", "Branding")}</h2>
+      <p className="mb-4 text-xs text-muted">{l("Le nom, les couleurs et le logo de votre portail. Ils s'appliquent à toute l'application et à l'écran de connexion.", "The name, colors and logo of your portal. They apply to the whole app and the sign-in screen.")}</p>
+      <label className="mb-3 block"><span className="label">{l("Nom de l'application", "App name")}</span><input className="input" value={name} maxLength={60} disabled={!manage} onChange={(e) => setName(e.target.value)} /></label>
+      <div className="mb-4 grid grid-cols-2 gap-3">{color(l("Couleur principale", "Primary color"), primary, setPrimary)}{color(l("Couleur d'accent", "Accent color"), accent, setAccent)}</div>
+      <div className="mb-4">
+        <span className="label">{l("Logo", "Logo")}</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex h-14 min-w-14 items-center justify-center rounded-xl border border-white/15 bg-black/30 p-2"><BrandMark name={name || d.branding.appName} logoUrl={d.branding.logoUrl} size={36} /></div>
+          {manage && (
+            <>
+              <label className="btn cursor-pointer">{l("Choisir une image", "Choose an image")}<input type="file" hidden accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} /></label>
+              {d.brandingOverride.logoUrl && <button className="btn btn-danger" disabled={busy} onClick={() => void run(() => api("/api/admin/branding/logo", { method: "DELETE" }), l("Logo retiré.", "Logo removed."))}>{l("Retirer", "Remove")}</button>}
+            </>)}
+        </div>
+        <p className="mt-1 text-xs text-muted">{l("PNG, JPG, WebP ou SVG, 400 Ko maximum. Un logo clair sur fond transparent convient le mieux.", "PNG, JPG, WebP or SVG, 400 KB maximum. A light logo on a transparent background works best.")}</p>
+      </div>
+      {manage && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="btn btn-primary" disabled={!valid || busy} onClick={() => void run(() => api("/api/admin/branding", { method: "PUT", body: { appName: name.trim(), primaryColor: primary, accentColor: accent } }), l("Enregistré.", "Saved."))}>{l("Enregistrer", "Save")}</button>
+          {overridden && <button className="btn" disabled={busy} onClick={() => { if (window.confirm(l("Revenir à l'image de marque par défaut du fournisseur ?", "Go back to the supplier's default branding?"))) void run(async () => { await api("/api/admin/branding", { method: "DELETE" }); setName(d.defaultBranding.appName); setPrimary(d.defaultBranding.primaryColor); setAccent(d.defaultBranding.accentColor); }, l("Valeurs par défaut rétablies.", "Defaults restored.")); }}>{l("Rétablir les valeurs par défaut", "Restore defaults")}</button>}
+          {msg && <span role="status" className="text-sm text-muted">{msg}</span>}
+          {error && <span role="alert" className="text-sm text-danger">{error}</span>}
+        </div>)}
+      {!manage && <p className="text-xs text-muted">{l("Vous n'avez pas le droit de modifier l'image de marque.", "You do not have the right to change the branding.")}</p>}
+    </section>
   );
 }

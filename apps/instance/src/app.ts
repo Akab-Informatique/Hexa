@@ -7,7 +7,7 @@ import { compareVersions, VERSION_RE, type UpdaterStatus } from "@hexa/shared";
 import { config } from "./config.ts";
 import * as license from "./license.ts";
 import { loadedModules } from "./modules.ts";
-import { pool } from "./db.ts";
+import { getSetting, pool } from "./db.ts";
 import { licenseGate } from "./licenseGate.ts";
 import { clientIp, loadAuth, requirePermission, requireReady, sameOriginWrites, type Env } from "./auth/session.ts";
 import { audit } from "./auth/access.ts";
@@ -75,6 +75,15 @@ export function buildApp(): Hono<Env> {
     return c.json({ ok: db, version: config.version }, db ? 200 : 503);
   });
   app.get("/api/version", (c) => c.json({ version: config.version }));
+  // The firm's own logo, uploaded in Administration. Public: the sign-in screen shows it.
+  app.get("/api/branding/logo", async (c) => {
+    const logo = await getSetting<{ type: string; b64: string }>("branding_logo");
+    if (!logo) return c.json({ error: "not found" }, 404);
+    return new Response(Buffer.from(logo.b64, "base64"), { headers: {
+      "content-type": logo.type, "x-content-type-options": "nosniff", "cache-control": "public, max-age=3600",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    } });
+  });
   app.get("/api/config", (c) => {
     const lic = license.current();
     const a = c.get("auth");
