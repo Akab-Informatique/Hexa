@@ -12,7 +12,9 @@ function envBranding(): Branding {
 
 export const config = {
   port: Number(e.PORT ?? 3000),
-  version: e.APP_VERSION ?? "0.0.0-dev",
+  // BUILD_VERSION is baked into the image at release time: it is the code that is really running. APP_VERSION only says
+  // which tag the .env asks for, so it can differ (for example while an update is half done).
+  version: e.BUILD_VERSION || e.APP_VERSION || "0.0.0-dev",
   databaseUrl:
     e.DATABASE_URL ??
     `postgres://${e.POSTGRES_USER ?? "hexa"}:${encodeURIComponent(e.POSTGRES_PASSWORD ?? "")}` +

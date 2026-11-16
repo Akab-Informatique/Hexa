@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { UpdaterStatus } from "@hexa/shared";
+import { composeEnv } from "./composeEnv.ts";
 import { getEnv, setEnv } from "./envfile.ts";
 
 const run = promisify(execFile);
@@ -17,10 +18,17 @@ const ENV_FILE = path.join(COMPOSE_DIR, ".env");
 
 let status: UpdaterStatus = { state: "idle" };
 export const getStatus = () => status;
-const set = (patch: Partial<UpdaterStatus>) => (status = { ...status, ...patch });
+const set = (patch: Partial<UpdaterStatus>) => {
+  status = { ...status, ...patch };
+  if (patch.step) console.log(`[updater] ${patch.step}${patch.error ? ` (${patch.error})` : ""}`);
+  else if (patch.state) console.log(`[updater] state: ${patch.state}${patch.error ? ` (${patch.error})` : ""}`);
+};
+
+/** Compose must read the .env as it is NOW, not the copy this container started with (see composeEnv.ts). */
+const childEnv = () => composeEnv(process.env, fs.readFileSync(ENV_FILE, "utf8"));
 
 const compose = (...args: string[]) =>
-  run("docker", ["compose", "--project-directory", COMPOSE_DIR, ...args], { cwd: COMPOSE_DIR, maxBuffer: 20 * 1024 * 1024 });
+  run("docker", ["compose", "--project-directory", COMPOSE_DIR, ...args], { cwd: COMPOSE_DIR, env: childEnv(), maxBuffer: 20 * 1024 * 1024 });
 
 async function registryLogin(): Promise<void> {
   const { GHCR_USER, GHCR_TOKEN } = e;
@@ -41,7 +49,7 @@ async function backup(version: string): Promise<string> {
   const file = path.join(BACKUP_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}_v${version}.dump`);
   await new Promise<void>((resolve, reject) => {
     const out = fs.createWriteStream(file);
-    const p = spawn("docker", ["compose", "--project-directory", COMPOSE_DIR, "exec", "-T", "db", "pg_dump", "-U", user, "-Fc", db], { cwd: COMPOSE_DIR });
+    const p = spawn("docker", ["compose", "--project-directory", COMPOSE_DIR, "exec", "-T", "db", "pg_dump", "-U", user, "-Fc", db], { cwd: COMPOSE_DIR, env: childEnv() });
     p.stdout.pipe(out);
     p.on("error", reject);
     p.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`pg_dump exited ${code}`))));
@@ -57,7 +65,7 @@ async function restore(file: string): Promise<void> {
   const user = getEnv(env, "POSTGRES_USER") ?? "hexa";
   const db = getEnv(env, "POSTGRES_DB") ?? "hexa";
   await new Promise<void>((resolve, reject) => {
-    const p = spawn("docker", ["compose", "--project-directory", COMPOSE_DIR, "exec", "-T", "db", "pg_restore", "-U", user, "-d", db, "--clean", "--if-exists", "--no-owner"], { cwd: COMPOSE_DIR });
+    const p = spawn("docker", ["compose", "--project-directory", COMPOSE_DIR, "exec", "-T", "db", "pg_restore", "-U", user, "-d", db, "--clean", "--if-exists", "--no-owner"], { cwd: COMPOSE_DIR, env: childEnv() });
     fs.createReadStream(file).pipe(p.stdin);
     p.on("error", reject);
     // pg_restore exits 1 on harmless warnings (e.g. dropping objects that don't exist).
@@ -101,6 +109,10 @@ export async function applyUpdate(version: string): Promise<void> {
     await registryLogin();
     fs.writeFileSync(ENV_FILE, setEnv(original, "APP_VERSION", version));
     await compose("pull", "app");
+    // Proof that the new image is really on this server before anything is switched.
+    const wanted = `${getEnv(fs.readFileSync(ENV_FILE, "utf8"), "INSTANCE_IMAGE")}:${version}`;
+    const have = (await run("docker", ["image", "inspect", wanted, "--format", "{{.Id}}"]).catch(() => ({ stdout: "" }))).stdout.trim();
+    if (!have) throw new Error(`image ${wanted} was not downloaded`);
 
     set({ step: "restarting application" });
     switched = true;
@@ -111,6 +123,7 @@ export async function applyUpdate(version: string): Promise<void> {
     set({ state: "success", step: "done", finishedAt: new Date().toISOString() });
   } catch (err) {
     const message = (err as Error).message;
+    console.error("[updater] update failed:", err);
     set({ step: "rolling back", error: message });
     try {
       fs.writeFileSync(ENV_FILE, original);

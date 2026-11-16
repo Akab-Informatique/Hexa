@@ -14,7 +14,8 @@ RUN npm ci --workspace @hexa/web --workspace @hexa/shared --include-workspace-ro
 # ---- runtime ----
 FROM node:22-bookworm-slim
 ARG APP=instance
-ENV NODE_ENV=production APP=${APP}
+ARG BUILD_VERSION=
+ENV NODE_ENV=production APP=${APP} BUILD_VERSION=${BUILD_VERSION}
 WORKDIR /app
 
 COPY package.json package-lock.json ./

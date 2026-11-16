@@ -26,7 +26,9 @@ jobs:
         with:
           context: .
           file: deploy/docker/Dockerfile
-          build-args: APP=instance
+          build-args: |
+            APP=instance
+            BUILD_VERSION=${{ steps.v.outputs.version }}
           push: true
           tags: ghcr.io/akab-informatique/hexa-instance:${{ steps.v.outputs.version }}
       - name: console
@@ -34,7 +36,9 @@ jobs:
         with:
           context: .
           file: deploy/docker/Dockerfile
-          build-args: APP=console
+          build-args: |
+            APP=console
+            BUILD_VERSION=${{ steps.v.outputs.version }}
           push: true
           tags: ghcr.io/akab-informatique/hexa-console:${{ steps.v.outputs.version }}
       - name: updater
