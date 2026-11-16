@@ -3,11 +3,12 @@ import { z } from "zod";
 import { isKnownPermission, MODULES, permissionsFor, ungrantable } from "@hexa/shared/permissions";
 import { pool } from "../db.ts";
 import { audit, rightsOf } from "../auth/access.ts";
-import { hashPassword, temporaryPassword } from "../auth/crypto.ts";
+import { hashPassword, MIN_PASSWORD, randomToken, sha256, temporaryPassword } from "../auth/crypto.ts";
 import { clientIp, requirePermission, type Env } from "../auth/session.ts";
 import * as license from "../license.ts";
 import { loadedModules } from "../modules.ts";
 import { config } from "../config.ts";
+import { mailReady, resetMail, sendMail } from "../lib/mail.ts";
 
 export const adminRoutes = new Hono<Env>();
 
@@ -70,6 +71,8 @@ adminRoutes.post("/users", requirePermission("admin.users.manage"), async (c) =>
 
 const UserPatch = z.object({
   name: z.string().min(1).max(120).optional(),
+  email: z.string().trim().toLowerCase().email().max(200).optional(),
+  locale: z.enum(["fr", "en"]).optional(),
   active: z.boolean().optional(),
   groupIds: z.array(z.string().uuid()).optional(),
   overrides: z.array(z.object({ permission: Perm, effect: z.enum(["allow", "deny"]) })).optional(),
@@ -93,6 +96,11 @@ adminRoutes.patch("/users/:id", requirePermission("admin.users.manage"), async (
   if (escalation.length) return c.json({ error: "cannot grant rights you do not hold", rights: uniq(escalation) }, 403);
 
   if (d.name !== undefined) await pool.query("update users set name = $2 where id = $1", [id, d.name]);
+  if (d.locale !== undefined) await pool.query("update users set locale = $2 where id = $1", [id, d.locale]);
+  if (d.email !== undefined) {
+    try { await pool.query("update users set email = $2 where id = $1", [id, d.email]); }
+    catch (err) { if ((err as { code?: string }).code === "23505") return c.json({ error: "email already used" }, 409); throw err; }
+  }
   if (d.active !== undefined) {
     await pool.query("update users set active = $2 where id = $1", [id, d.active]);
     if (!d.active) await pool.query("delete from sessions where user_id = $1", [id]);
@@ -120,6 +128,45 @@ adminRoutes.post("/users/:id/reset-password", requirePermission("admin.users.man
   await pool.query("delete from sessions where user_id = $1", [id]);
   await audit("user.password_reset", { userId: a.user.id, target: id, ip: clientIp(c) });
   return c.json({ temporaryPassword: temp });
+});
+
+const RESET_HOURS = 72;
+
+/** Emails the person a one-time link to choose a new password; when no email can leave, the link is returned to hand over. */
+adminRoutes.post("/users/:id/send-reset", requirePermission("admin.users.manage"), async (c) => {
+  const a = c.get("auth")!;
+  const id = c.req.param("id");
+  const u = (await pool.query("select id, name, email, locale, is_master, active from users where id = $1 and kind = 'staff'", [id])).rows[0];
+  if (!u) return c.json({ error: "not found" }, 404);
+  if (u.is_master && !a.user.isMaster) return c.json({ error: "only a master user can reset a master user" }, 403);
+  if (!u.active) return c.json({ error: "user is inactive" }, 400);
+  const token = randomToken();
+  await pool.query("delete from password_tokens where user_id = $1 and used_at is null", [id]);
+  await pool.query("insert into password_tokens (token_hash, user_id, expires_at) values ($1, $2, now() + ($3 || ' hours')::interval)", [sha256(token), id, String(RESET_HOURS)]);
+  const link = `${config.publicUrl || ""}/set-password?token=${token}`;
+  let emailed = false;
+  if (await mailReady()) {
+    const m = resetMail({ firm: license.current().branding.appName, name: u.name, link, hours: RESET_HOURS }, u.locale === "en" ? "en" : "fr");
+    const res = await sendMail({ to: [{ email: u.email, name: u.name }], ...m }).catch(() => ({ sent: 0 }));
+    emailed = res.sent > 0;
+  }
+  await audit("user.reset_link_sent", { userId: a.user.id, target: id, detail: { emailed }, ip: clientIp(c) });
+  return c.json({ emailed, link: emailed ? undefined : link });
+});
+
+/** An administrator chooses the password directly (for example by phone). The person can be made to change it at next sign-in. */
+adminRoutes.post("/users/:id/set-password", requirePermission("admin.users.manage"), async (c) => {
+  const a = c.get("auth")!;
+  const id = c.req.param("id");
+  const body = z.object({ password: z.string().min(MIN_PASSWORD).max(200), mustChange: z.boolean().default(true) }).safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return c.json({ error: `password must be at least ${MIN_PASSWORD} characters` }, 400);
+  const target = (await pool.query("select is_master from users where id = $1 and kind = 'staff'", [id])).rows[0];
+  if (!target) return c.json({ error: "not found" }, 404);
+  if (target.is_master && !a.user.isMaster) return c.json({ error: "only a master user can change a master user" }, 403);
+  await pool.query("update users set password_hash = $2, must_change_password = $3, failed_logins = 0, locked_until = null where id = $1", [id, await hashPassword(body.data.password), body.data.mustChange]);
+  if (id !== a.user.id) await pool.query("delete from sessions where user_id = $1", [id]);
+  await audit("user.password_set", { userId: a.user.id, target: id, ip: clientIp(c) });
+  return c.json({ ok: true });
 });
 
 /** Rights granted through groups the acting admin is about to assign but does not hold themselves. */

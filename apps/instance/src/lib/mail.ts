@@ -78,6 +78,15 @@ export function boardMail(firm: string, title: string, bodyText: string, lang: "
   return { subject: title, html: wrap(firm, `<h2 style="margin:0 0 12px">${esc(title)}</h2><p>${esc(bodyText).replace(/\n/g, "<br>")}</p>`), text: `${title}\n\n${bodyText}` };
 }
 
+/** Password reset email of a staff user: a one-time link, never the password itself. */
+export function resetMail(d: { firm: string; name: string; link: string; hours: number }, lang: "fr" | "en") {
+  const fr = lang === "fr";
+  const subject = fr ? `Réinitialisation de votre mot de passe ${d.firm}` : `Reset your ${d.firm} password`;
+  const intro = fr ? `Un administrateur de ${d.firm} vous envoie ce lien pour choisir un nouveau mot de passe (valide ${d.hours} h, un seul usage).` : `An administrator at ${d.firm} sent you this link to choose a new password (valid ${d.hours} h, single use).`;
+  const html = wrap(d.firm, `<p>${fr ? "Bonjour" : "Hello"} ${esc(d.name)},</p><p>${esc(intro)}</p><p><a href="${esc(d.link)}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#6d4aff;color:#fff;text-decoration:none">${fr ? "Choisir un mot de passe" : "Choose a password"}</a></p>`);
+  return { subject, html, text: `${intro}\n\n${d.link}` };
+}
+
 /** Welcome email of a client portal user: a one-time link to choose a password (the password itself is never sent). */
 export function welcomeMail(d: { firm: string; name: string; link: string; hours: number }, lang: "fr" | "en") {
   const fr = lang === "fr";

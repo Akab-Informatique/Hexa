@@ -37,7 +37,7 @@ services:
       UPDATER_URL: http://updater:4000
     # Bound to localhost only: your Nginx is the public entry point.
     ports:
-      - "127.0.0.1:${APP_PORT}:3000"
+      - "${BIND_ADDR:-127.0.0.1}:${APP_PORT}:3000"
     logging: *logs
 
   updater:

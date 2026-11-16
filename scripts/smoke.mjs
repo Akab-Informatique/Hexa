@@ -147,6 +147,25 @@ ok("shortcut hidden from another user", !((await call("GET", "/api/docs/shortcut
 const sc2 = await call("POST", "/api/docs/shortcuts", { drive: clientsLib, path: "Dossiers clients/Acme Corp/2025", label: "SMOKE shared", shared: true });
 ok("manager adds a shared shortcut", sc2.status === 200);
 await call("DELETE", `/api/docs/shortcuts/${sc1.body.id}`, undefined, uc); await call("DELETE", `/api/docs/shortcuts/${sc2.body.id}`);
+// editing a user, reset link, password set by an administrator (on a throwaway user)
+const euEmail = `smoke-edit-${Date.now()}@example.com`;
+const eu = await call("POST", "/api/admin/users", { email: euEmail, name: "SMOKE Edit User", groupIds: [] });
+const euLogin = (e, pw) => fetch(BASE + "/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: e, password: pw }) });
+ok("edit: name, email and language can be changed", (await call("PATCH", `/api/admin/users/${eu.body.id}`, { name: "SMOKE Edited", email: euEmail.replace("smoke-edit", "smoke-edited"), locale: "en" })).status === 200);
+const euDetail = (await call("GET", `/api/admin/users/${eu.body.id}`)).body;
+ok("edit: the changes are saved", euDetail.name === "SMOKE Edited" && euDetail.email.startsWith("smoke-edited") && euDetail.locale === "en");
+ok("edit: an email already used is refused", (await call("PATCH", `/api/admin/users/${eu.body.id}`, { email: dEmail })).status === 409);
+ok("edit: an invalid email is refused", (await call("PATCH", `/api/admin/users/${eu.body.id}`, { email: "nope" })).status === 400);
+const euNow = euDetail.email;
+const rl = await call("POST", `/api/admin/users/${eu.body.id}/send-reset`, {});
+ok("reset link: without mail set up the link is handed over", rl.status === 200 && rl.body.emailed === false && /set-password\?token=/.test(rl.body.link ?? ""));
+const rlTok = /token=([0-9a-f]+)/.exec(rl.body.link ?? "")?.[1];
+ok("reset link: the person chooses a password with it", (await call("POST", "/api/auth/set-password", { token: rlTok, password: "Reset-link-pass-2026!" }, "")).status === 200 && (await euLogin(euNow, "Reset-link-pass-2026!")).status === 200);
+ok("reset link: it works only once", (await call("POST", "/api/auth/set-password", { token: rlTok, password: "Another-pass-2026!!" }, "")).status === 410);
+ok("set password: too short is refused", (await call("POST", `/api/admin/users/${eu.body.id}/set-password`, { password: "short" })).status === 400);
+ok("set password: an administrator sets it", (await call("POST", `/api/admin/users/${eu.body.id}/set-password`, { password: "Admin-chosen-pass-2026!", mustChange: false })).status === 200);
+ok("set password: the old one stops working and the new one works", (await euLogin(euNow, "Reset-link-pass-2026!")).status === 401 && (await euLogin(euNow, "Admin-chosen-pass-2026!")).status === 200);
+ok("set password and reset link need the manage right", (await call("POST", `/api/admin/users/${eu.body.id}/set-password`, { password: "Admin-chosen-pass-2026!" }, uc)).status === 403 && (await call("POST", `/api/admin/users/${eu.body.id}/send-reset`, {}, uc)).status === 403);
 // HR folder of an employee
 const hrUrl = `/api/docs/hr-folder/${dUser.body.id}`;
 ok("HR folder: needs the HR right", (await call("PUT", hrUrl, { drive: clientsLib, path: "Dossiers clients/Acme Corp" }, uc)).status === 403);
