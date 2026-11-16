@@ -107,6 +107,7 @@ export function AuditPage() {
 }
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
+interface SiteScan { site: string; title: string; colors: { hex: string; source: string }[]; logos: { url: string; source: string; type: string; bytes: number; dataUrl?: string }[] }
 
 /** The firm's own look (white label): name, the two colors and the logo. Left empty, the supplier's defaults apply. */
 function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
@@ -120,6 +121,10 @@ function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [siteUrl, setSiteUrl] = useState("");
+  const [scan, setScan] = useState<SiteScan | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
   const valid = HEX.test(primary) && HEX.test(accent) && name.trim().length > 0;
   const overridden = Object.keys(d.brandingOverride).length > 0;
   const refresh = async () => { await qc.invalidateQueries({ queryKey: ["config"] }); onChanged(); };
@@ -131,6 +136,20 @@ function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
     const res = await fetch("/api/admin/branding/logo", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/octet-stream", "x-hexa-upload": "1", "x-logo-type": f.type }, body: f });
     if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
   }, l("Logo enregistré.", "Logo saved."));
+  const scanErrors: Record<string, [string, string]> = {
+    invalid_url: ["Adresse invalide. Exemple : www.moncabinet.com", "Invalid address. Example: www.myfirm.com"],
+    blocked_address: ["Cette adresse n'est pas permise (seuls les sites publics sont lus).", "This address is not allowed (only public websites are read)."],
+    not_a_web_page: ["Cette adresse n'est pas une page web.", "This address is not a web page."],
+    timeout: ["Le site met trop de temps à répondre.", "The website takes too long to answer."],
+    fetch_failed: ["Impossible de lire ce site. Vérifiez l'adresse.", "Could not read this website. Check the address."],
+    too_large: ["Le fichier est trop gros.", "The file is too large."],
+    not_an_image: ["Ce fichier n'est pas une image.", "This file is not an image."],
+  };
+  const scanMsg = (e: unknown) => { const c = e instanceof ApiError ? e.message : "fetch_failed"; return scanErrors[c] ? l(...scanErrors[c]!) : c; };
+  const analyze = async () => {
+    setScanError(""); setScan(null); setScanning(true);
+    try { setScan(await api<SiteScan>("/api/admin/branding/from-site", { body: { url: siteUrl } })); } catch (e) { setScanError(scanMsg(e)); } finally { setScanning(false); }
+  };
   const color = (label: string, v: string, set: (x: string) => void) => (
     <label className="block"><span className="label">{label}</span>
       <div className="flex items-center gap-2">
@@ -141,6 +160,39 @@ function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
     <section className="glass p-5">
       <h2 className="mb-1 font-semibold">{l("Image de marque", "Branding")}</h2>
       <p className="mb-4 text-xs text-muted">{l("Le nom, les couleurs et le logo de votre portail. Ils s'appliquent à toute l'application et à l'écran de connexion.", "The name, colors and logo of your portal. They apply to the whole app and the sign-in screen.")}</p>
+      {manage && (
+        <div className="glass-flat mb-4 p-3">
+          <div className="mb-2 text-sm font-medium">{l("Importer depuis votre site web", "Import from your website")}</div>
+          <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (siteUrl.trim()) void analyze(); }}>
+            <input className="input min-w-[200px] flex-1" placeholder="www.moncabinet.com" value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} inputMode="url" />
+            <button className="btn" disabled={scanning || !siteUrl.trim()}>{scanning ? l("Analyse…", "Reading…") : l("Analyser le site", "Read the site")}</button>
+          </form>
+          {scanError && <p role="alert" className="mt-2 text-sm text-danger">{scanError}</p>}
+          {scan && (
+            <div className="mt-3 space-y-3">
+              <div>
+                <div className="mb-1 text-xs text-muted">{l("Couleurs trouvées : choisissez la principale et l'accent, puis enregistrez.", "Colors found: choose the primary and the accent, then save.")}</div>
+                {scan.colors.length === 0 ? <p className="text-sm text-muted">{l("Aucune couleur trouvée.", "No colors found.")}</p> : (
+                  <div className="flex flex-wrap gap-2">{scan.colors.map((c) => (
+                    <div key={c.hex} className="glass-flat flex items-center gap-2 p-1.5 pr-2 text-xs" title={c.source}>
+                      <span className="h-7 w-7 rounded-md border border-white/20" style={{ background: c.hex }} />
+                      <code>{c.hex}</code>
+                      <button type="button" className="btn !px-2 !py-0.5 text-xs" onClick={() => setPrimary(c.hex)}>{l("Principale", "Primary")}</button>
+                      <button type="button" className="btn !px-2 !py-0.5 text-xs" onClick={() => setAccent(c.hex)}>{l("Accent", "Accent")}</button>
+                    </div>))}</div>)}
+              </div>
+              <div>
+                <div className="mb-1 text-xs text-muted">{l("Logos trouvés : cliquez pour l'utiliser (enregistré tout de suite).", "Logos found: click to use it (saved right away).")}</div>
+                {scan.logos.length === 0 ? <p className="text-sm text-muted">{l("Aucun logo utilisable trouvé. Vous pouvez en téléverser un.", "No usable logo found. You can upload one.")}</p> : (
+                  <div className="flex flex-wrap gap-2">{scan.logos.map((g) => (
+                    <button key={g.url} type="button" disabled={busy} className="glass-flat flex w-32 flex-col items-center gap-1 p-2 text-xs hover:bg-white/10" title={g.url}
+                      onClick={() => void run(() => api("/api/admin/branding/logo-from-url", { body: { url: g.url } }), l("Logo enregistré.", "Logo saved."))}>
+                      <span className="flex h-14 w-full items-center justify-center rounded-lg bg-black/40 p-1">{g.dataUrl ? <img src={g.dataUrl} alt="" className="max-h-full max-w-full object-contain" /> : <span className="text-muted">…</span>}</span>
+                      <span className="text-muted">{g.source}</span><span className="btn !px-2 !py-0.5 text-xs">{l("Utiliser", "Use")}</span>
+                    </button>))}</div>)}
+              </div>
+            </div>)}
+        </div>)}
       <label className="mb-3 block"><span className="label">{l("Nom de l'application", "App name")}</span><input className="input" value={name} maxLength={60} disabled={!manage} onChange={(e) => setName(e.target.value)} /></label>
       <div className="mb-4 grid grid-cols-2 gap-3">{color(l("Couleur principale", "Primary color"), primary, setPrimary)}{color(l("Couleur d'accent", "Accent color"), accent, setAccent)}</div>
       <div className="mb-4">

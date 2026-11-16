@@ -9,6 +9,7 @@ import * as license from "../license.ts";
 import { loadedModules } from "../modules.ts";
 import { config } from "../config.ts";
 import { mailReady, resetMail, sendMail } from "../lib/mail.ts";
+import { colorsFromCss, dedupeColors, extractBrand, normalizeColor, safeGet, SiteError, sniffImage, type ColorHit } from "../lib/siteBrand.ts";
 
 export const adminRoutes = new Hono<Env>();
 
@@ -272,10 +273,59 @@ adminRoutes.put("/branding/logo", BRAND, async (c) => {
   const data = Buffer.from(await c.req.arrayBuffer());
   if (!data.length) return c.json({ error: "empty file" }, 400);
   if (data.length > LOGO_MAX) return c.json({ error: "logo too large (400 KB maximum)" }, 413);
+  await storeLogo(c.get("auth")!.user.id, type, data, clientIp(c));
+  return c.json({ ok: true });
+});
+
+async function storeLogo(userId: string, type: string, data: Buffer, ip?: string) {
   await setSetting("branding_logo", { type, b64: data.toString("base64") });
   await license.setBrandingOverride({ ...license.brandingOverride(), logoUrl: `/api/branding/logo?v=${Date.now()}` });
-  await audit("branding.logo_set", { userId: c.get("auth")!.user.id, ip: clientIp(c) });
-  return c.json({ ok: true });
+  await audit("branding.logo_set", { userId, ip });
+}
+
+const siteFailure = (e: unknown) => {
+  const code = e instanceof SiteError ? e.code : "fetch_failed";
+  return { body: { error: code }, status: (code === "blocked_address" || code === "invalid_url" ? 400 : 502) as 400 | 502 };
+};
+
+/** Looks at the firm's public website and suggests colors and logos. Nothing is saved: the administrator chooses. */
+adminRoutes.post("/branding/from-site", BRAND, async (c) => {
+  const d = z.object({ url: z.string().trim().min(3).max(300) }).safeParse(await c.req.json().catch(() => null));
+  if (!d.success) return c.json({ error: "invalid_url" }, 400);
+  try {
+    const page = await safeGet(d.data.url, { maxBytes: 1_500_000, accept: "text/html,application/xhtml+xml", truncate: true });
+    if (!/html|xml/.test(page.type)) return c.json({ error: "not_a_web_page" }, 400);
+    const found = extractBrand(page.body.toString("utf8"), page.url);
+    const css = await Promise.all(found.stylesheets.map((u) => safeGet(u, { maxBytes: 300_000, accept: "text/css,*/*", truncate: true }).then((r) => r.body.toString("utf8")).catch(() => "")));
+    const manifest = found.manifest ? await safeGet(found.manifest, { maxBytes: 100_000, accept: "application/json,*/*" }).then((r) => JSON.parse(r.body.toString("utf8")) as { theme_color?: string; background_color?: string }).catch(() => null) : null;
+    const fromManifest: ColorHit[] = [];
+    for (const k of ["theme_color", "background_color"] as const) { const hex = normalizeColor(String(manifest?.[k] ?? "")); if (hex) fromManifest.push({ hex, source: `manifest ${k}` }); }
+    const fromCss = colorsFromCss(css.join("\n"));
+    // The page's declared colors first, then CSS variables, then the colors the site uses most.
+    const colors = dedupeColors([...found.colors, ...fromManifest.filter((x) => x.source.includes("theme")), ...fromCss.filter((x) => x.source !== "used"), ...fromCss.filter((x) => x.source === "used"), ...fromManifest]).slice(0, 8);
+    const logos = (await Promise.all(found.logos.map(async (l) => {
+      try {
+        const r = await safeGet(l.url, { maxBytes: LOGO_MAX, accept: "image/*" });
+        const type = sniffImage(r.body);
+        if (!type) return null;
+        return { url: r.url, source: l.source, type, bytes: r.body.length, dataUrl: r.body.length <= 250 * 1024 ? `data:${type};base64,${r.body.toString("base64")}` : undefined };
+      } catch { return null; }
+    }))).filter((x): x is NonNullable<typeof x> => x !== null);
+    return c.json({ site: page.url, title: found.title, colors, logos });
+  } catch (e) { const f = siteFailure(e); return c.json(f.body, f.status); }
+});
+
+/** Uses one of the logos found on the site (downloaded again by the server, checked, then stored). */
+adminRoutes.post("/branding/logo-from-url", BRAND, async (c) => {
+  const d = z.object({ url: z.string().trim().min(3).max(500) }).safeParse(await c.req.json().catch(() => null));
+  if (!d.success) return c.json({ error: "invalid_url" }, 400);
+  try {
+    const r = await safeGet(d.data.url, { maxBytes: LOGO_MAX, accept: "image/*" });
+    const type = sniffImage(r.body);
+    if (!type) return c.json({ error: "not_an_image" }, 400);
+    await storeLogo(c.get("auth")!.user.id, type, r.body, clientIp(c));
+    return c.json({ ok: true });
+  } catch (e) { const f = siteFailure(e); return c.json(f.body, f.status); }
 });
 
 adminRoutes.delete("/branding/logo", BRAND, async (c) => {

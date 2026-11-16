@@ -187,6 +187,13 @@ ok("branding: the logo can be removed", (await fetch(BASE + "/api/branding/logo"
 await call("DELETE", "/api/admin/branding");
 const rb2 = await cfgBrand();
 ok("branding: reset gives the supplier's defaults back", rb2.appName === baseBrand.appName && rb2.primaryColor === baseBrand.primaryColor && rb2.accentColor === baseBrand.accentColor);
+// import from a website: nothing internal may be reached through it
+for (const u of ["http://127.0.0.1/", "http://localhost:3000/api/health", "http://169.254.169.254/latest/meta-data/", "http://[::1]/", "http://10.0.0.1/", "https://example.com:8443/", "ftp://example.com/", "file:///etc/passwd"]) {
+  const r = await call("POST", "/api/admin/branding/from-site", { url: u });
+  ok(`site import refuses ${u}`, r.status === 400, JSON.stringify(r.body));
+  ok(`logo import refuses ${u}`, (await call("POST", "/api/admin/branding/logo-from-url", { url: u })).status === 400);
+}
+ok("site import needs the branding right", (await call("POST", "/api/admin/branding/from-site", { url: "https://example.com" }, uc)).status === 403 && (await call("POST", "/api/admin/branding/logo-from-url", { url: "https://example.com/a.png" }, uc)).status === 403);
 // HR folder of an employee
 const hrUrl = `/api/docs/hr-folder/${dUser.body.id}`;
 ok("HR folder: needs the HR right", (await call("PUT", hrUrl, { drive: clientsLib, path: "Dossiers clients/Acme Corp" }, uc)).status === 403);
