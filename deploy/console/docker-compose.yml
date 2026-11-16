@@ -29,7 +29,7 @@ services:
       POSTGRES_HOST: db
       PORT: "8080"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${BIND_ADDR:-127.0.0.1}:8080:8080"
 
   # The one-page marketing site, served next to the console. Its settings (config.js) are written from .env at start.
   # In your proxy (NPM) point your public site name at 127.0.0.1:8081.
@@ -49,7 +49,7 @@ services:
         printf 'window.HEXA = { consoleUrl: "%s", contactEmail: "%s" };' "$$CONSOLE_URL" "$$CONTACT_EMAIL" > /usr/share/nginx/html/config.js
         exec nginx -g 'daemon off;'
     ports:
-      - "127.0.0.1:8081:80"
+      - "${BIND_ADDR:-127.0.0.1}:8081:80"
 
 volumes:
   console_pgdata:
