@@ -46,8 +46,7 @@ services:
       - -c
       - |
         cp -r /site-src/. /usr/share/nginx/html/
-        printf 'window.HEXA = { consoleUrl: "%s", contactEmail: "%s" };
-' "$CONSOLE_URL" "$CONTACT_EMAIL" > /usr/share/nginx/html/config.js
+        printf 'window.HEXA = { consoleUrl: "%s", contactEmail: "%s" };' "$$CONSOLE_URL" "$$CONTACT_EMAIL" > /usr/share/nginx/html/config.js
         exec nginx -g 'daemon off;'
     ports:
       - "127.0.0.1:8081:80"
