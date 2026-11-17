@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AuthProvider } from "./lib/auth";
 import { useBranding } from "./lib/theme";
 import { setLanguage } from "./i18n";
-import { NAV } from "./modules/registry";
+import { NAV_ALL } from "./modules/registry";
 import Login from "./pages/Login";
 import AppShell from "./layouts/AppShell";
 import AdminLayout from "./admin/AdminLayout";
@@ -31,7 +31,7 @@ const ContractsPage = lazy(() => import("./modules/accounting/ContractsPage"));
 const ServicesPage = lazy(() => import("./modules/accounting/ServicesPage"));
 const KbPage = lazy(() => import("./modules/mytools/KnowledgePages").then((m) => ({ default: m.KbPage })));
 const ProceduresPage = lazy(() => import("./modules/mytools/KnowledgePages").then((m) => ({ default: m.ProceduresPage })));
-const BoardPage = lazy(() => import("./modules/command/BoardPage"));
+const EvolutionsPage = lazy(() => import("./modules/evolutions/EvolutionsPage"));
 const DocsPage = lazy(() => import("./modules/command/DocsPage"));
 const PipelinePage = lazy(() => import("./modules/tasks/PipelinePage"));
 const TasksPage = lazy(() => import("./modules/tasks/TasksPage"));
@@ -69,9 +69,9 @@ export default function App() {
 const PAGES: Record<string, ReactNode> = {
   "/team": <Wait><DashboardsPage /></Wait>, "/team/meeting": <Wait><MeetingPage /></Wait>,
   "/my/calendar": <Wait><ConnectPage kind="calendar" /></Wait>, "/my/mail": <Wait><ConnectPage kind="mail" /></Wait>, "/my/timesheet": <Wait><TimesheetPage /></Wait>, "/my/expenses": <Wait><ExpensesPage /></Wait>, "/my/kb": <Wait><KbPage /></Wait>, "/my/procedures": <Wait><ProceduresPage /></Wait>,
-  "/command/board": <Wait><BoardPage /></Wait>, "/command/pipeline": <Wait><PipelinePage /></Wait>,
+  "/command/pipeline": <Wait><PipelinePage /></Wait>,
   "/clients": <Wait><ClientsPage /></Wait>, "/tracking": <Wait><TrackingPage /></Wait>, "/tasks": <Wait><TasksPage /></Wait>, "/docs": <Wait><DocsPage /></Wait>,
-  "/accounting/invoices": <Wait><InvoicesPage /></Wait>, "/accounting/contracts": <Wait><ContractsPage /></Wait>, "/services": <Wait><ServicesPage /></Wait>, "/accounting/approvals": <Wait><ApprovalsPage /></Wait>, "/accounting/vendors": <Wait><VendorsPage /></Wait>, "/hr": <Wait><HrPage /></Wait>,
+  "/accounting/invoices": <Wait><InvoicesPage /></Wait>, "/accounting/contracts": <Wait><ContractsPage /></Wait>, "/services": <Wait><ServicesPage /></Wait>, "/accounting/approvals": <Wait><ApprovalsPage /></Wait>, "/accounting/vendors": <Wait><VendorsPage /></Wait>, "/hr": <Wait><HrPage /></Wait>, "/evolutions": <Wait><EvolutionsPage /></Wait>,
 };
 
 function Signed({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...k: string[]) => boolean }) {
@@ -83,7 +83,7 @@ function Signed({ userLocale, can }: { userLocale?: "fr" | "en"; can: (...k: str
 
   const denied = <div className="glass p-8 text-center text-sm text-muted">{t("errors.forbidden")}</div>;
   const adminHome = can("admin.users.view") ? "users" : can("admin.integrations.view") ? "integrations/o365" : can("admin.branding.view") ? "tenant" : "audit";
-  const items = NAV.flatMap((s) => s.items);
+  const items = NAV_ALL.flatMap((s) => s.items);
   const first = items.find((i) => can(...(Array.isArray(i.permission) ? i.permission : [i.permission])));
 
   return (

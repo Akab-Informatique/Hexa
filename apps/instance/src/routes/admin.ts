@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { effectivePermissions, isKnownPermission, MODULES, permissionsFor, ungrantable, type Audience } from "@hexa/shared/permissions";
+import { effectivePermissions, isKnownPermission, MODULES, RETIRED_PERMISSIONS, permissionsFor, ungrantable, type Audience } from "@hexa/shared/permissions";
+import { isSafeIconUrl } from "@hexa/shared";
 import { getSetting, pool, setSetting } from "../db.ts";
 import { audit, rightsOf } from "../auth/access.ts";
 import { hashPassword, MIN_PASSWORD, randomToken, sha256, temporaryPassword } from "../auth/crypto.ts";
@@ -9,14 +10,14 @@ import * as license from "../license.ts";
 import { loadedModules } from "../modules.ts";
 import { config } from "../config.ts";
 import { mailReady, resetMail, sendMail } from "../lib/mail.ts";
-import { colorsFromCss, dedupeColors, extractBrand, normalizeColor, safeGet, SiteError, sniffImage, type ColorHit } from "../lib/siteBrand.ts";
+import { colorsFromCss, dedupeColors, extractBrand, normalizeColor, rankFavicons, safeGet, SiteError, sniffIcon, sniffImage, type ColorHit } from "../lib/siteBrand.ts";
 
 export const adminRoutes = new Hono<Env>();
 
 const Perm = z.string().refine(isKnownPermission, "unknown permission");
 const uniq = <T>(a: T[]) => [...new Set(a)];
 
-adminRoutes.get("/catalog", requirePermission("admin.users.view", "admin.groups.manage"), (c) => c.json(MODULES));
+adminRoutes.get("/catalog", requirePermission("admin.users.view", "admin.groups.manage"), (c) => c.json(MODULES.map((m) => ({ ...m, permissions: m.permissions.filter((p) => !RETIRED_PERMISSIONS.has(p.key)) }))));
 
 // ------------------------------- Users -------------------------------
 adminRoutes.get("/users", requirePermission("admin.users.view"), async (c) => {
@@ -44,29 +45,47 @@ adminRoutes.get("/users/:id", requirePermission("admin.users.view"), async (c) =
 const UserInput = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(120),
-  groupIds: z.array(z.string().uuid()).default([]),
+  groupIds: z.array(z.string().uuid()).max(100).default([]),
+  overrides: z.array(z.object({ permission: Perm, effect: z.enum(["allow", "deny"]) })).max(500).default([]),
 });
 
 adminRoutes.post("/users", requirePermission("admin.users.manage"), async (c) => {
   const a = c.get("auth")!;
   const body = UserInput.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return c.json({ error: body.error.flatten() }, 400);
-  const bad = await groupEscalation(a, body.data.groupIds);
+  const d = body.data;
+  const staffKeys = new Set(permissionsFor("staff"));
+  if (d.overrides.some((o) => !staffKeys.has(o.permission))) return c.json({ error: "unknown permission" }, 400);
+  if (d.groupIds.length && (await pool.query("select id from groups where id = any($1::uuid[])", [d.groupIds])).rowCount !== uniq(d.groupIds).length)
+    return c.json({ error: "unknown group" }, 400);
+  // Same rule as update: a non-master admin only hands out rights they hold (groups and per-user allows).
+  const bad = uniq([
+    ...(await groupEscalation(a, d.groupIds)),
+    ...ungrantable(a.rights, a.user.isMaster, d.overrides.filter((o) => o.effect === "allow").map((o) => o.permission)),
+  ]);
   if (bad.length) return c.json({ error: "cannot grant rights you do not hold", rights: bad }, 403);
   const temp = temporaryPassword();
+  const hash = await hashPassword(temp);
+  const cx = await pool.connect();
   try {
-    const r = await pool.query(
+    await cx.query("begin");
+    const r = await cx.query(
       `insert into users (kind, email, name, password_hash, must_change_password) values ('staff', $1, $2, $3, true) returning id`,
-      [body.data.email, body.data.name, await hashPassword(temp)],
+      [d.email, d.name, hash],
     );
     const id = r.rows[0].id as string;
-    for (const g of body.data.groupIds) await pool.query("insert into user_groups values ($1, $2) on conflict do nothing", [id, g]);
-    await audit("user.created", { userId: a.user.id, target: body.data.email, ip: clientIp(c) });
+    for (const g of uniq(d.groupIds)) await cx.query("insert into user_groups values ($1, $2) on conflict do nothing", [id, g]);
+    for (const o of new Map(d.overrides.map((x) => [x.permission, x])).values()) await cx.query("insert into user_permissions values ($1, $2, $3)", [id, o.permission, o.effect]);
+    await cx.query("commit");
+    await audit("user.created", { userId: a.user.id, target: d.email, detail: { groups: d.groupIds.length, overrides: d.overrides.length }, ip: clientIp(c) });
     // Shown once. Email delivery arrives with the Mailjet integration.
     return c.json({ id, temporaryPassword: temp }, 201);
   } catch (err) {
+    await cx.query("rollback").catch(() => {});
     if ((err as { code?: string }).code === "23505") return c.json({ error: "email already used" }, 409);
     throw err;
+  } finally {
+    cx.release();
   }
 });
 
@@ -300,14 +319,15 @@ adminRoutes.get("/tenant", requirePermission("admin.branding.view"), (c) => {
 const Hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
 const LOGO_MAX = 400 * 1024;
+const FAVICON_MAX = 256 * 1024;
 const BRAND = requirePermission("admin.branding.manage");
 
 adminRoutes.put("/branding", BRAND, async (c) => {
-  const d = z.object({ appName: z.string().trim().max(60).optional(), primaryColor: Hex.optional(), accentColor: Hex.optional() })
+  const d = z.object({ appName: z.string().trim().max(60).optional(), primaryColor: Hex.optional(), accentColor: Hex.optional(), faviconUrl: z.string().refine(isSafeIconUrl).optional() })
     .safeParse(await c.req.json().catch(() => null));
   if (!d.success) return c.json({ error: d.error.flatten() }, 400);
   const cur = license.brandingOverride();
-  await license.setBrandingOverride({ ...cur, appName: d.data.appName ?? cur.appName, primaryColor: d.data.primaryColor ?? cur.primaryColor, accentColor: d.data.accentColor ?? cur.accentColor });
+  await license.setBrandingOverride({ ...cur, appName: d.data.appName ?? cur.appName, primaryColor: d.data.primaryColor ?? cur.primaryColor, accentColor: d.data.accentColor ?? cur.accentColor, faviconUrl: d.data.faviconUrl ?? cur.faviconUrl });
   await audit("branding.updated", { userId: c.get("auth")!.user.id, detail: Object.keys(d.data), ip: clientIp(c) });
   return c.json({ ok: true });
 });
@@ -356,7 +376,16 @@ adminRoutes.post("/branding/from-site", BRAND, async (c) => {
         return { url: r.url, source: l.source, type, bytes: r.body.length, dataUrl: r.body.length <= 250 * 1024 ? `data:${type};base64,${r.body.toString("base64")}` : undefined };
       } catch { return null; }
     }))).filter((x): x is NonNullable<typeof x> => x !== null);
-    return c.json({ site: page.url, title: found.title, colors, logos });
+    // Suggested tab icon: the first ranked candidate that really is a PNG/ICO/WebP. Only a suggestion; nothing is saved.
+    let favicon: { url: string; source: string; type: string; bytes: number; dataUrl: string } | null = null;
+    for (const ic of rankFavicons(found.icons).slice(0, 4)) {
+      try {
+        const r = await safeGet(ic.url, { maxBytes: FAVICON_MAX, accept: "image/*" });
+        const type = sniffIcon(r.body);
+        if (type) { favicon = { url: r.url, source: ic.source, type, bytes: r.body.length, dataUrl: `data:${type};base64,${r.body.toString("base64")}` }; break; }
+      } catch { /* try the next one */ }
+    }
+    return c.json({ site: page.url, title: found.title, colors, logos, favicon });
   } catch (e) { const f = siteFailure(e); return c.json(f.body, f.status); }
 });
 
@@ -373,6 +402,44 @@ adminRoutes.post("/branding/logo-from-url", BRAND, async (c) => {
   } catch (e) { const f = siteFailure(e); return c.json(f.body, f.status); }
 });
 
+// Tab icon (favicon): uploaded or taken from the site, stored here, served from /api/branding/favicon.
+async function storeFavicon(userId: string, type: string, data: Buffer, ip?: string) {
+  await setSetting("branding_favicon", { type, b64: data.toString("base64") });
+  await license.setBrandingOverride({ ...license.brandingOverride(), faviconUrl: `/api/branding/favicon?v=${Date.now()}` });
+  await audit("branding.favicon_set", { userId, ip });
+}
+
+adminRoutes.put("/branding/favicon", BRAND, async (c) => {
+  const data = Buffer.from(await c.req.arrayBuffer());
+  if (!data.length) return c.json({ error: "empty file" }, 400);
+  if (data.length > FAVICON_MAX) return c.json({ error: "icon too large (256 KB maximum)" }, 413);
+  const type = sniffIcon(data); // the real bytes decide, never the declared type
+  if (!type) return c.json({ error: "icon must be a PNG, ICO or WebP image" }, 400);
+  await storeFavicon(c.get("auth")!.user.id, type, data, clientIp(c));
+  return c.json({ ok: true });
+});
+
+adminRoutes.post("/branding/favicon-from-url", BRAND, async (c) => {
+  const d = z.object({ url: z.string().trim().min(3).max(500) }).safeParse(await c.req.json().catch(() => null));
+  if (!d.success) return c.json({ error: "invalid_url" }, 400);
+  try {
+    const r = await safeGet(d.data.url, { maxBytes: FAVICON_MAX, accept: "image/*" });
+    const type = sniffIcon(r.body);
+    if (!type) return c.json({ error: "not_an_image" }, 400);
+    await storeFavicon(c.get("auth")!.user.id, type, r.body, clientIp(c));
+    return c.json({ ok: true });
+  } catch (e) { const f = siteFailure(e); return c.json(f.body, f.status); }
+});
+
+adminRoutes.delete("/branding/favicon", BRAND, async (c) => {
+  await setSetting("branding_favicon", null);
+  const { faviconUrl: _drop, ...rest } = license.brandingOverride();
+  void _drop;
+  await license.setBrandingOverride(rest);
+  await audit("branding.favicon_removed", { userId: c.get("auth")!.user.id, ip: clientIp(c) });
+  return c.json({ ok: true });
+});
+
 adminRoutes.delete("/branding/logo", BRAND, async (c) => {
   await setSetting("branding_logo", null);
   const { logoUrl: _drop, ...rest } = license.brandingOverride();
@@ -385,6 +452,7 @@ adminRoutes.delete("/branding/logo", BRAND, async (c) => {
 /** Back to the supplier's default look. */
 adminRoutes.delete("/branding", BRAND, async (c) => {
   await setSetting("branding_logo", null);
+  await setSetting("branding_favicon", null);
   await license.setBrandingOverride({});
   await audit("branding.reset", { userId: c.get("auth")!.user.id, ip: clientIp(c) });
   return c.json({ ok: true });

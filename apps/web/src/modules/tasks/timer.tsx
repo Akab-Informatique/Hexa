@@ -19,6 +19,7 @@ const TIME_ERRORS: Record<string, [string, string]> = {
   timesheet_locked: ["Cette entrée n'est plus modifiable (semaine envoyée ou approuvée). Le temps reste dans votre feuille de temps.", "This entry can no longer be edited (week sent or approved). The time stays in your timesheet."],
   timer_entry_locked: ["Cette entrée n'est plus modifiable (semaine envoyée ou approuvée).", "This entry can no longer be changed (week sent or approved)."],
   entry_invoiced: ["Ce temps est déjà facturé : il ne peut plus être modifié.", "This time is already invoiced and can no longer be changed."],
+  entry_billed: ["Ce temps est déjà approuvé ou exclu dans les éléments à facturer : il ne peut plus être modifié.", "This time was already approved or excluded in the items to bill and can no longer be changed."],
   day_total_exceeded: ["Le total de cette journée dépasserait 24 h.", "The total for this day would exceed 24 h."],
   already_logged: ["Ce temps est déjà saisi.", "This time is already logged."],
 };

@@ -5,7 +5,7 @@ import type { ModuleDef } from "@hexa/shared/permissions";
 
 type Effect = "allow" | "deny";
 
-interface Common { catalog: ModuleDef[]; disabled?: boolean }
+interface Common { catalog: ModuleDef[]; disabled?: boolean; /** Rights the current admin may not hand out are shown locked. */ canGrant?: (key: string) => boolean }
 interface GroupMode extends Common { mode: "group"; granted: string[]; onChange: (next: string[]) => void }
 interface UserMode extends Common {
   mode: "user";
@@ -16,7 +16,7 @@ interface UserMode extends Common {
 }
 
 const SECTION_KEYS: Record<string, string> = {
-  team: "admin.sectionTeam", mytools: "admin.sectionMytools", command: "admin.sectionCommand", management: "admin.sectionManagement",
+  team: "admin.sectionTeam", mytools: "admin.sectionMytools", management: "admin.sectionManagement",
   accounting: "admin.sectionAccounting", admin: "admin.sectionAdmin", clientportal: "admin.sectionClientportal",
 };
 
@@ -53,12 +53,12 @@ export default function PermissionMatrix(props: GroupMode | UserMode) {
               return (
                 <div key={m.key} className="glass-flat">
                   <div className="flex items-center gap-2 p-3">
-                    <button className="flex flex-1 items-center gap-2 text-left" onClick={() => setOpen((o) => ({ ...o, [m.key]: !isOpen }))} aria-expanded={isOpen}>
+                    <button type="button" className="flex flex-1 items-center gap-2 text-left" onClick={() => setOpen((o) => ({ ...o, [m.key]: !isOpen }))} aria-expanded={isOpen}>
                       <ChevronDown size={15} style={{ transform: isOpen ? "rotate(180deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
                       <span className="font-medium">{m.label[lang]}</span>
                       <span className="chip">{grantedCount(m)}/{m.permissions.length}</span>
                     </button>
-                    {props.mode === "group" && !props.disabled && <button className="btn !px-2.5 !py-1 text-xs" onClick={() => toggleModule(m)}>{t("admin.selectAll")}</button>}
+                    {props.mode === "group" && !props.disabled && <button type="button" className="btn !px-2.5 !py-1 text-xs" onClick={() => toggleModule(m)}>{t("admin.selectAll")}</button>}
                   </div>
                   {isOpen && (
                     <ul className="border-t border-white/10 px-3 py-1">
@@ -69,10 +69,10 @@ export default function PermissionMatrix(props: GroupMode | UserMode) {
                             <code className="text-[11px] text-muted">{p.key}</code>
                           </div>
                           {props.mode === "group" ? (
-                            <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" disabled={props.disabled} checked={props.granted.includes(p.key)}
+                            <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" disabled={props.disabled || props.canGrant?.(p.key) === false} checked={props.granted.includes(p.key)}
                               onChange={(e) => props.onChange(e.target.checked ? [...props.granted, p.key] : props.granted.filter((k) => k !== p.key))} aria-label={p.label[lang]} />
                           ) : (
-                            <Tri value={props.overrides[p.key]} inherited={props.inherited.includes(p.key)} disabled={props.disabled}
+                            <Tri value={props.overrides[p.key]} inherited={props.inherited.includes(p.key)} disabled={props.disabled} lockAllow={props.canGrant?.(p.key) === false}
                               onChange={(v) => { const next = { ...props.overrides }; if (v) next[p.key] = v; else delete next[p.key]; props.onChange(next); }} />
                           )}
                         </li>
@@ -89,7 +89,7 @@ export default function PermissionMatrix(props: GroupMode | UserMode) {
   );
 }
 
-function Tri({ value, inherited, onChange, disabled }: { value?: Effect; inherited: boolean; onChange: (v?: Effect) => void; disabled?: boolean }) {
+function Tri({ value, inherited, onChange, disabled, lockAllow }: { value?: Effect; inherited: boolean; onChange: (v?: Effect) => void; disabled?: boolean; lockAllow?: boolean }) {
   const { t } = useTranslation();
   const opts: { v?: Effect; label: string }[] = [
     { v: undefined, label: `${t("admin.inherited")} ${inherited ? "✓" : "✗"}` },
@@ -101,7 +101,7 @@ function Tri({ value, inherited, onChange, disabled }: { value?: Effect; inherit
       {opts.map((o) => {
         const on = value === o.v;
         const bg = !on ? undefined : o.v === "deny" ? "rgb(248 113 113 / .35)" : o.v === "allow" ? "rgb(74 222 128 / .3)" : "rgb(255 255 255 / .14)";
-        return <button key={o.label} disabled={disabled} onClick={() => onChange(o.v)} className="rounded-[9px] px-2.5 py-1 transition" style={{ background: bg, color: on ? "var(--fg)" : "var(--muted)" }}>{o.label}</button>;
+        return <button type="button" key={o.label} disabled={disabled || (lockAllow && o.v === "allow")} onClick={() => onChange(o.v)} className="rounded-[9px] px-2.5 py-1 transition" style={{ background: bg, color: on ? "var(--fg)" : "var(--muted)" }}>{o.label}</button>;
       })}
     </div>
   );

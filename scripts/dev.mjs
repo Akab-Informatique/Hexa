@@ -96,7 +96,7 @@ await waitFor("http://127.0.0.1:9099/_mock/mail", "mock services");
 run("instance", "apps/instance/src/index.ts", {
   PUBLIC_URL: "http://localhost:5173", // where the browser reaches the app: OAuth sign-ins come back here
   MAILJET_URL: "http://127.0.0.1:9099", GRAPH_URL: "http://127.0.0.1:9099/graph/v1.0", MS_LOGIN_URL: "http://127.0.0.1:9099/mslogin",
-  INTUIT_AUTH_URL: "http://127.0.0.1:9099/intuit/connect/oauth2", INTUIT_TOKEN_URL: "http://127.0.0.1:9099/intuit/oauth2/v1/tokens/bearer", QBO_API_URL: "http://127.0.0.1:9099/qbo",
+  INTUIT_AUTH_URL: "http://127.0.0.1:9099/intuit/connect/oauth2", INTUIT_TOKEN_URL: "http://127.0.0.1:9099/intuit/oauth2/v1/tokens/bearer", INTUIT_REVOKE_URL: "http://127.0.0.1:9099/intuit/revoke", QBO_API_URL: "http://127.0.0.1:9099/qbo",
   PORT: String(INSTANCE_PORT),
   DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5434/postgres",
   CLIENT_ID: get("CLIENT_ID"),
@@ -109,6 +109,7 @@ run("instance", "apps/instance/src/index.ts", {
   APP_SECRET: get("APP_SECRET"),
   DEV_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173",
   SEED_PROFILE: "accounting", // demo data for the A Bezeau demo tenant (the console puts this in real bundles)
+  DEV_FAVICON_FILE: path.resolve("scripts/dev-assets/abezeau-favicon.png"), // demo firm tab icon (dev only)
   SHAREPOINT_MOCK: "1", // local stand-in for SharePoint (never honored in production)
 });
 await waitFor(`http://127.0.0.1:${INSTANCE_PORT}/api/health`, "instance");

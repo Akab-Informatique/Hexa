@@ -57,7 +57,7 @@ export function ProceduresPage() {
   const l = useL();
   const { can, me } = useAuth();
   const qc = useQueryClient();
-  const [view, setView] = useState<string | null>(null);
+  const [view, setView] = useState<string | null>(() => { const o = new URLSearchParams(window.location.search).get("open"); return o && /^[0-9a-f-]{36}$/i.test(o) ? o : null; }); // ?open=<id> from the portal changes list
   const [edit, setEdit] = useState<null | { id?: string }>(null);
   const list = useQuery({ queryKey: ["procedures"], queryFn: () => api<Proc[]>("/api/my/procedures") });
   const detail = useQuery({ queryKey: ["procedure", view ?? edit?.id], queryFn: () => api<Proc>(`/api/my/procedures/${view ?? edit?.id}`), enabled: Boolean(view ?? edit?.id) });

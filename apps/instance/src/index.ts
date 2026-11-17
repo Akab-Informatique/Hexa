@@ -1,7 +1,9 @@
 import { serve } from "@hono/node-server";
 import { migrate } from "@hexa/shared/migrate";
 import { config } from "./config.ts";
-import { pool } from "./db.ts";
+import fs from "node:fs";
+import { getSetting, pool, setSetting } from "./db.ts";
+import { sniffIcon } from "./lib/siteBrand.ts";
 import * as license from "./license.ts";
 import { loadModules } from "./modules.ts";
 import { buildApp } from "./app.ts";
@@ -11,6 +13,19 @@ import { autoTaskTick } from "./lib/autoTasks.ts";
 import { refreshContractBilling } from "./lib/contractBilling.ts";
 import { quickbooksTick } from "./routes/quickbooks.ts";
 
+/** Dev only (never in production): DEV_FAVICON_FILE gives the demo firm its tab icon the first time, without overwriting one the firm set. */
+async function devFavicon() {
+  const file = process.env.DEV_FAVICON_FILE;
+  if (!file || config.isProd || (await getSetting("branding_favicon")) || license.brandingOverride().faviconUrl) return;
+  try {
+    const data = fs.readFileSync(file);
+    const type = sniffIcon(data);
+    if (!type || data.length > 256 * 1024) return;
+    await setSetting("branding_favicon", { type, b64: data.toString("base64") });
+    await license.setBrandingOverride({ ...license.brandingOverride(), faviconUrl: `/api/branding/favicon?v=${Date.now()}` });
+  } catch { /* the dev icon is optional */ }
+}
+
 async function main() {
   console.log(`[hexa] instance v${config.version} starting`);
   const applied = await migrate(pool, config.migrationsDir, "core");
@@ -19,6 +34,7 @@ async function main() {
   if (config.isProd && config.appSecret.length < 32) throw new Error("APP_SECRET (32+ chars) is required in production");
   await bootstrap();
   await license.loadCached();
+  await devFavicon();
   await license.check();
   license.startPeriodicCheck();
 

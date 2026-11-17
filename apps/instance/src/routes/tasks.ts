@@ -3,6 +3,7 @@ import { z } from "zod";
 import { addRecurrence, todayISO, addDays, fridayOf, mondayOf } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
+import { autoApproveClients, billTimeEntries, unbillTaskTime } from "../lib/timeBilling.ts";
 import { stopTimer } from "./taskTimer.ts";
 import { audit } from "../auth/access.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";
@@ -134,7 +135,7 @@ taskRoutes.get("/:id", requirePermission(...VIEW), async (c) => {
               e.user_id = $2 as mine, case when e.user_id = $2 then e.billable end as billable, e.client_id is not null as has_client,
               (e.user_id = $2 and e.status in ('draft','rejected')
                 and coalesce((select w.status from timesheet_weeks w where w.user_id = e.user_id and w.week_start = date_trunc('week', e.work_date)::date), 'draft') in ('draft','rejected')
-                and not exists (select 1 from billing_items b where b.source = 'time' and b.source_id = e.id and b.status = 'invoiced')) as editable
+                and not exists (select 1 from billing_items b where b.source = 'time' and b.source_id = e.id and b.status <> 'pending')) as editable
          from timesheet_entries e join users u on u.id = e.user_id
         where e.task_id = $1 and ($3 or e.user_id = $2 or e.status in ('submitted','approved'))
         order by e.work_date desc, e.created_at desc`,
@@ -177,19 +178,38 @@ taskRoutes.patch("/:id", requirePermission(...EDIT), async (c) => {
     if (open) return c.json({ error: "complete the checklist first" }, 409);
   }
 
+  // Completing a task ends any timer still running on it, like Stop: the time becomes a draft timesheet entry (nothing is lost) and is billed below.
+  if (closing) {
+    for (const r of (await pool.query("select user_id from task_timers where task_id = $1", [id])).rows) await stopTimer(r.user_id as string);
+  }
+
   const { sets, values } = buildUpdate(d, COLS, 2);
   if (d.recurrence !== undefined) { values.push(d.recurrence ? JSON.stringify(d.recurrence) : null); sets.push(`recurrence = $${values.length + 1}::jsonb`); }
   if (d.status !== undefined) sets.push(d.status === "done" ? "completed_at = coalesce(completed_at, now())" : "completed_at = null");
-  if (sets.length) await pool.query(`update tasks set ${sets.join(", ")}, updated_at = now() where id = $1`, [id, ...values]);
+  // Done = its billable time goes to the items waiting for approval, in the same transaction (never twice: unique source index).
+  let billed: string[] = [];
+  // Undo: done back to not done removes the time items still waiting for approval (same transaction).
+  const reopening = d.status !== undefined && d.status !== "done" && t.status === "done";
+  let unbilled = 0;
+  const db = await pool.connect();
+  try {
+    await db.query("begin");
+    if (sets.length) await db.query(`update tasks set ${sets.join(", ")}, updated_at = now() where id = $1`, [id, ...values]);
+    if (closing) billed = await billTimeEntries(db, { taskId: id });
+    if (reopening) unbilled = await unbillTaskTime(db, id);
+    await db.query("commit");
+  } catch (e) { await db.query("rollback").catch(() => undefined); throw e; } finally { db.release(); }
   if (d.viewerIds) {
     await pool.query("delete from task_viewers where task_id = $1", [id]);
     for (const v of d.viewerIds) await pool.query("insert into task_viewers values ($1, $2) on conflict do nothing", [id, v]);
   }
 
-  // Completing a task ends any timer still running on it, like Stop: the time becomes a draft timesheet entry (nothing is lost).
-  if (closing) {
-    for (const r of (await pool.query("select user_id from task_timers where task_id = $1", [id])).rows) await stopTimer(r.user_id as string);
+  if (billed.length) {
+    await autoApproveClients(billed);
+    await audit("task.time_billed", { userId: auth(c).user.id, target: id, detail: { clients: billed.length } });
   }
+
+  if (unbilled) await audit("task.time_unbilled", { userId: auth(c).user.id, target: id, detail: { items: unbilled } });
 
   // Recurring task: completing it creates the next occurrence (checklist reset, same assignee).
   let next: string | null = null;

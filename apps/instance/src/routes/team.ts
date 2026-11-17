@@ -21,7 +21,7 @@ const DEFAULT_LAYOUT = [
 ];
 const TEAM_LAYOUT = [
   { id: "t1", type: "clock", size: 1 }, { id: "t2", type: "week-status", size: 1 }, { id: "t3", type: "tasks-by-person", size: 1 },
-  { id: "t4", type: "upcoming-deadlines", size: 2 }, { id: "t5", type: "overdue-tasks", size: 1 }, { id: "t6", type: "board-latest", size: 2 }, { id: "t7", type: "meeting-points", size: 1 },
+  { id: "t4", type: "upcoming-deadlines", size: 2 }, { id: "t5", type: "overdue-tasks", size: 1 }, { id: "t7", type: "meeting-points", size: 1 },
 ];
 
 interface Row { id: string; name: string; owner_id: string; visibility: string; team_access: string; locked: boolean; layout: unknown; builtin: boolean; slug: string | null; owner_name?: string; member_access?: string | null; my_layout?: unknown; is_default?: boolean }

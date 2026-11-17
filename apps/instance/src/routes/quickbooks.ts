@@ -1,11 +1,11 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { roundCents } from "@hexa/shared/billing";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, requireReady, type Env } from "../auth/session.ts";
 import { config } from "../config.ts";
-import { allCustomers, authorizeUrl, completeConnect, createCustomer, disconnect, invoiceBalance, normName, pushInvoice, QB_CALLBACK, qbConn, qbState } from "../lib/quickbooks.ts";
+import { allCustomers, authorizeUrl, completeConnect, createCustomer, disconnect, invoiceBalance, normName, pushInvoice, QB_CALLBACK, qbConn, qbState, taxCodes } from "../lib/quickbooks.ts";
 import { loadIntegration, patchIntegration, redirectUri, ServiceError } from "../lib/services.ts";
 import { settings } from "./accounting.ts";
 import { auth, body, isUuid } from "./util.ts";
@@ -27,7 +27,7 @@ quickbooksRoutes.get("/status", SEE, async (c) => {
   const m = await loadIntegration("quickbooks");
   const counts = (await pool.query("select count(*) filter (where quickbooks_id is not null)::int as linked, count(*)::int as total from clients where status <> 'inactive'")).rows[0];
   return c.json({
-    configured: Boolean(conn), connected: Boolean(conn?.connected), needsReauth: conn?.needsReauth ?? false, environment: conn?.environment ?? "sandbox", realmId: m.config.realmId ?? null,
+    configured: Boolean(conn), connected: Boolean(conn?.connected), needsReauth: conn?.needsReauth ?? false, environment: conn?.environment ?? "sandbox", realmId: m.config.realmId ?? null, taxCodeId: m.config.taxCodeId ?? null,
     connectedAt: m.config.connectedAt ?? null, lastPull: m.config.lastPull ?? null, autoSync: m.config.autoSync === "1", redirectUri: config.publicUrl ? redirectUri(QB_CALLBACK) : null, linkedClients: counts.linked, clients: counts.total,
   });
 });
@@ -39,7 +39,7 @@ quickbooksRoutes.get("/callback", ADMIN, async (c) => {
   const back = (q: string) => c.redirect(`/admin/integrations/quickbooks?${q}`);
   const code = c.req.query("code"), realm = c.req.query("realmId");
   if (c.req.query("error")) return back(`error=${encodeURIComponent(c.req.query("error")!)}`);
-  if (!code || !realm || qbState.read(c.req.query("state") ?? "") !== auth(c).user.id) return back("error=state");
+  if (!code || !realm || !/^\d{6,25}$/.test(realm) || qbState.read(c.req.query("state") ?? "") !== auth(c).user.id) return back("error=state");
   try {
     await completeConnect(code, realm);
     await audit("quickbooks.connected", { userId: auth(c).user.id, target: realm });
@@ -52,6 +52,9 @@ quickbooksRoutes.post("/disconnect", ADMIN, async (c) => {
   await audit("quickbooks.disconnected", { userId: auth(c).user.id });
   return c.json({ ok: true });
 });
+
+/** The company's tax codes, to pick the GST/QST one for the integration ("Tax code id"). */
+quickbooksRoutes.get("/tax-codes", ADMIN, async (c) => c.json({ rows: await taxCodes() }));
 
 quickbooksRoutes.put("/settings", ADMIN, async (c) => {
   const d = await body(c, z.object({ autoSync: z.boolean() }));
@@ -97,9 +100,16 @@ quickbooksRoutes.post("/customers/sync", ADMIN, async (c) => {
 });
 
 // ------------------------------------------------------------------ Invoices out, payments back
+const sending = new Set<string>();
 quickbooksRoutes.post("/invoices/:id", BILL, async (c) => {
   const id = c.req.param("id");
   if (!isUuid(id)) throw new ServiceError(404, "not_found");
+  if (sending.has(id)) throw new ServiceError(409, "already_sending"); // a double click never races itself
+  sending.add(id);
+  try { return await sendInvoice(c, id); } finally { sending.delete(id); }
+});
+
+async function sendInvoice(c: Context<Env>, id: string) {
   const inv = (await pool.query("select i.*, cl.name as client_name, cl.quickbooks_id as customer_id, cl.billing_email, cl.email as client_email, cl.address, cl.city, cl.province, cl.postal_code, cl.phone from invoices i join clients cl on cl.id = i.client_id where i.id = $1", [id])).rows[0];
   if (!inv) throw new ServiceError(404, "not_found");
   if (inv.status === "draft" || inv.status === "void") throw new ServiceError(409, "invoice_not_sent");
@@ -125,10 +135,12 @@ quickbooksRoutes.post("/invoices/:id", BILL, async (c) => {
     await audit("quickbooks.invoice", { userId: auth(c).user.id, target: inv.number, detail: { qbId: r.id, updated: Boolean(inv.quickbooks_id) } });
     return c.json({ ok: true, quickbooksId: r.id, updated: Boolean(inv.quickbooks_id), warning: mismatch ? "total_mismatch" : null });
   } catch (e) {
-    await pool.query("update invoices set quickbooks_error = $2 where id = $1", [id, e instanceof ServiceError ? `${e.code}${e.detail ? `: ${e.detail}` : ""}`.slice(0, 300) : "failed"]);
+    const why = e instanceof ServiceError ? `${e.code}${e.detail ? `: ${e.detail}` : ""}`.slice(0, 300) : "failed";
+    await pool.query("update invoices set quickbooks_error = $2 where id = $1", [id, why]);
+    await audit("quickbooks.invoice_failed", { userId: auth(c).user.id, target: inv.number, detail: { reason: why } }).catch(() => {});
     throw e;
   }
-});
+}
 
 /** A payment entered in QuickBooks becomes a payment here (the difference between the two balances). */
 export async function pullPayments(userId: string | null): Promise<{ checked: number; recorded: number; cents: number; errors: number }> {
@@ -148,7 +160,7 @@ export async function pullPayments(userId: string | null): Promise<{ checked: nu
         if (theirs === 0) await pool.query("update invoices set status = 'paid', paid_at = now() where id = $1", [i.id]);
         recorded++; cents += diff;
       }
-    } catch { errors++; }
+    } catch (err) { errors++; console.error("[quickbooks] pull", i.number, err instanceof ServiceError ? err.code : err); }
   }
   await patchIntegration("quickbooks", { config: { lastPull: new Date().toISOString() } });
   return { checked: rows.length, recorded, cents, errors };

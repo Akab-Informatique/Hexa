@@ -112,16 +112,6 @@ function MeetingPoints() {
   );
 }
 
-function BoardLatest() {
-  const l = useL(); const loc = useLocale();
-  const q = useQuery({ queryKey: ["w-board"], queryFn: () => api<{ id: string; title: string; createdAt: string; pinned: boolean }[]>("/api/command/board") });
-  return (
-    <Card title={l("Babillard", "Message board")} to="/command/board">
-      {!q.data?.length ? <p className="text-sm text-muted">—</p> : <ul className="space-y-1.5 text-sm">{q.data.slice(0, 4).map((m) => <li key={m.id} className="flex justify-between gap-2"><span className="truncate">{m.pinned ? "📌 " : ""}{m.title}</span><span className="shrink-0 text-xs text-muted">{fmtDate(m.createdAt, loc)}</span></li>)}</ul>}
-    </Card>
-  );
-}
-
 function TimesheetWeek() {
   const l = useL();
   const q = useQuery({ queryKey: ["w-ts"], queryFn: () => api<{ totals: { paidMinutes: number }; status: string; entries: unknown[] }>("/api/time/week") });
@@ -157,7 +147,7 @@ function QuickLinks() {
   const l = useL(); const { can } = useAuth();
   const links = [
     { to: "/command/pipeline", label: l("Ma journée", "My day"), ok: can("command.pipeline.view", "tasks.view") }, { to: "/tasks", label: l("Tâches", "Tasks"), ok: can("tasks.view") },
-    { to: "/clients", label: "Clients", ok: can("clients.view") }, { to: "/my/timesheet", label: l("Temps", "Time"), ok: can("mytools.timesheet.use") }, { to: "/command/board", label: l("Babillard", "Board"), ok: can("command.board.view") },
+    { to: "/clients", label: "Clients", ok: can("clients.view") }, { to: "/my/timesheet", label: l("Temps", "Time"), ok: can("mytools.timesheet.use") },
   ].filter((x) => x.ok);
   return <Card title={l("Accès rapide", "Quick links")}><div className="flex flex-wrap gap-2">{links.map((x) => <Link key={x.to} to={x.to} className="chip no-underline">{x.label}</Link>)}</div></Card>;
 }
@@ -171,7 +161,6 @@ export const WIDGETS: Record<string, WidgetDef> = {
   "upcoming-deadlines": { label: ["Échéances à venir", "Upcoming deadlines"], desc: ["Les 14 prochains jours", "The next 14 days"], size: 2, permission: ["tasks.view", "command.pipeline.view"], render: () => <UpcomingDeadlines /> },
   "tasks-by-person": { label: ["Tâches par personne", "Tasks by person"], desc: ["La charge de l'équipe", "The team's workload"], size: 1, permission: ["tasks.view", "command.pipeline.view"], render: () => <TasksByPerson /> },
   "meeting-points": { label: ["Rencontre d'équipe", "Team meeting"], desc: ["Les points de la semaine", "This week's points"], size: 1, permission: ["team.meeting.view"], render: () => <MeetingPoints /> },
-  "board-latest": { label: ["Babillard", "Message board"], desc: ["Les derniers messages aux clients", "The latest messages to clients"], size: 2, permission: ["command.board.view"], render: () => <BoardLatest /> },
   "timesheet-week": { label: ["Feuille de temps", "Timesheet"], desc: ["Mes heures payées de la semaine", "My paid hours this week"], size: 1, permission: ["mytools.timesheet.use"], render: () => <TimesheetWeek /> },
   "clients-count": { label: ["Clients", "Clients"], desc: ["Clients actifs et prospects", "Active clients and prospects"], size: 1, permission: ["clients.view"], render: () => <ClientsCount /> },
   "billing-summary": { label: ["Facturation", "Billing"], desc: ["À approuver, prêt à facturer, à recevoir", "To approve, ready to invoice, receivable"], size: 2, permission: ["accounting.approvals.view", "accounting.invoices.view"], render: () => <BillingSummary /> },

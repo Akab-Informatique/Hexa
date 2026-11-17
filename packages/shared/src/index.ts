@@ -1,9 +1,17 @@
 import { z } from "zod";
 
 // ---------- Branding (white label) ----------
+/** A browser-tab icon address: an https URL or a same-origin path. Nothing else (no javascript:, data:, http:, //host). */
+export function isSafeIconUrl(v: string): boolean {
+  if (v.length === 0 || v.length > 500 || /[\s\\\x00-\x1f]/.test(v)) return false;
+  if (v.startsWith("/")) return !v.startsWith("//");
+  try { return new URL(v).protocol === "https:"; } catch { return false; }
+}
 export const BrandingSchema = z.object({
   appName: z.string().default("Hexa"),
   logoUrl: z.string().optional(),
+  // Browser-tab icon. Optional: the logo is used when it is not set, then the default Hexa icon.
+  faviconUrl: z.string().refine(isSafeIconUrl).optional(),
   // Hexa default: near-black canvas with purple and blue light. Tenants override both.
   primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#7c3aed"),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"),

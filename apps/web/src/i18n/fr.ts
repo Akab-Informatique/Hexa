@@ -19,7 +19,7 @@ export const fr = {
   nav: {
     team: "Équipe", team_dashboard: "Tableau de bord", team_meeting: "Rencontre d'équipe",
     mytools: "Mes outils", mytools_calendar: "Calendrier", mytools_mail: "Boîte de réception", mytools_timesheet: "Feuille de temps", mytools_expenses: "Dépenses", mytools_kb: "Base de connaissances", mytools_procedures: "Procédures",
-    command: "Centre de commande", command_board: "Babillard", command_pipeline: "Opérations",
+    command_pipeline: "Opérations", portal: "Portail", evolutions: "Évolutions du portail",
     tasks_all: "Tâches",
     management: "Gestion", docs_sharepoint: "Documentation", services_catalogue: "Services", accounting_contracts: "Contrats", clients_all: "Clients", tracking: "Suivi fiscal",
     accounting: "Comptabilité interne", accounting_invoices: "Factures", accounting_approvals: "Travail à facturer", accounting_vendors: "Fournisseurs et paiements",
@@ -47,7 +47,7 @@ export const fr = {
     newGroup: "Nouveau groupe", groupName: "Nom du groupe", groupDescription: "Description", members: "membres", locked: "Verrouillé", system: "Système",
     lockedHelp: "Ce groupe est géré par le système et ne peut pas être modifié.", deleteGroup: "Supprimer le groupe", confirmDelete: "Supprimer ce groupe ?",
     inherited: "Hérité", allow: "Autoriser", deny: "Refuser", selectAll: "Tout", granted: "droits accordés",
-    sectionTeam: "Équipe", sectionMytools: "Mes outils", sectionCommand: "Centre de commande", sectionManagement: "Gestion", sectionAccounting: "Comptabilité", sectionAdmin: "Administration", sectionClientportal: "Portail client",
+    sectionTeam: "Équipe", sectionMytools: "Mes outils", sectionManagement: "Gestion", sectionAccounting: "Comptabilité", sectionAdmin: "Administration", sectionClientportal: "Portail client",
     notConfigured: "À configurer", integrationSoon: "Chaque entreprise saisit ses propres identifiants d'application. Les secrets sont chiffrés et ne sont jamais réaffichés. La synchronisation elle-même est la prochaine étape.",
     o365Help: "Calendrier, courriels et SharePoint via Microsoft Graph. Nécessite l'enregistrement d'une application dans Azure (identifiant, secret et locataire).",
     mailjetHelp: "Envoi des messages aux clients et courriels du système. Nécessite une clé d'API et une clé secrète Mailjet.",

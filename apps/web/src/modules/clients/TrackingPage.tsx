@@ -29,13 +29,13 @@ const NEXT: Record<Status, Status> = { todo: "done", done: "na", na: "todo", pro
 const NEXT_YEAREND: Record<Status, Status> = { todo: "progress", progress: "review", review: "done", done: "todo", na: "todo" };
 
 // Memoized with primitive props only. Clicks are handled once on <tbody> (see onGridClick), which reads the data-* ids below.
-const Cell = memo(function Cell({ st, label, disabled, dim, tip, c, k, p, i }: { st: Status; label?: string; disabled?: boolean; dim?: boolean; tip?: string; c: string; k: Kind; p: string; i: string }) {
+const Cell = memo(function Cell({ st, label, disabled, dim, tip, c, k, p, i, compact }: { st: Status; label?: string; disabled?: boolean; dim?: boolean; compact?: boolean; tip?: string; c: string; k: Kind; p: string; i: string }) {
   const l = useL();
-  const txt = st === "done" ? "✓" : st === "na" ? "N/A" : st === "progress" ? l("en cours", "in progress") : st === "review" ? l("à vérifier", "to review") : "";
+  const txt = compact ? (st === "done" ? "✓" : st === "na" ? "–" : st === "progress" ? "…" : st === "review" ? "?" : "") : st === "done" ? "✓" : st === "na" ? "N/A" : st === "progress" ? l("en cours", "in progress") : st === "review" ? l("à vérifier", "to review") : "";
   const color = st === "done" ? "var(--ok)" : st === "progress" ? "var(--warn)" : st === "review" ? "var(--brand)" : "var(--muted)";
   return (
     <button type="button" aria-label={label} title={tip} disabled={disabled} data-c={c} data-k={k} data-p={p} data-i={i}
-      className={`h-7 min-w-[34px] whitespace-nowrap rounded-md border px-1 text-[11px] ${dim ? "opacity-40" : ""}`}
+      className={`h-7 ${compact ? "w-5 min-w-0 px-0 text-[12px]" : "min-w-[26px] px-0.5 text-[11px]"} whitespace-nowrap rounded-md border ${dim ? "opacity-40" : ""}`}
       style={{ color, borderColor: st === "todo" ? "var(--line)" : color, background: st === "todo" ? "transparent" : "rgb(255 255 255 / .05)" }}>{txt || "·"}</button>
   );
 });
@@ -102,13 +102,13 @@ export function TrackingView({ clientId }: { clientId?: string }) {
   const monthDue = (c: TClient, m: number) => c.taxFrequency !== "quarterly" || [1, 4, 7, 10].includes(m);
   const views: [View, string][] = [["clients", l("Dossiers", "Files")], ["das", "DAS"], ["tax", l("Taxes", "Taxes")], ["payroll", l("Paie", "Payroll")], ["yearend", l("Fin d'année", "Year-end")], ["t4rl1", "T4 / RL-1"], ["rl31", "RL-31"], ["t5", "T5"]];
   const sel = "input !w-auto !py-1 text-xs";
-  const th = "px-2 py-2 text-left text-[13px] font-semibold text-fg border-b border-white/10 whitespace-nowrap";
+  const th = "px-1.5 py-2 text-left text-[12px] font-semibold text-fg border-b border-white/10 whitespace-nowrap";
   const num = (v: unknown) => (v === null || v === undefined || v === "" ? "" : String(v));
   const amount = (c: string, kind: Kind, period: string, item: string) => (
     <input className="input !w-24 !py-1 text-right text-xs" title={tipOf(c, kind, period, item)} inputMode="decimal" disabled={!edit} defaultValue={num(get(c, kind, period, item)?.amount)} key={`${c}${kind}${period}${item}${num(get(c, kind, period, item)?.amount)}`}
       onBlur={(e) => { const v = e.target.value.trim().replace(",", "."); const n = v === "" ? null : Number(v); if (n !== null && Number.isNaN(n)) return; if ((n ?? null) !== (get(c, kind, period, item)?.amount == null ? null : Number(get(c, kind, period, item)?.amount))) void setFiling(c, kind, period, item, n === null ? "todo" : stOf(c, kind, period, item) === "todo" ? "progress" : stOf(c, kind, period, item), n); }} />
   );
-  const nameCell = (c: TClient) => (clientId ? null : <td className="whitespace-nowrap px-2 py-1 font-medium"><Link to={`/clients/${c.id}`} className="no-underline hover:underline">{c.name}</Link></td>);
+  const nameCell = (c: TClient) => (clientId ? null : <td className="trk-name px-2 py-1 font-medium"><Link to={`/clients/${c.id}`} title={c.name} className="block max-w-[150px] truncate no-underline hover:underline">{c.name}</Link></td>);
   const head = (children: React.ReactNode) => <tr>{!clientId && <th className={th}>{l("Client", "Client")}</th>}{children}</tr>;
   const ym = (m: number) => `${year}-${pad(m)}`;
 
@@ -140,13 +140,13 @@ export function TrackingView({ clientId }: { clientId?: string }) {
         {views.map(([k, label]) => <button key={k} role="tab" aria-selected={view === k} className={`rounded-lg px-3 py-1.5 ${view === k ? "bg-white/10 font-medium" : "text-muted"}`} onClick={() => setView(k)}>{label}</button>)}
       </div>
 
-      <div className="glass overflow-x-auto p-2">
+      <div className="glass overflow-x-auto p-1.5">
         {rows.length === 0 ? <Empty>{l("Aucun client.", "No clients.")}</Empty> : (
           <table className="grid trk">
             <thead>
               {view === "clients" && head(<><th className={th}>{l("Ressource", "Resource")}</th><th className={th}>{l("Fin d'année", "Year-end")}</th><th className={th}>{l("Tenue de livres faite jusqu'au", "Books done through")}</th><th className={th}>{l("Fréquence de vérification", "Check frequency")}</th><th className={th}>{l("Vérifié", "Checked")} {year}</th><th className={`${th} text-center`}>T4</th><th className={`${th} text-center`}>RL-1</th><th className={`${th} text-center`}>T4A</th></>)}
-              {view === "das" && <><tr>{!clientId && <th className={th} rowSpan={2}>{l("Client", "Client")}</th>}<th className={th} rowSpan={2}>{l("Qui déclare", "Filed by")}</th>{MONTHS.map((m, i) => <th key={i} colSpan={3} className="border-l border-white/10 border-b px-2 py-2 text-center text-[13px] font-semibold text-fg">{l(...m)}</th>)}</tr>
-                <tr>{MONTHS.flatMap((_, i) => ["Féd", "QC", "CCQ"].map((s) => <th key={`${i}${s}`} className={`${s === "Féd" ? "border-l border-white/10 " : ""}px-1 pb-1 text-center text-[11px] font-medium text-fg/80`}>{s}</th>))}</tr></>}
+              {view === "das" && <><tr>{!clientId && <th className={th} rowSpan={2}>{l("Client", "Client")}</th>}<th className={th} rowSpan={2} title={l("Qui déclare", "Filed by")}>{l("Décl.", "By")}</th>{MONTHS.map((m, i) => <th key={i} colSpan={3} className="border-l border-white/10 border-b !px-0 py-2 text-center text-[12px] font-semibold text-fg">{l(...m)}</th>)}</tr>
+                <tr>{MONTHS.flatMap((_, i) => ["Féd", "QC", "CCQ"].map((s) => <th key={`${i}${s}`} title={s} className={`${s === "Féd" ? "border-l border-white/10 " : ""}!px-0 pb-1 text-center text-[11px] font-medium text-fg/80`}>{s[0]}</th>))}</tr></>}
               {view === "tax" && head(<>{MONTHS.map((m, i) => <th key={i} className={`${th} text-center`}>{l(...m)}</th>)}<th className={th}>{l("Fréquence", "Frequency")}</th></>)}
               {view === "payroll" && head(<><th className={th}>{l("Période", "Period")}</th><th className={`${th} text-center`}>{l("Paies", "Payroll")}</th><th className={th}>{l("Système", "System")}</th><th className={th}>{l("Info / spécification", "Info / notes")}</th></>)}
               {view === "yearend" && head(<><th className={th}>{l("Fin d'année", "Year-end")}</th>{[year - 1, year, year + 1].map((y) => <th key={y} className={`${th} text-center`}>{y}</th>)}</>)}
@@ -156,7 +156,7 @@ export function TrackingView({ clientId }: { clientId?: string }) {
             </thead>
             <tbody onClick={onGridClick}>
               {rows.map((c) => {
-                const cell = (kind: Kind, period: string, item = "", dim = false) => <Cell st={stOf(c.id, kind, period, item)} tip={tipOf(c.id, kind, period, item)} disabled={!edit} dim={dim} label={`${c.name} ${period} ${item}`} c={c.id} k={kind} p={period} i={item} />;
+                const cell = (kind: Kind, period: string, item = "", dim = false) => <Cell compact={view === "das"} st={stOf(c.id, kind, period, item)} tip={tipOf(c.id, kind, period, item)} disabled={!edit} dim={dim} label={`${c.name} ${period} ${item}`} c={c.id} k={kind} p={period} i={item} />;
                 return (
                   <tr key={c.id}>
                     {nameCell(c)}
@@ -173,13 +173,13 @@ export function TrackingView({ clientId }: { clientId?: string }) {
                         <input autoFocus className="input !w-36 !py-1 text-xs" placeholder={l("Nouvelle option…", "New option…")} onKeyDown={(e) => { if (e.key === "Escape") setOther(null); if (e.key === "Enter") e.currentTarget.blur(); }}
                           onBlur={(e) => { const v = e.target.value.trim(); setOther(null); if (v) void setSettings(c.id, { dasFiler: v }); }} />
                       ) : (
-                        <select className={sel} disabled={!edit} value={c.dasFiler} onChange={(e) => { if (e.target.value === "__other") setOther(c.id); else void setSettings(c.id, { dasFiler: e.target.value }); }}>
+                        <select className="input !w-[84px] !px-1 !py-1 text-xs" title={c.dasFiler} disabled={!edit} value={c.dasFiler} onChange={(e) => { if (e.target.value === "__other") setOther(c.id); else void setSettings(c.id, { dasFiler: e.target.value }); }}>
                           <option value="">—</option><option value="us">{l("Nous", "Us")}</option><option value="them">{l("Eux", "Them")}</option><option value="them_ccq_us">{l("Eux – CCQ nous", "Them – CCQ us")}</option>
                           {customFilers.map((f) => <option key={f} value={f}>{f}</option>)}
                           {edit && <option value="__other">{l("Autre…", "Other…")}</option>}
                         </select>
                       )}</td>
-                      {MONTHS.flatMap((_, i) => ["fed", "prov", "ccq"].map((it) => <td key={`${i}${it}`} className={`${it === "fed" ? "border-l border-white/10 " : ""}px-0.5 text-center`}>{cell("das", ym(i + 1), it)}</td>))}
+                      {MONTHS.flatMap((_, i) => ["fed", "prov", "ccq"].map((it) => <td key={`${i}${it}`} className={`${it === "fed" ? "border-l border-white/10 " : ""}!px-0 text-center`}>{cell("das", ym(i + 1), it)}</td>))}
                     </>}
                     {view === "tax" && <>
                       {MONTHS.map((_, i) => <td key={i} className="px-0.5 text-center">{cell("tax", ym(i + 1), "", !monthDue(c, i + 1))}</td>)}

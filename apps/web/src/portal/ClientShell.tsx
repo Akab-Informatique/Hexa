@@ -61,7 +61,7 @@ export default function ClientShell() {
           <button className="btn !p-2" onClick={() => setDrawer((d) => !d)} aria-label="Menu">{drawer ? <X size={18} /> : <Menu size={18} />}</button>
           <BrandMark name={brand.appName} logoUrl={brand.logoUrl} size={28} /><span className="font-semibold">{brand.appName}</span>
         </div>
-        <div className="mx-auto max-w-5xl p-4 lg:p-8"><Outlet /></div>
+        <div className="mx-auto max-w-7xl p-3 lg:p-5"><Outlet /></div>
       </main>
     </div>
   );

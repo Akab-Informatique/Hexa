@@ -10,7 +10,7 @@ import { ServiceError } from "../lib/services.ts";
 
 // Each firm registers its own apps with Microsoft, Intuit and Mailjet and enters the credentials here.
 // Secret fields are sealed at rest and never returned: the API only says whether they are set.
-export interface FieldDef { key: string; label: { fr: string; en: string }; secret?: boolean; options?: string[]; placeholder?: string }
+export interface FieldDef { key: string; label: { fr: string; en: string }; secret?: boolean; options?: string[]; placeholder?: string; optional?: boolean }
 export const PROVIDERS: Record<string, { label: string; fields: FieldDef[] }> = {
   o365: { label: "Microsoft 365", fields: [
     { key: "tenantId", label: { fr: "ID de l'annuaire (tenant)", en: "Directory (tenant) ID" } },
@@ -30,6 +30,7 @@ export const PROVIDERS: Record<string, { label: string; fields: FieldDef[] }> = 
     { key: "environment", label: { fr: "Environnement", en: "Environment" }, options: ["sandbox", "production"] },
     { key: "clientId", label: { fr: "ID client Intuit", en: "Intuit client ID" } },
     { key: "clientSecret", label: { fr: "Secret client Intuit", en: "Intuit client secret" }, secret: true },
+    { key: "taxCodeId", label: { fr: "ID du code de taxe QuickBooks (TPS/TVQ)", en: "QuickBooks tax code id (GST/QST)" }, placeholder: "ex. 5", optional: true },
   ] },
 };
 
@@ -49,7 +50,7 @@ integrationRoutes.get("/", requirePermission("admin.integrations.view", "admin.i
         value: f.secret ? "" : (row?.config?.[f.key] ?? ""),
         isSet: f.secret ? Boolean(secrets[f.key]) : Boolean(row?.config?.[f.key]),
       })),
-      configured: def.fields.filter((f) => f.key !== "senderName").every((f) => (f.secret ? Boolean(secrets[f.key]) : Boolean(row?.config?.[f.key]))),
+      configured: def.fields.filter((f) => f.key !== "senderName" && !f.optional).every((f) => (f.secret ? Boolean(secrets[f.key]) : Boolean(row?.config?.[f.key]))),
     };
   }));
 });
@@ -100,7 +101,7 @@ export async function integrationStatus(): Promise<Record<string, { configured: 
     const secrets = open(row?.secret_enc);
     out[key] = {
       enabled: Boolean(row?.enabled),
-      configured: Boolean(row) && def.fields.filter((f) => f.key !== "senderName").every((f) => (f.secret ? Boolean(secrets[f.key]) : Boolean(row.config?.[f.key]))),
+      configured: Boolean(row) && def.fields.filter((f) => f.key !== "senderName" && !f.optional).every((f) => (f.secret ? Boolean(secrets[f.key]) : Boolean(row.config?.[f.key]))),
     };
   }
   return out;

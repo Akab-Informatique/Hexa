@@ -126,7 +126,8 @@ export const isBrandy = (hex: string) => { const c = hsl(hex); return c.s >= 0.2
 
 export interface ColorHit { hex: string; source: string }
 export interface LogoHit { url: string; source: string }
-export interface Found { title: string; colors: ColorHit[]; logos: LogoHit[]; stylesheets: string[]; manifest?: string }
+export interface IconHit { url: string; source: "apple-touch-icon" | "icon" | "favicon.ico"; size: number; ext: string }
+export interface Found { title: string; colors: ColorHit[]; logos: LogoHit[]; icons: IconHit[]; stylesheets: string[]; manifest?: string }
 
 const attr = (tag: string, name: string) => tag.match(new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"))?.slice(1).find((x) => x !== undefined);
 const abs = (href: string | undefined, base: string): string | null => {
@@ -167,10 +168,15 @@ export function extractBrand(html: string, base: string): Found {
   let manifest: string | undefined;
   const stylesheets: string[] = [];
   const icons: LogoHit[] = [];
+  const iconHits: IconHit[] = [];
   for (const l of links) {
     const rel = (attr(l, "rel") ?? "").toLowerCase();
     const href = abs(attr(l, "href"), base);
     if (!href) continue;
+    if (rel.includes("apple-touch-icon") || rel.split(/\s+/).includes("icon")) {
+      const sz = Math.max(0, ...(attr(l, "sizes") ?? "").split(/\s+/).map((x) => Number(x.split("x")[0]) || 0));
+      iconHits.push({ url: href, source: rel.includes("apple-touch-icon") ? "apple-touch-icon" : "icon", size: sz, ext: (href.split(/[?#]/)[0]!.match(/\.([a-z0-9]+)$/i)?.[1] ?? "").toLowerCase() });
+    }
     if (rel.includes("apple-touch-icon")) icons.push({ url: href, source: "apple-touch-icon" });
     else if (rel.split(/\s+/).includes("icon") && !/\.ico(\?|$)/i.test(href)) icons.push({ url: href, source: "icon" });
     else if (rel.includes("manifest")) manifest = href;
@@ -186,12 +192,37 @@ export function extractBrand(html: string, base: string): Found {
 
   const seen = new Set<string>();
   const uniqueLogos = logos.filter((x) => (seen.has(x.url) ? false : (seen.add(x.url), true))).slice(0, 6);
-  return { title, colors: dedupeColors(colors), logos: uniqueLogos, stylesheets: stylesheets.slice(0, 3), manifest };
+  try { iconHits.push({ url: new URL("/favicon.ico", base).href, source: "favicon.ico", size: 0, ext: "ico" }); } catch { /* bad base */ }
+  return { title, colors: dedupeColors(colors), logos: uniqueLogos, icons: iconHits, stylesheets: stylesheets.slice(0, 3), manifest };
+}
+
+/**
+ * Best tab icon first. Only formats a browser tab takes from an upload (PNG, ICO, WebP; no SVG) are kept.
+ * The touch icon (large, square, opaque) beats a PNG icon, which beats an unsized one, which beats a plain .ico.
+ */
+export function rankFavicons(icons: IconHit[]): IconHit[] {
+  const score = (i: IconHit) => {
+    if (!["png", "ico", "webp", ""].includes(i.ext)) return -1;
+    if (i.source === "apple-touch-icon") return 3000 + Math.min(i.size || 120, 512);
+    if (i.source === "favicon.ico") return 100;
+    if (i.ext === "ico") return 200 + Math.min(i.size, 64);
+    return 1000 + Math.min(i.size || 48, 512);
+  };
+  const seen = new Set<string>();
+  return icons.filter((i) => score(i) >= 0 && (seen.has(i.url) ? false : (seen.add(i.url), true))).sort((a, b) => score(b) - score(a));
 }
 
 export function dedupeColors(list: ColorHit[]): ColorHit[] {
   const seen = new Set<string>();
   return list.filter((c) => (seen.has(c.hex) ? false : (seen.add(c.hex), true)));
+}
+
+/** Real type of a tab icon from its first bytes: PNG, ICO or WebP only. */
+export function sniffIcon(b: Buffer): "image/png" | "image/x-icon" | "image/webp" | null {
+  if (b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (b.length > 6 && b[0] === 0 && b[1] === 0 && b[2] === 1 && b[3] === 0 && b[4]! > 0) return "image/x-icon";
+  if (b.length > 12 && b.subarray(0, 4).toString() === "RIFF" && b.subarray(8, 12).toString() === "WEBP") return "image/webp";
+  return null;
 }
 
 /** Sniffs the real image type from the first bytes (a server's content-type header can lie). */

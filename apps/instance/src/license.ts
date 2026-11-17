@@ -19,7 +19,7 @@ const licensingEnabled = () => Boolean(config.consoleUrl && config.clientId && c
  * The firm's own look. It is white label, so what the firm sets here wins over the supplier's default
  * (the branding that comes with the license). Empty fields fall back to the supplier's.
  */
-export type BrandingOverride = Partial<Pick<Branding, "appName" | "primaryColor" | "accentColor" | "logoUrl">>;
+export type BrandingOverride = Partial<Pick<Branding, "appName" | "primaryColor" | "accentColor" | "logoUrl" | "faviconUrl">>;
 let override: BrandingOverride = {};
 export const brandingOverride = (): BrandingOverride => override;
 export async function setBrandingOverride(o: BrandingOverride): Promise<void> {

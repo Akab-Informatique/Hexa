@@ -17,9 +17,9 @@ import { clientRoutes } from "./routes/clients.ts";
 import { trackingRoutes } from "./routes/tracking.ts";
 import { autoTaskRuleRoutes } from "./routes/autoTaskRules.ts";
 import { taskRoutes } from "./routes/tasks.ts";
+import { evolutionRoutes } from "./routes/evolutions.ts";
 import { teamRoutes } from "./routes/team.ts";
 import { myToolsRoutes } from "./routes/mytools.ts";
-import { commandRoutes } from "./routes/command.ts";
 import { accountingRoutes } from "./routes/accounting.ts";
 import { hrRoutes } from "./routes/hr.ts";
 import { portalAdminRoutes, portalRoutes } from "./routes/portal.ts";
@@ -84,6 +84,15 @@ export function buildApp(): Hono<Env> {
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     } });
   });
+  // The tab icon (public: the sign-in screen sets it before anyone is signed in).
+  app.get("/api/branding/favicon", async (c) => {
+    const icon = await getSetting<{ type: string; b64: string }>("branding_favicon");
+    if (!icon) return c.json({ error: "not found" }, 404);
+    return new Response(Buffer.from(icon.b64, "base64"), { headers: {
+      "content-type": icon.type, "x-content-type-options": "nosniff", "cache-control": "public, max-age=3600",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    } });
+  });
   app.get("/api/config", (c) => {
     const lic = license.current();
     const a = c.get("auth");
@@ -112,10 +121,10 @@ export function buildApp(): Hono<Env> {
   app.route("/api/auto-task-rules", autoTaskRuleRoutes);
   app.route("/api/tasks", taskTimerRoutes);
   app.route("/api/tasks", taskRoutes);
+  app.route("/api/evolutions", evolutionRoutes);
   app.route("/api/team/meeting", meetingRoutes);
   app.route("/api/team", teamRoutes);
   app.route("/api/my", myToolsRoutes);
-  app.route("/api/command", commandRoutes);
   app.route("/api/accounting/quickbooks", quickbooksRoutes);
   app.route("/api/accounting", mailingRoutes);
   app.route("/api/accounting", vendorPaymentRoutes);

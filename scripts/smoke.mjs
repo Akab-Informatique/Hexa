@@ -88,9 +88,7 @@ const bill = await call("POST", "/api/accounting/bills", { vendorId: vendor.body
 const bills = await call("GET", "/api/accounting/bills");
 ok("overdue bill counted", bill.status === 201 && bills.body.totals.overdue >= 500);
 
-// ---- Board, docs, KB, procedures, HR, integrations ----
-ok("post board message", (await call("POST", "/api/command/board", { title: "SMOKE msg", audience: "selected", clientIds: [cid], emailCopy: true })).status === 201);
-ok("selected audience needs a client", (await call("POST", "/api/command/board", { title: "x", audience: "selected", clientIds: [] })).status === 400);
+// ---- Docs, KB, procedures, HR, integrations ----
 ok("kb article", (await call("POST", "/api/my/kb", { title: "SMOKE kb", body: "hello" })).status === 201);
 const proc = await call("POST", "/api/my/procedures", { title: "SMOKE proc", steps: [{ title: "one" }, { title: "two" }] });
 ok("procedure with steps", proc.status === 201 && (await call("GET", `/api/my/procedures/${proc.body.id}`)).body.steps.length === 2);
@@ -468,7 +466,9 @@ const dayOf = (date, extra = "", as) => call("GET", `/api/pipeline/day?date=${da
 const dayPlan = (await dayOf(D)).body;
 const titles = dayPlan.items.map((i) => i.title);
 ok("the plate holds what is due, daily and continuous tasks, not what is for later", titles.includes("SMOKE urgente") && titles.includes("SMOKE quotidienne") && titles.includes("SMOKE continue") && !titles.includes("SMOKE plus tard"));
-ok("the urgent one comes first", dayPlan.items[0].title === "SMOKE urgente");
+// Other urgent or in-progress tasks already in a persistent dev DB may rightly rank above ours, so compare the SMOKE tasks among themselves.
+const smokeOrder = titles.filter((t) => ["SMOKE urgente", "SMOKE normale", "SMOKE pas avant dix heures"].includes(t));
+ok("the urgent one comes first", smokeOrder[0] === "SMOKE urgente" && smokeOrder.lastIndexOf("SMOKE urgente") < smokeOrder.indexOf("SMOKE normale"), smokeOrder.join());
 const taskBlocks = dayPlan.blocks.filter((b) => b.kind === "task");
 const toMin = (s) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
 ok("work is laid out from the start of the dayOf, never in lunch or on top of each other", taskBlocks[0].start === "08:30" && taskBlocks.every((b) => toMin(b.end) <= 720 || toMin(b.start) >= 780) && taskBlocks.every((b, i) => i === 0 || toMin(b.start) >= toMin(taskBlocks[i - 1].end)), JSON.stringify(taskBlocks));
@@ -578,9 +578,6 @@ ok("wrong Mailjet keys are reported, not hidden", (await post("/api/admin/integr
 await igPut("mailjet", { apiKey: "mock-key", secretKey: "mock-secret", senderEmail: "firme@acme.test", senderName: "Acme" });
 const tm = await post("/api/admin/integrations/mailjet/test", { to: "dest@example.com" });
 ok("the test email goes out with the right credentials", tm.status === 200 && (await mockMails()).some((m) => m.subject.startsWith("Test Hexa") && m.to[0].Email === "dest@example.com" && m.from.Email === "firme@acme.test"));
-const bm = await post("/api/command/board", { title: "SMOKE avis aux clients", body: "Bonjour a tous", audience: "selected", clientIds: [cid], emailCopy: true });
-ok("a board message is emailed to the clients it targets", bm.body.email.status === "sent" && bm.body.email.sent === 1 && (await mockMails()).some((m) => m.subject === "SMOKE avis aux clients" && m.to[0].Email === "jane@example.com"));
-ok("…and its status shows as sent", (await call("GET", "/api/command/board")).body.find((m) => m.id === bm.body.id)?.emailStatus === "sent");
 const draftInv = (await post("/api/accounting/invoices", { clientId: bid, lines: [{ description: "SMOKE draft", quantity: 1, unitPrice: 10 }] })).body.id;
 ok("a draft invoice cannot be emailed", (await post(`/api/accounting/invoices/${draftInv}/email`, { to: "x@example.com" })).body?.error === "invoice_not_sent");
 ok("an invoice with no billing address asks for one", (await post(`/api/accounting/invoices/${madeInv.created[0]}/email`, {})).body?.error === "no_billing_email");
@@ -685,8 +682,6 @@ const poInvA2 = (await post("/api/accounting/invoices", { clientId: poA, lines: 
 const poInvB = (await post("/api/accounting/invoices", { clientId: poB, lines: [{ description: "SMOKE B service", quantity: 1, unitPrice: 999 }] })).body.id;
 await post(`/api/accounting/invoices/${poInvA}/action`, { action: "send" });
 await post(`/api/accounting/invoices/${poInvB}/action`, { action: "send" });
-await post("/api/command/board", { title: "SMOKE for everyone", body: "hello all", audience: "all" });
-await post("/api/command/board", { title: "SMOKE only B", body: "secret for B", audience: "selected", clientIds: [poB] });
 await post(`/api/clients/${poA}/contracts`, { name: "SMOKE A contract", kind: "recurring", amount: 500 });
 await post(`/api/clients/${poB}/contracts`, { name: "SMOKE B contract", kind: "recurring", amount: 700 });
 
@@ -718,12 +713,10 @@ const poSt = (await call("GET", "/api/portal/statement", undefined, poCc)).body;
 ok("the statement is the client's own", poSt.rows.length === 1 && poSt.rows[0].id === poInvA && poSt.total === poInv[0].balance);
 const poCon = (await call("GET", "/api/portal/contracts", undefined, poCc)).body;
 ok("contracts are the client's own", poCon.length === 1 && poCon[0].name === "SMOKE A contract");
-const poBoard = (await call("GET", "/api/portal/board", undefined, poCc)).body.map((m) => m.title);
-ok("the board shows messages for everyone and none meant for another client", poBoard.includes("SMOKE for everyone") && !poBoard.includes("SMOKE only B"));
 const poMe = (await call("GET", "/api/portal/me", undefined, poCc)).body;
 ok("the portal summary shows the balance", poMe.client.name === "SMOKE Portal A" && poMe.balance === poInv[0].balance);
 
-for (const p of ["/api/clients", "/api/accounting/invoices", "/api/tasks", "/api/admin/users", "/api/directory/clients", "/api/directory/integrations", "/api/update/status", "/api/command/board", "/api/team/dashboards", "/api/docs/access"]) {
+for (const p of ["/api/clients", "/api/accounting/invoices", "/api/tasks", "/api/admin/users", "/api/directory/clients", "/api/directory/integrations", "/api/update/status", "/api/team/dashboards", "/api/docs/access"]) {
   const r = await call("GET", p, undefined, poCc);
   ok(`a client is refused on ${p}`, r.status === 403 || r.status === 401, String(r.status));
 }
@@ -736,7 +729,6 @@ await call("POST", "/api/auth/set-password", { token: poTokB, password: PO_PW },
 const poCb = (await clientLogin("bob.portal@b.test", PO_PW)).cookie;
 const poBInv = (await call("GET", "/api/portal/invoices", undefined, poCb)).body;
 ok("client B sees only B's invoice", poBInv.length === 1 && poBInv[0].id === poInvB && (await call("GET", `/api/portal/invoices/${poInvA}`, undefined, poCb)).status === 404);
-ok("client B sees the message meant for B", (await call("GET", "/api/portal/board", undefined, poCb)).body.some((m) => m.title === "SMOKE only B"));
 
 // Documents for a client
 ok("no folder rule: a client sees no library", (await call("GET", "/api/docs/libraries", undefined, poCc)).body.length === 0);

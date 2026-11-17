@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { colorsFromCss, extractBrand, hsl, isBrandy, isPrivateAddress, normalizeColor, parseSiteUrl, safeGet, sniffImage } from "../apps/instance/src/lib/siteBrand.ts";
+import { colorsFromCss, extractBrand, hsl, isBrandy, isPrivateAddress, normalizeColor, parseSiteUrl, rankFavicons, safeGet, sniffIcon, sniffImage } from "../apps/instance/src/lib/siteBrand.ts";
 
 describe("site fetch guard (nothing internal can be reached)", () => {
   it("flags loopback, private, link-local, shared and reserved addresses", () => {
@@ -89,5 +89,33 @@ describe("image sniffing", () => {
     expect(sniffImage(Buffer.from('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>'))).toBe("image/svg+xml");
     expect(sniffImage(Buffer.from("<html><body>not an image</body></html>"))).toBeNull();
     expect(sniffImage(Buffer.alloc(0))).toBeNull();
+  });
+});
+
+describe("tab icon (favicon)", () => {
+  const base = "https://abezeau.com/";
+  it("prefers the touch icon, then a sized PNG, then an .ico, then /favicon.ico; skips svg", () => {
+    const html = `<link rel="icon" href="/f.ico"><link rel="icon" type="image/png" sizes="32x32" href="/i32.png"><link rel="icon" sizes="192x192" href="/i192.png">
+      <link rel="apple-touch-icon" sizes="180x180" href="/touch.png"><link rel="icon" href="/x.svg">`;
+    const r = rankFavicons(extractBrand(html, base).icons).map((i) => i.url);
+    expect(r[0]).toBe("https://abezeau.com/touch.png");
+    expect(r.slice(0, 3)).toEqual(["https://abezeau.com/touch.png", "https://abezeau.com/i192.png", "https://abezeau.com/i32.png"]);
+    expect(r).not.toContain("https://abezeau.com/x.svg");
+    expect(r.at(-1)).toBe("https://abezeau.com/favicon.ico");
+  });
+  it("falls back to /favicon.ico when the page declares nothing", () => {
+    expect(rankFavicons(extractBrand("<html></html>", base).icons).map((i) => i.url)).toEqual(["https://abezeau.com/favicon.ico"]);
+  });
+  it("recognizes PNG, ICO and WebP by their bytes only", () => {
+    expect(sniffIcon(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]))).toBe("image/png");
+    expect(sniffIcon(Buffer.from([0, 0, 1, 0, 1, 0, 16, 16]))).toBe("image/x-icon");
+    expect(sniffIcon(Buffer.concat([Buffer.from("RIFF"), Buffer.from([0, 0, 0, 0]), Buffer.from("WEBPVP8 ")]))).toBe("image/webp");
+    expect(sniffIcon(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'></svg>"))).toBeNull();
+    expect(sniffIcon(Buffer.from("<html>not an image</html>"))).toBeNull();
+  });
+  it("accepts only https URLs and same-origin paths", async () => {
+    const { isSafeIconUrl } = await import("../packages/shared/src/index.ts");
+    for (const u of ["https://a.com/i.png", "/api/branding/favicon?v=1"]) expect(isSafeIconUrl(u), u).toBe(true);
+    for (const u of ["javascript:alert(1)", "data:image/png;base64,AAAA", "http://a.com/i.png", "//evil.com/i.png", "/\\evil.com", "", "https://a.com/a b", "vbscript:x"]) expect(isSafeIconUrl(u), u).toBe(false);
   });
 });

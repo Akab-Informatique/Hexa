@@ -8,7 +8,7 @@ const MS = { clientId: "ms-client-id", secret: "ms-secret", code: "MSCODE" };
 const QB = { clientId: "qb-client-id", secret: "qb-secret", code: "QBCODE", realm: "9130000000000001" };
 const MJ = { auth: "Basic " + Buffer.from("mock-key:mock-secret").toString("base64") };
 
-const state = { mails: [], seq: 1, msAccess: new Set(), msRefresh: new Set(), qbAccess: new Set(), qbRefresh: new Set(), customers: [], items: [], invoices: [], nextId: 100 };
+const state = { mails: [], seq: 1, msAccess: new Set(), msRefresh: new Set(), qbAccess: new Set(), qbRefresh: new Set(), customers: [], items: [], invoices: [], nextId: 100, rids: new Map() };
 const reset = () => {
   Object.assign(state, { mails: [], msAccess: new Set(), msRefresh: new Set(), qbAccess: new Set(), qbRefresh: new Set(), nextId: 100 });
   state.customers = [{ Id: "58", DisplayName: "Boulangerie Dupont", SyncToken: "0" }, { Id: "59", DisplayName: "Autre Client Ltée", SyncToken: "0" }];
@@ -17,7 +17,7 @@ const reset = () => {
 };
 reset();
 
-const send = (res, status, body, headers = {}) => { res.writeHead(status, { "content-type": "application/json", ...headers }); res.end(JSON.stringify(body)); };
+const send = (res, status, body, headers = {}) => { if (res.__rid && status === 200) state.rids.set(res.__rid, body); res.writeHead(status, { "content-type": "application/json", ...headers }); res.end(JSON.stringify(body)); };
 const readBody = (req) => new Promise((resolve) => { let d = ""; req.on("data", (c) => (d += c)); req.on("end", () => resolve(d)); });
 const fault = (res, status, code, message, detail = "") => send(res, status, { Fault: { Error: [{ Message: message, Detail: detail, code }], type: "ValidationFault" } });
 const bearer = (req, set) => { const h = req.headers.authorization ?? ""; return h.startsWith("Bearer ") && set.has(h.slice(7)); };
@@ -111,6 +111,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 400, { error: "unsupported_grant_type" });
   }
 
+  if (p === "/intuit/revoke" && req.method === "POST") return send(res, 200, {});
   // ---------------- QuickBooks Online
   m = /^\/qbo\/v3\/company\/([^/]+)(\/.*)$/.exec(p);
   if (m) {
@@ -118,6 +119,10 @@ const server = http.createServer(async (req, res) => {
     if (m[1] !== QB.realm) return fault(res, 400, "610", "Company not found");
     if (!url.searchParams.get("minorversion")) return fault(res, 400, "2020", "minorversion missing");
     const path = m[2];
+    // Like Intuit: the same requestid on a POST answers with the first result instead of creating again.
+    const rid = url.searchParams.get("requestid");
+    if (req.method === "POST" && rid && state.rids.has(rid)) return send(res, 200, state.rids.get(rid));
+    if (req.method === "POST" && rid) res.__rid = rid;
     if (path === "/query") {
       const sql = url.searchParams.get("query") ?? "";
       if (/from Customer/i.test(sql)) {
@@ -125,6 +130,8 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { QueryResponse: { Customer: name ? state.customers.filter((c) => c.DisplayName === name) : state.customers } });
       }
       if (/from Item/i.test(sql)) return send(res, 200, { QueryResponse: { Item: state.items.filter((i) => /Name = 'Services'/.test(sql) ? i.Name === "Services" : true) } });
+      if (/from Invoice/i.test(sql)) { const dn = /DocNumber = '((?:[^'\\]|\\.)*)'/i.exec(sql)?.[1]?.replace(/\\'/g, "'"); return send(res, 200, { QueryResponse: { Invoice: state.invoices.filter((i) => i.DocNumber === dn) } }); }
+      if (/from TaxCode/i.test(sql)) return send(res, 200, { QueryResponse: { TaxCode: [{ Id: "5", Name: "GST/QST QC - 9.975", Active: true }] } });
       if (/from Account/i.test(sql)) return send(res, 200, { QueryResponse: { Account: [{ Id: "1", Name: "Services", AccountType: "Income" }] } });
       return send(res, 200, { QueryResponse: {} });
     }
@@ -139,6 +146,13 @@ const server = http.createServer(async (req, res) => {
     if (path === "/item" && req.method === "POST") { const b = json(); if (!b.IncomeAccountRef?.value) return fault(res, 400, "2020", "IncomeAccountRef required"); const it = { Id: String(state.nextId++), SyncToken: "0", ...b }; state.items.push(it); return send(res, 200, { Item: it }); }
     if (path === "/invoice" && req.method === "POST") {
       const b = json();
+      if (url.searchParams.get("operation") === "void") {
+        const cur = state.invoices.find((i) => i.Id === b.Id);
+        if (!cur) return fault(res, 400, "610", "Object Not Found");
+        if (b.SyncToken !== cur.SyncToken) return fault(res, 400, "5010", "Stale Object Error");
+        Object.assign(cur, { TotalAmt: 0, Balance: 0, PrivateNote: "Voided", SyncToken: String(Number(cur.SyncToken) + 1) });
+        return send(res, 200, { Invoice: cur });
+      }
       if (!b.CustomerRef?.value || !state.customers.some((c) => c.Id === b.CustomerRef.value)) return fault(res, 400, "2500", "Invalid Reference Id", "CustomerRef");
       if (!Array.isArray(b.Line) || !b.Line.length || b.Line.some((l) => !l.SalesItemLineDetail?.ItemRef?.value)) return fault(res, 400, "2020", "Line with ItemRef required");
       const total = Math.round(b.Line.reduce((a, l) => a + Number(l.Amount), 0) * 100) / 100;
@@ -155,7 +169,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { Invoice: inv });
     }
     const one = /^\/invoice\/(.+)$/.exec(path);
-    if (one && req.method === "GET") { const inv = state.invoices.find((i) => i.Id === one[1]); return inv ? send(res, 200, { Invoice: inv }) : fault(res, 404, "610", "Object Not Found"); }
+    if (one && req.method === "GET") { const inv = state.invoices.find((i) => i.Id === one[1]); return inv ? send(res, 200, { Invoice: inv }) : fault(res, 400, "610", "Object Not Found"); }
     return send(res, 404, { Fault: { Error: [{ Message: "Not found" }] } });
   }
 

@@ -48,7 +48,7 @@ export const MODULES: ModuleDef[] = [
     ],
   },
   {
-    key: "command", audience: "staff", section: "command", label: { fr: "Centre de commande", en: "Command center" },
+    key: "command", audience: "staff", section: "mytools", label: { fr: "Opérations", en: "Operations" },
     permissions: [
       p("command.board.view", "Voir le babillard", "View the message board"),
       p("command.board.post", "Publier un message", "Post a message"),
@@ -121,6 +121,13 @@ export const MODULES: ModuleDef[] = [
     ],
   },
   {
+    key: "evolutions", audience: "staff", section: "management", label: { fr: "Évolutions du portail", en: "Portal changes" },
+    permissions: [
+      p("evolutions.view", "Voir les évolutions du portail", "View the portal changes list"),
+      p("evolutions.edit", "Ajouter, modifier, commenter et valider les évolutions", "Add, edit, comment on and validate portal changes"),
+    ],
+  },
+  {
     key: "admin", audience: "staff", section: "admin", label: { fr: "Administration", en: "Administration" },
     permissions: [
       p("admin.users.view", "Voir les utilisateurs", "View users"),
@@ -147,6 +154,9 @@ export const MODULES: ModuleDef[] = [
     ],
   },
 ];
+
+/** Retired rights (the staff message board is gone): still valid for stored groups/users, but no longer offered. */
+export const RETIRED_PERMISSIONS: ReadonlySet<string> = new Set(["command.board.view", "command.board.post", "command.board.email", "command.board.manage"]);
 
 export const ALL_PERMISSIONS = MODULES.flatMap((m) => m.permissions.map((x) => ({ ...x, module: m.key, audience: m.audience })));
 const AUDIENCE_OF = new Map(ALL_PERMISSIONS.map((x) => [x.key, x.audience]));

@@ -27,7 +27,21 @@ export function Points() {
   const q = useQuery({ queryKey: ["meeting-points", view, search], queryFn: () => api<{ points: Point[]; later: number }>(`/api/team/meeting/points?view=${view}&q=${encodeURIComponent(search)}`), refetchInterval: 15_000 });
   const edit = can("team.meeting.edit", "team.meeting.manage");
   const manage = can("team.meeting.manage");
-  const pts = q.data?.points ?? [];
+  // Points settled on this screen stay in place, ticked, until the page is left; ticking again puts them back (no jump, no disappearing).
+  const [settled, setSettled] = useState<Record<string, { p: Point; at: number }>>({});
+  const live = q.data?.points ?? [];
+  const pts = (() => {
+    if (view !== "open") return live;
+    const out = [...live];
+    for (const { p, at } of Object.values(settled).sort((a, b) => a.at - b.at)) if (!out.some((x) => x.id === p.id)) out.splice(Math.min(at, out.length), 0, p);
+    return out;
+  })();
+  const tick = async (p: Point, i: number) => {
+    const was = settled[p.id];
+    const set = (on: boolean) => setSettled((s) => { const n = { ...s }; if (on) n[p.id] = { p, at: i }; else delete n[p.id]; return n; });
+    set(!was); // shown first so the refetch never makes it blink out
+    try { setError(""); await api(`/api/team/meeting/points/${p.id}`, { method: "PATCH", body: { done: !was } }); await refresh(); } catch (e) { set(!!was); setError(errMsg(e, "Error")); }
+  };
   const refresh = async () => { await qc.invalidateQueries({ queryKey: ["meeting-points"] }); await qc.invalidateQueries({ queryKey: ["w-meeting"] }); };
   const run = async (fn: () => Promise<unknown>) => { try { setError(""); await fn(); await refresh(); } catch (e) { setError(errMsg(e, "Error")); } };
   const patch = (id: string, b: object) => run(() => api(`/api/team/meeting/points/${id}`, { method: "PATCH", body: b }));
@@ -44,24 +58,25 @@ export function Points() {
       {view === "archive" && <div className="relative mb-3"><Search size={14} className="pointer-events-none absolute left-3 top-3 text-muted" /><input className="input !pl-8" placeholder={l("Rechercher dans les archives…", "Search the archive…")} value={search} onChange={(e) => setSearch(e.target.value)} /></div>}
       {error && <p role="alert" className="mb-2 text-sm text-danger">{error}</p>}
       {pts.length === 0 ? <Empty>{view === "open" ? l("Aucun point. Ajoutez-en un ci-dessous.", "No points. Add one below.") : view === "later" ? l("Rien de reporté.", "Nothing put off.") : l("Archives vides.", "Archive is empty.")}</Empty> : (
-        <ul className="space-y-1.5">{pts.map((p) => (
+        <ul className="space-y-1.5">{pts.map((p, i) => { const fait = view === "open" && !!settled[p.id]; return (
           <li key={p.id} onDragOver={(e) => view === "open" && manage && e.preventDefault()} onDrop={() => { if (dragId) reorder(dragId, p.id); setDragId(null); }}>
             <div className="flex items-start gap-2 text-sm" style={{ opacity: dragId === p.id ? 0.4 : 1 }}>
-              {view === "open" && manage && <span draggable onDragStart={() => setDragId(p.id)} onDragEnd={() => setDragId(null)} className="mt-0.5 cursor-grab text-muted" title={l("Glisser pour réordonner", "Drag to reorder")}><GripVertical size={14} /></span>}
-              {view !== "archive" ? <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--brand)]" checked={false} disabled={!edit} onChange={() => void patch(p.id, { done: true })} aria-label={l("Régler ce point", "Settle this point")} />
+              {view === "open" && manage && !fait && <span draggable onDragStart={() => setDragId(p.id)} onDragEnd={() => setDragId(null)} className="mt-0.5 cursor-grab text-muted" title={l("Glisser pour réordonner", "Drag to reorder")}><GripVertical size={14} /></span>}
+              {view !== "archive" ? <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--brand)]" checked={fait} disabled={!edit} onChange={() => void tick(p, i)} aria-label={fait ? l("Remettre ce point à faire", "Put this point back") : l("Régler ce point", "Settle this point")} />
                 : <button className="btn !p-1" title={l("Remettre sur la liste", "Back on the list")} onClick={() => void patch(p.id, { archived: false })}><RotateCcw size={13} /></button>}
               <button className="min-w-0 flex-1 text-left" onClick={() => setOpenId(openId === p.id ? null : p.id)}>
-                <span className={p.kind === "issue" ? "text-warn" : ""}>{p.kind === "issue" ? "⚠ " : ""}{p.title}</span>
+                <span className={`${p.kind === "issue" && !fait ? "text-warn" : ""} ${fait ? "text-muted line-through" : ""}`}>{p.kind === "issue" ? "⚠ " : ""}{p.title}</span>
+                {fait && <span className="ml-2 rounded-md border px-1.5 text-[11px]" style={{ color: "var(--ok)", borderColor: "var(--ok)" }}>{l("Fait", "Done")}</span>}
                 <span className="ml-2 text-xs text-muted">{p.authorName}{p.snoozeUntil && view === "later" ? ` · ${l("revient le", "back on")} ${fmtDate(p.snoozeUntil, loc)}` : ""}</span>
                 {p.noteCount > 0 && <span className="ml-2 inline-flex items-center gap-0.5 text-xs text-muted"><MessageSquare size={11} />{p.noteCount}</span>}
               </button>
-              {edit && view === "open" && <button className="text-muted hover:text-white" title={l("Reporter", "Put off")} onClick={() => setSnooze(p)} aria-label="snooze"><BellOff size={13} /></button>}
+              {edit && view === "open" && !fait && <button className="text-muted hover:text-white" title={l("Reporter", "Put off")} onClick={() => setSnooze(p)} aria-label="snooze"><BellOff size={13} /></button>}
               {edit && view === "later" && <button className="text-muted hover:text-white" title={l("Remettre sur la liste", "Bring back")} onClick={() => void patch(p.id, { snoozeUntil: null })} aria-label="bring back"><RotateCcw size={13} /></button>}
-              {edit && view === "open" && <button className="text-muted hover:text-white" title={l("Archiver", "Archive")} onClick={() => void patch(p.id, { archived: true })} aria-label="archive"><Archive size={13} /></button>}
+              {edit && view === "open" && !fait && <button className="text-muted hover:text-white" title={l("Archiver", "Archive")} onClick={() => void patch(p.id, { archived: true })} aria-label="archive"><Archive size={13} /></button>}
               {edit && (p.authorId === me.user?.id || manage) && <button className="text-muted hover:text-danger" onClick={() => { if (window.confirm(l("Supprimer ce point ?", "Delete this point?"))) void run(() => api(`/api/team/meeting/points/${p.id}`, { method: "DELETE" })); }} aria-label="delete"><Trash2 size={13} /></button>}
             </div>
             {openId === p.id && <PointNotes id={p.id} canWrite={edit} onChanged={refresh} />}
-          </li>))}</ul>)}
+          </li>); })}</ul>)}
       {edit && view === "open" && (
         <form className="mt-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (title.trim()) void run(async () => { await api("/api/team/meeting/points", { body: { kind, title: title.trim() } }); setTitle(""); }); }}>
           <select className="input !w-auto" value={kind} onChange={(e) => setKind(e.target.value as "point" | "issue")} aria-label="kind"><option value="point">{l("Point", "Point")}</option><option value="issue">{l("Problème", "Issue")}</option></select>

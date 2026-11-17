@@ -1,4 +1,4 @@
-import { BookOpen, Briefcase, CalendarCheck, CalendarDays, CheckSquare, Clock, FileText, FolderOpen, Inbox, LayoutDashboard, ListChecks, Megaphone, Receipt, Truck, UserCog, Users, Workflow, Wrench, ClipboardCheck, Landmark, Wallet, Package, FileSignature, type LucideIcon } from "lucide-react";
+import { BookOpen, Briefcase, CalendarCheck, CalendarDays, CheckSquare, Clock, FileText, FolderOpen, Inbox, LayoutDashboard, ListChecks, Receipt, Truck, UserCog, Users, Workflow, Wrench, ClipboardCheck, Landmark, Wallet, Package, FileSignature, Lightbulb, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   path: string;
@@ -24,9 +24,6 @@ export const NAV: NavSection[] = [
     { path: "/my/expenses", labelKey: "nav.mytools_expenses", icon: Wallet, permission: ["mytools.expenses.use", "mytools.expenses.approve"] },
     { path: "/my/kb", labelKey: "nav.mytools_kb", icon: BookOpen, permission: ["mytools.kb.view", "mytools.kb.edit"] },
     { path: "/my/procedures", labelKey: "nav.mytools_procedures", icon: FileText, permission: ["mytools.procedures.view", "mytools.procedures.edit", "mytools.procedures.manage"] },
-  ] },
-  { key: "command", labelKey: "nav.command", icon: Workflow, items: [
-    { path: "/command/board", labelKey: "nav.command_board", icon: Megaphone, permission: "command.board.view" },
     { path: "/command/pipeline", labelKey: "nav.command_pipeline", icon: Workflow, permission: ["command.pipeline.view", "tasks.view"] },
   ] },
   { key: "management", labelKey: "nav.management", icon: Briefcase, items: [
@@ -44,6 +41,12 @@ export const NAV: NavSection[] = [
     { path: "/hr", labelKey: "nav.hr_staff", icon: UserCog, permission: ["hr.view", "hr.manage"] },
   ] },
 ];
+
+/** Bottom-of-sidebar link, next to Administration (not a collapsible section, but it has its own row in the access grid). */
+export const PORTAL_NAV: NavSection = { key: "portal", labelKey: "nav.portal", icon: Lightbulb, items: [
+  { path: "/evolutions", labelKey: "nav.evolutions", icon: Lightbulb, permission: ["evolutions.view", "evolutions.edit"] },
+] };
+export const NAV_ALL: NavSection[] = [...NAV, PORTAL_NAV];
 
 const arr = (p: string | string[]) => (Array.isArray(p) ? p : [p]);
 

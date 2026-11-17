@@ -12,6 +12,7 @@ export const URLS = {
   msLogin: () => dev("MS_LOGIN_URL", "https://login.microsoftonline.com"),
   intuitAuth: () => dev("INTUIT_AUTH_URL", "https://appcenter.intuit.com/connect/oauth2"),
   intuitToken: () => dev("INTUIT_TOKEN_URL", "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"),
+  intuitRevoke: () => dev("INTUIT_REVOKE_URL", "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"),
   qbo: (environment: string) => dev("QBO_API_URL", environment === "production" ? "https://quickbooks.api.intuit.com" : "https://sandbox-quickbooks.api.intuit.com"),
 };
 
@@ -25,14 +26,21 @@ export async function loadIntegration(provider: string): Promise<Integration> {
 
 /** Merges values into an integration's settings and secrets (the credentials form keeps working beside the tokens). */
 export async function patchIntegration(provider: string, patch: { config?: Record<string, string>; secrets?: Record<string, string> }, drop: string[] = []) {
-  const cur = await loadIntegration(provider);
-  const cfg = { ...cur.config, ...(patch.config ?? {}) };
-  const sec = { ...cur.secrets, ...(patch.secrets ?? {}) };
-  for (const k of drop) { delete cfg[k]; delete sec[k]; }
-  await pool.query(
-    `insert into integrations (provider, config, secret_enc, enabled, updated_at) values ($1,$2::jsonb,$3,$4,now())
-     on conflict (provider) do update set config = excluded.config, secret_enc = excluded.secret_enc, updated_at = now()`,
-    [provider, JSON.stringify(cfg), seal(sec), cur.enabled]);
+  // One transaction with the row locked: a token refresh and a settings save at the same time can never overwrite each other.
+  const db = await pool.connect();
+  try {
+    await db.query("begin");
+    const r = (await db.query("select config, secret_enc, enabled from integrations where provider = $1 for update", [provider])).rows[0];
+    const cfg = { ...((r?.config ?? {}) as Record<string, string>), ...(patch.config ?? {}) };
+    const sec = { ...open(r?.secret_enc), ...(patch.secrets ?? {}) };
+    for (const k of drop) { delete cfg[k]; delete sec[k]; }
+    await db.query(
+      `insert into integrations (provider, config, secret_enc, enabled, updated_at) values ($1,$2::jsonb,$3,$4,now())
+       on conflict (provider) do update set config = excluded.config, secret_enc = excluded.secret_enc, updated_at = now()`,
+      [provider, JSON.stringify(cfg), seal(sec), Boolean(r?.enabled)]);
+    await db.query("commit");
+  } catch (err) { await db.query("rollback").catch(() => {}); throw err; }
+  finally { db.release(); }
 }
 
 /** The address OAuth providers send people back to. */

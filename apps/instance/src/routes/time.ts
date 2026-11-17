@@ -6,7 +6,7 @@ import { accruablePaidMinutes, centsOf, holidayBasisMinutes, holidayPayCents, pa
 import { pool, getSetting, setSetting } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
-import { applyAutoApprove } from "../lib/autoApprove.ts";
+import { autoApproveClients, billTimeEntries, entryBillingLock, resyncEntryBilling } from "../lib/timeBilling.ts";
 import { DAY_CAP_MINUTES, DEFAULT_PAY, fitsDayCap, hoursOf, isRealDate, normalizePayConfig, payPeriodOf, toCsv } from "../lib/timesheetPayroll.ts";
 import { quebecToday } from "../lib/quebecDate.ts";
 import { auth, body, camelRows, can, isUuid } from "./util.ts";
@@ -272,6 +272,7 @@ export async function addEntry(c: Ctx, d: z.infer<typeof EntryInput>): Promise<{
   catch (e) { await pool.query("delete from timesheet_entries where id = $1", [id]); throw e; }
   await afterChange(userId, start, auth(c).user.id);
   await recordEntry("create", me, id, userId, null, { workDate: d.workDate, typeKey: b.type_key, minutes: b.minutes, clientId: b.client_id, taskId: b.task_id, description: b.description, billable: b.billable, source: "manual", status: "draft" });
+  await resyncEntryBilling(id); // time added to an already completed task goes straight to the items to approve
   return { id, negative };
 }
 
@@ -288,7 +289,8 @@ timeRoutes.patch("/entries/:id", async (c) => {
   const start = mondayOf(cur.work_date);
   await assertEditable(c, cur.user_id, start);
   if (cur.status !== "draft" && cur.status !== "rejected") throw new Fail(409, "timesheet_locked");
-  if ((await pool.query("select 1 from billing_items where source = 'time' and source_id = $1 and status = 'invoiced'", [id])).rowCount) throw new Fail(409, "entry_invoiced");
+  const locked = await entryBillingLock(id);
+  if (locked) throw new Fail(409, locked);
   const fromTimer = cur.source === "timer"; // a timer entry keeps its day, client and task: only description, minutes and billable change
   const merged = {
     workDate: fromTimer ? cur.work_date : d.workDate ?? cur.work_date, typeKey: cur.type_key, minutes: d.minutes ?? (cur.kind === "workday" || cur.kind === "holiday" ? undefined : cur.minutes),
@@ -304,6 +306,7 @@ timeRoutes.patch("/entries/:id", async (c) => {
     `update timesheet_entries set work_date=$2, minutes=$3, start_time=$4, end_time=$5, lunch_minutes=$6, bank_minutes=$7, amount_cents=$8, client_id=$9, task_id=$10, description=$11, billable=$12, billable_minutes=$13, updated_at=now() where id=$1`,
     [cur.id, merged.workDate, b.minutes, b.start_time, b.end_time, b.lunch_minutes, b.bank_minutes, b.amount_cents, b.client_id, b.task_id, b.description, b.billable, b.billable_minutes]);
   const negative = await applyLedger({ id: cur.id, user_id: cur.user_id, kind: b.kind, minutes: b.minutes, bank_minutes: b.bank_minutes, work_date: merged.workDate }, me);
+  await resyncEntryBilling(cur.id); // a pending item follows the edit (a completed task's time is already in the items to approve)
   await afterChange(cur.user_id, start, me);
   await recordEntry("update", me, cur.id, cur.user_id, snap(cur), { ...snap(cur), workDate: merged.workDate, minutes: b.minutes, clientId: b.client_id, taskId: b.task_id, description: b.description, billable: b.billable, billableMinutes: b.billable_minutes });
   return c.json({ ok: true, negative });
@@ -321,8 +324,9 @@ timeRoutes.delete("/entries/:id", async (c) => {
   await assertEditable(c, cur.user_id, start);
   if (cur.source === "timer" && cur.status !== "draft") throw new Fail(409, "timer_entry_locked");
   if (cur.status !== "draft" && cur.status !== "rejected") throw new Fail(409, "timesheet_locked");
-  const used = (await pool.query("select 1 from billing_items where source = 'time' and source_id = $1 and status = 'invoiced'", [id])).rowCount;
-  if (used) throw new Fail(409, "entry_invoiced");
+  const locked = await entryBillingLock(id);
+  if (locked) throw new Fail(409, locked);
+  await pool.query("delete from billing_items where source = 'time' and source_id = $1 and status = 'pending'", [id]); // its pending item goes with it
   await recordEntry("delete", me, id, cur.user_id, snap(cur), null); // written first: the trail exists even if the delete fails half way
   await pool.query("delete from timesheet_entries where id = $1", [id]); // ledger rows go with it (cascade)
   await afterChange(cur.user_id, start, me);
@@ -331,15 +335,8 @@ timeRoutes.delete("/entries/:id", async (c) => {
 
 // ------------------------------------------------------------------ Sending and approval
 async function handOffToBilling(userId: string, start: string) {
-  const rows = (await weekEntries(userId, start)).filter((e) => e.kind === "work" && e.billable && e.client_id);
-  for (const e of rows) {
-    const rate = (await pool.query("select hourly_rate from client_contracts where client_id = $1 and kind = 'hourly' and status = 'active' and hourly_rate is not null order by created_at desc limit 1", [e.client_id])).rows[0]?.hourly_rate ?? 0;
-    await pool.query(
-      `insert into billing_items (client_id, source, source_id, description, quantity, unit_price, work_date, created_by)
-       values ($1,'time',$2,$3,$4,$5,$6,$7) on conflict do nothing`,
-      [e.client_id, e.id, e.description || e.task_title || "Temps de travail", Math.round((((e.billable_minutes ?? e.minutes) / 60)) * 100) / 100, rate, e.work_date, userId]);
-  }
-  for (const clientId of new Set(rows.map((e) => e.client_id!))) await applyAutoApprove(clientId);
+  const ids = (await weekEntries(userId, start)).map((e) => e.id);
+  if (ids.length) await autoApproveClients(await billTimeEntries(pool, { entryIds: ids })); // same items as completing a task; never twice
 }
 
 async function setWeek(userId: string, start: string, status: string, fields: { by?: string | null; reason?: string; submit?: boolean; paid?: boolean } = {}) {

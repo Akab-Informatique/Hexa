@@ -163,7 +163,13 @@ table.grid th { text-align: left; font-weight: 500; font-size: 12px; color: var(
 table.grid th.text-center { text-align: center; }
 table.grid th.text-right { text-align: right; }
 table.grid.trk th { color: var(--fg); font-weight: 600; font-size: 13px; padding: 10px 8px; white-space: nowrap; }
-table.grid.trk td { padding: 8px; }
+table.grid.trk td { padding: 6px 4px; }
+table.grid.trk th { padding: 8px 4px; font-size: 12px; }
+/* Client name stays visible while the calendar scrolls sideways on small screens. */
+table.grid.trk thead tr:first-child th:first-child, table.grid.trk td.trk-name { position: sticky; left: 0; z-index: 1; background: var(--bg); }
+table.grid.trk td select, table.grid.trk td input.input { max-width: 100%; }
+/* Any table placed directly in a card scrolls inside it, never the page. */
+.glass:has(> table.grid) { overflow-x: auto; }
 table.grid td { padding: 11px 12px; border-bottom: 1px solid rgb(255 255 255 / 0.06); vertical-align: middle; }
 table.grid tr:hover td { background: rgb(255 255 255 / 0.03); }
 

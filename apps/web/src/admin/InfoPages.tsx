@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { isSafeIconUrl } from "@hexa/shared";
 import { api, ApiError } from "../lib/api";
 import { useL } from "../lib/l";
 import { BrandMark } from "../components/ui";
@@ -56,7 +57,7 @@ export function IntegrationPage() {
   );
 }
 
-interface Brand { appName: string; primaryColor: string; accentColor: string; logoUrl?: string }
+interface Brand { appName: string; primaryColor: string; accentColor: string; logoUrl?: string; faviconUrl?: string }
 interface Tenant { version: string; plan: string; maxUsers: number | null; branding: Brand; defaultBranding: Brand; brandingOverride: Partial<Brand>; enabledModules: string[]; license: { usable: boolean; reason?: string; lastOkAt?: string } }
 
 export function TenantPage() {
@@ -107,7 +108,7 @@ export function AuditPage() {
 }
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
-interface SiteScan { site: string; title: string; colors: { hex: string; source: string }[]; logos: { url: string; source: string; type: string; bytes: number; dataUrl?: string }[] }
+interface SiteScan { site: string; title: string; colors: { hex: string; source: string }[]; logos: { url: string; source: string; type: string; bytes: number; dataUrl?: string }[]; favicon?: { url: string; source: string; type: string; bytes: number; dataUrl: string } | null }
 
 /** The firm's own look (white label): name, the two colors and the logo. Left empty, the supplier's defaults apply. */
 function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
@@ -125,6 +126,7 @@ function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
   const [scan, setScan] = useState<SiteScan | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
+  const [iconUrl, setIconUrl] = useState(/^https:/.test(d.brandingOverride.faviconUrl ?? "") ? d.brandingOverride.faviconUrl! : "");
   const valid = HEX.test(primary) && HEX.test(accent) && name.trim().length > 0;
   const overridden = Object.keys(d.brandingOverride).length > 0;
   const refresh = async () => { await qc.invalidateQueries({ queryKey: ["config"] }); onChanged(); };
@@ -136,6 +138,11 @@ function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
     const res = await fetch("/api/admin/branding/logo", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/octet-stream", "x-hexa-upload": "1", "x-logo-type": f.type }, body: f });
     if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
   }, l("Logo enregistré.", "Logo saved."));
+  const uploadIcon = (f: File) => run(async () => {
+    const res = await fetch("/api/admin/branding/favicon", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/octet-stream", "x-hexa-upload": "1" }, body: f });
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+    setIconUrl("");
+  }, l("Icône enregistrée.", "Icon saved."));
   const scanErrors: Record<string, [string, string]> = {
     invalid_url: ["Adresse invalide. Exemple : www.moncabinet.com", "Invalid address. Example: www.myfirm.com"],
     blocked_address: ["Cette adresse n'est pas permise (seuls les sites publics sont lus).", "This address is not allowed (only public websites are read)."],
@@ -181,6 +188,15 @@ function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
                       <button type="button" className="btn !px-2 !py-0.5 text-xs" onClick={() => setAccent(c.hex)}>{l("Accent", "Accent")}</button>
                     </div>))}</div>)}
               </div>
+              {scan.favicon && (
+                <div>
+                  <div className="mb-1 text-xs text-muted">{l("Icône d'onglet trouvée :", "Tab icon found:")} {d.brandingOverride.faviconUrl ? l("vous en avez déjà une, elle ne sera remplacée que si vous cliquez.", "you already have one, it is only replaced if you click.") : l("suggérée, cliquez pour l'utiliser.", "suggested, click to use it.")}</div>
+                  <button type="button" disabled={busy} className="glass-flat flex w-32 flex-col items-center gap-1 p-2 text-xs hover:bg-white/10" title={scan.favicon.url}
+                    onClick={() => void run(() => api("/api/admin/branding/favicon-from-url", { body: { url: scan.favicon!.url } }), l("Icône enregistrée.", "Icon saved."))}>
+                    <span className="flex h-14 w-full items-center justify-center rounded-lg bg-white/90 p-1"><img src={scan.favicon.dataUrl} alt="" className="max-h-full max-w-full object-contain" /></span>
+                    <span className="text-muted">{scan.favicon.source}</span><span className="btn !px-2 !py-0.5 text-xs">{l("Utiliser", "Use")}</span>
+                  </button>
+                </div>)}
               <div>
                 <div className="mb-1 text-xs text-muted">{l("Logos trouvés : cliquez pour l'utiliser (enregistré tout de suite).", "Logos found: click to use it (saved right away).")}</div>
                 {scan.logos.length === 0 ? <p className="text-sm text-muted">{l("Aucun logo utilisable trouvé. Vous pouvez en téléverser un.", "No usable logo found. You can upload one.")}</p> : (
@@ -207,9 +223,24 @@ function BrandingCard({ d, onChanged }: { d: Tenant; onChanged: () => void }) {
         </div>
         <p className="mt-1 text-xs text-muted">{l("PNG, JPG, WebP ou SVG, 400 Ko maximum. Un logo clair sur fond transparent convient le mieux.", "PNG, JPG, WebP or SVG, 400 KB maximum. A light logo on a transparent background works best.")}</p>
       </div>
+      <div className="mb-4">
+        <span className="label">{l("Icône de l'onglet (favicon)", "Tab icon (favicon)")}</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-white/15 bg-white/90 p-2" title={l("Aperçu sur fond clair", "Preview on a light background")}>
+            {d.branding.faviconUrl || d.branding.logoUrl ? <img src={d.branding.faviconUrl || d.branding.logoUrl} alt="" className="max-h-full max-w-full object-contain" /> : <span className="text-xs text-black/50">Hexa</span>}
+          </div>
+          {manage && (
+            <>
+              <label className="btn cursor-pointer">{l("Importer une image", "Import an image")}<input type="file" hidden accept="image/png,image/x-icon,image/vnd.microsoft.icon,image/webp,.ico" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadIcon(f); }} /></label>
+              {d.brandingOverride.faviconUrl && <button className="btn btn-danger" disabled={busy} onClick={() => void run(async () => { await api("/api/admin/branding/favicon", { method: "DELETE" }); setIconUrl(""); }, l("Icône retirée.", "Icon removed."))}>{l("Retirer", "Remove")}</button>}
+            </>)}
+        </div>
+        {manage && <input className="input mt-2" value={iconUrl} maxLength={500} placeholder={l("ou une adresse https://… vers une image", "or an https://… address to an image")} onChange={(e) => setIconUrl(e.target.value)} aria-invalid={iconUrl !== "" && !isSafeIconUrl(iconUrl)} />}
+        <p className="mt-1 text-xs text-muted">{l("PNG, ICO ou WebP, 256 Ko maximum. Un carré avec fond uni (comme une icône d'application) se voit mieux qu'un logo blanc sur fond transparent. Sans icône, le logo est utilisé.", "PNG, ICO or WebP, 256 KB maximum. A square with a solid background (like an app icon) shows better than a white logo on transparent. Without an icon, the logo is used.")}</p>
+      </div>
       {manage && (
         <div className="flex flex-wrap items-center gap-3">
-          <button className="btn btn-primary" disabled={!valid || busy} onClick={() => void run(() => api("/api/admin/branding", { method: "PUT", body: { appName: name.trim(), primaryColor: primary, accentColor: accent } }), l("Enregistré.", "Saved."))}>{l("Enregistrer", "Save")}</button>
+          <button className="btn btn-primary" disabled={!valid || busy || (iconUrl !== "" && !isSafeIconUrl(iconUrl))} onClick={() => void run(() => api("/api/admin/branding", { method: "PUT", body: { appName: name.trim(), primaryColor: primary, accentColor: accent, ...(iconUrl && iconUrl !== d.brandingOverride.faviconUrl ? { faviconUrl: iconUrl } : {}) } }), l("Enregistré.", "Saved."))}>{l("Enregistrer", "Save")}</button>
           {overridden && <button className="btn" disabled={busy} onClick={() => { if (window.confirm(l("Revenir à l'image de marque par défaut du fournisseur ?", "Go back to the supplier's default branding?"))) void run(async () => { await api("/api/admin/branding", { method: "DELETE" }); setName(d.defaultBranding.appName); setPrimary(d.defaultBranding.primaryColor); setAccent(d.defaultBranding.accentColor); }, l("Valeurs par défaut rétablies.", "Defaults restored.")); }}>{l("Rétablir les valeurs par défaut", "Restore defaults")}</button>}
           {msg && <span role="status" className="text-sm text-muted">{msg}</span>}
           {error && <span role="alert" className="text-sm text-danger">{error}</span>}

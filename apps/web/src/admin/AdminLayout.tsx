@@ -63,7 +63,7 @@ export default function AdminLayout() {
         </nav>
         <div className="mt-3 flex items-center justify-between gap-2 px-1"><LanguageToggle /><button className="btn !p-2" onClick={() => void logout()} title={t("common.logout")} aria-label={t("common.logout")}><LogOut size={15} /></button></div>
       </aside>
-      <main className="relative z-10 min-w-0 flex-1 overflow-auto"><div className="mx-auto max-w-5xl p-4 lg:p-8"><Outlet /></div></main>
+      <main className="relative z-10 min-w-0 flex-1 overflow-auto"><div className="w-full p-3 lg:p-5"><Outlet /></div></main>
     </div>
   );
 }

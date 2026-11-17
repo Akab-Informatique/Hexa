@@ -7,7 +7,7 @@ import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useL } from "../lib/l";
 import { Field, Modal, PageHeader } from "../components/ui";
-import PermissionMatrix from "./PermissionMatrix";
+import AccessGrid from "./AccessGrid";
 
 interface UserRow { id: string; email: string; name: string; active: boolean; is_master: boolean; totp_enabled: boolean; last_login_at: string | null; groupIds: string[] }
 interface GroupRow { id: string; name: string; permissions: string[]; locked: boolean }
@@ -78,14 +78,26 @@ function CreateUser({ groups, onClose, onCreated }: { groups: GroupRow[]; onClos
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [groupIds, setGroupIds] = useState<string[]>(() => groups.filter((g) => g.name === "Personnel").map((g) => g.id));
-  const m = useMutation({ mutationFn: () => api<{ temporaryPassword: string }>("/api/admin/users", { body: { name, email, groupIds } }), onSuccess: (r) => onCreated(r.temporaryPassword) });
+  const [groupIds, setGroupIds] = useState<string[]>([]); // nothing pre-ticked: the admin picks the access row by row (or a group as a preset)
+  const l = useL();
+  const { can, me } = useAuth();
+  const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api<ModuleDef[]>("/api/admin/catalog") });
+  const [ov, setOv] = useState<Record<string, "allow" | "deny">>({});
+  const inherited = [...new Set(groups.filter((g) => groupIds.includes(g.id)).flatMap((g) => g.permissions))];
+  // The server enforces this too; here a non-master admin just can't tick what they don't hold.
+  const canGrant = (k: string) => !!me.user?.isMaster || can(k);
+  const m = useMutation({
+    mutationFn: () => api<{ temporaryPassword: string }>("/api/admin/users", { body: { name, email, groupIds, overrides: Object.entries(ov).map(([permission, effect]) => ({ permission, effect })) } }),
+    onSuccess: (r) => onCreated(r.temporaryPassword),
+  });
   return (
-    <Modal title={t("admin.newUser")} onClose={onClose}>
+    <Modal title={t("admin.newUser")} onClose={onClose} wide>
       <form onSubmit={(e) => { e.preventDefault(); m.mutate(); }}>
         <Field label={t("common.name")}><input className="input" required autoFocus value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <Field label={t("common.email")}><input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <div className="mb-2 text-sm font-medium">{l("Accès", "Access")}</div>
         <Field label={t("admin.userGroups")}><GroupPicker groups={groups} value={groupIds} onChange={setGroupIds} /></Field>
+        {catalog.data && <div className="mb-4"><AccessGrid catalog={catalog.data} inherited={inherited} overrides={ov} onChange={setOv} canGrant={canGrant} /></div>}
         {m.isError && <p role="alert" className="mb-3 text-sm text-danger">{errorText(m.error, t)}</p>}
         <div className="flex justify-end gap-2"><button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button><button className="btn btn-primary" disabled={m.isPending}>{t("common.create")}</button></div>
       </form>
@@ -96,6 +108,7 @@ function CreateUser({ groups, onClose, onCreated }: { groups: GroupRow[]; onClos
 function EditUser({ id, groups, readOnly, onClose, onSecret }: { id: string; groups: GroupRow[]; readOnly: boolean; onClose: () => void; onSecret: (pw: string) => void }) {
   const { t } = useTranslation();
   const l = useL();
+  const { me, can } = useAuth();
   const qc = useQueryClient();
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api<ModuleDef[]>("/api/admin/catalog") });
   const detail = useQuery({ queryKey: ["admin-user", id], queryFn: () => api<UserDetail>(`/api/admin/users/${id}`) });
@@ -124,6 +137,7 @@ function EditUser({ id, groups, readOnly, onClose, onSecret }: { id: string; gro
   // Rights the groups give, computed from the groups currently ticked in the form.
   const inherited = [...new Set(groups.filter((g) => gIds.includes(g.id)).flatMap((g) => g.permissions))];
   const locked = readOnly;
+  const canGrant = (k: string) => !!me.user?.isMaster || can(k);
   const msg = (e: unknown) => (e instanceof ApiError && e.status === 409 ? t("errors.exists") : errorText(e, t));
 
   return (
@@ -143,9 +157,8 @@ function EditUser({ id, groups, readOnly, onClose, onSecret }: { id: string; gro
           {sendLink.isError && <span role="alert" className="text-sm text-danger">{msg(sendLink.error)}</span>}
         </div>)}
       <Field label={t("admin.userGroups")}><GroupPicker groups={groups} value={gIds} onChange={setGroupIds} disabled={readOnly || d.is_master} /></Field>
-      <div className="mb-2 text-sm font-medium">{t("admin.userOverrides")}</div>
-      <p className="mb-3 text-xs text-muted">{t("admin.overridesHelp")}</p>
-      <PermissionMatrix mode="user" catalog={catalog.data} inherited={inherited} overrides={ov} onChange={setOverrides} disabled={readOnly || d.is_master} />
+      <div className="mb-2 text-sm font-medium">{l("Accès", "Access")}</div>
+      <AccessGrid catalog={catalog.data} inherited={inherited} overrides={ov} onChange={setOverrides} disabled={readOnly || d.is_master} canGrant={canGrant} />
       {save.isError && <p role="alert" className="mt-3 text-sm text-danger">{msg(save.error)}</p>}
       {!readOnly && (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2">

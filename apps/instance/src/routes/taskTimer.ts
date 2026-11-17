@@ -5,6 +5,7 @@ import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { splitByQuebecDay } from "../lib/timesheetPayroll.ts";
+import { entryBillingLock, resyncEntryBilling } from "../lib/timeBilling.ts";
 import { quebecToday } from "../lib/quebecDate.ts";
 import { assertDayCap, Fail, recordEntry, snap } from "./time.ts";
 import { auth, body, camel, camelRows, isUuid } from "./util.ts";
@@ -112,7 +113,7 @@ export async function stopTimer(userId: string, discardUnder = 0) {
     const task = (await db.query("select t.title, t.client_id, cl.name as client_name from tasks t left join clients cl on cl.id = t.client_id where t.id = $1", [t.task_id])).rows[0];
     const made = await makeEntries(db, { userId, taskId: t.task_id, title: task?.title ?? "", clientId: task?.client_id ?? null, startedAt, stoppedAt });
     await db.query("commit");
-    for (const m of made) await audit("timesheet.entry_create", { userId, target: m.entryId, detail: { owner: userId, source: "timer", minutes: m.minutes } });
+    for (const m of made) { await audit("timesheet.entry_create", { userId, target: m.entryId, detail: { owner: userId, source: "timer", minutes: m.minutes } }); await resyncEntryBilling(m.entryId); } // timer on an already completed task: straight to the items to approve
     const first = made[0]!;
     return {
       discarded: false as const, segmentId: first.segmentId, entryId: first.entryId, entryIds: made.map((m) => m.entryId), taskId: t.task_id as string,
@@ -190,6 +191,7 @@ taskTimerRoutes.post("/segments/:sid/log", VIEW, USE, async (c) => {
       await db.query("insert into timesheet_entry_history (entry_id, user_id, actor_id, action, after) values ($1,$2,$2,'create',$3::jsonb)", [e.id, me, JSON.stringify({ source: "timer", legacy: true, minutes })]);
       await db.query("commit");
       await audit("timesheet.entry_create", { userId: me, target: e.id, detail: { owner: me, source: "timer", legacy: true } });
+      await resyncEntryBilling(e.id); // task already completed: straight to the items to approve
       return c.json({ entryId: e.id }, 201);
     } catch (err) { await db.query("rollback").catch(() => undefined); throw err; } finally { db.release(); }
   }
@@ -199,12 +201,14 @@ taskTimerRoutes.post("/segments/:sid/log", VIEW, USE, async (c) => {
   if (e.status !== "draft" && e.status !== "rejected") throw new Fail(409, "timesheet_locked");
   const wk = (await pool.query("select status from timesheet_weeks where user_id = $1 and week_start = $2", [me, mondayOf(e.work_date)])).rows[0];
   if (wk && wk.status !== "draft" && wk.status !== "rejected") throw new Fail(409, "timesheet_locked");
-  if ((await pool.query("select 1 from billing_items where source = 'time' and source_id = $1 and status = 'invoiced'", [e.id])).rowCount) throw new Fail(409, "entry_invoiced");
+  const locked = await entryBillingLock(e.id);
+  if (locked) throw new Fail(409, locked);
   const minutes = d.minutes ?? e.minutes;
   if (minutes !== e.minutes) await assertDayCap(me, e.work_date, minutes, e.id);
   const billable = e.client_id ? d.billable ?? e.billable : false; // no client, nobody to bill
   const description = d.description ?? e.description;
   await pool.query("update timesheet_entries set minutes = $2, description = $3, billable = $4, billable_minutes = case when $4 then billable_minutes else null end, updated_at = now() where id = $1", [e.id, minutes, description, billable]);
+  await resyncEntryBilling(e.id);
   await recordEntry("update", me, e.id, me, snap(e), { ...snap(e), minutes, description, billable });
   return c.json({ entryId: e.id });
 });
