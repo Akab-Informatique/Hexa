@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock, Plus, Square, Trash2 } from "lucide-react";
+import { Clock, Pencil, Plus, Square, Trash2 } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fmtDate, useL, useLocale } from "../../lib/l";
 import { Chip, errMsg, FormFields, useUsers, type FieldDef } from "../../components/kit";
 import { Modal } from "../../components/ui";
 import type { TaskRow } from "./TasksPage";
-import { autoStartPref, clock, LogTimeDialog, minLabel, setAutoStartPref, useElapsed, useTimerActions, useTimerState, type Stopped } from "./timer";
+import { autoStartPref, clock, EditTimeDialog, LogTimeDialog, minLabel, setAutoStartPref, useElapsed, useTimerActions, useTimerState, type Stopped, type TaskTimeEntry } from "./timer";
 
 interface Full extends TaskRow {
   description: string; startDate: string | null; estimateMinutes: number | null; visibility: string; waitsForId: string | null; waitsForTitle: string | null;
   recurrence: { every: number; unit: string; until?: string | null } | null; tags: string[]; createdBy: string | null; isWaiting: boolean;
   checklist: { id: string; text: string; done: boolean }[]; notes: { id: string; body: string; userName: string | null; createdAt: string; audience: "internal" | "client" }[];
-  timeEntries: { id: string; workDate: string; minutes: number; description: string; userName: string }[];
+  timeEntries: TaskTimeEntry[];
   subtasks: { id: string; title: string; status: string }[]; viewers: { id: string; name: string }[];
   kind: "normal" | "continuous" | "daily"; startTime: string | null; dueTime: string | null; remindEveryDays: number | null; lastCheckedOn: string | null;
 }
@@ -42,6 +42,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
   const acts = useTimerActions();
   const [auto, setAuto] = useState(autoStartPref);
   const [log, setLog] = useState<Stopped | null>(null);
+  const [editEntry, setEditEntry] = useState<TaskTimeEntry | null>(null);
   const [closing, setClosing] = useState(false);
   const closeOk = useRef(false);
   const tried = useRef(false);
@@ -216,9 +217,15 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
             <div className="mb-4 overflow-x-auto">
               <table className="w-full text-sm">
                 <tbody>{t.timeEntries.map((e) => (
-                  <tr key={e.id} className="border-b border-white/5 align-top"><td className="py-1.5 pr-3 whitespace-nowrap text-muted">{fmtDate(e.workDate, loc)}</td><td className="py-1.5 pr-3 whitespace-nowrap">{e.userName}</td><td className="py-1.5 pr-3 text-muted">{e.description || "—"}</td><td className="py-1.5 whitespace-nowrap text-right">{minLabel(e.minutes)}</td></tr>
+                  <tr key={e.id} className="border-b border-white/5 align-top"><td className="py-1.5 pr-3 whitespace-nowrap text-muted">{fmtDate(e.workDate, loc)}</td><td className="py-1.5 pr-3 whitespace-nowrap">{e.userName}</td>
+                    <td className="py-1.5 pr-3 text-muted">{e.description || "—"}{e.mine && e.billable != null && <> <Chip tone={e.billable ? "ok" : "off"}>{e.billable ? l("Facturable", "Billable") : l("Non facturable", "Not billable")}</Chip></>}</td>
+                    <td className="py-1.5 whitespace-nowrap text-right">{minLabel(e.minutes)}</td>
+                    <td className="py-1.5 pl-2 whitespace-nowrap text-right">{e.editable && <span className="inline-flex gap-1">
+                      <button type="button" className="text-muted hover:text-[var(--fg)]" onClick={() => setEditEntry(e)} aria-label={l("Modifier le temps", "Edit time")} title={l("Modifier", "Edit")}><Pencil size={13} /></button>
+                      <button type="button" className="text-muted hover:text-danger" onClick={() => { if (window.confirm(l("Supprimer cette entrée de temps ?", "Delete this time entry?"))) void act(() => api(`/api/time/entries/${e.id}`, { method: "DELETE" })); }} aria-label={l("Supprimer le temps", "Delete time")} title={l("Supprimer", "Delete")}><Trash2 size={13} /></button>
+                    </span>}</td></tr>
                 ))}</tbody>
-                <tfoot><tr><td colSpan={3} className="pt-2 text-right text-xs text-muted">{l("Total", "Total")}</td><td className="pt-2 text-right font-semibold whitespace-nowrap">{minLabel(t.timeEntries.reduce((a, e) => a + e.minutes, 0))}</td></tr></tfoot>
+                <tfoot><tr><td colSpan={3} className="pt-2 text-right text-xs text-muted">{l("Total", "Total")}</td><td className="pt-2 text-right font-semibold whitespace-nowrap">{minLabel(t.timeEntries.reduce((a, e) => a + e.minutes, 0))}</td><td /></tr></tfoot>
               </table>
             </div>)}
         </>
@@ -229,7 +236,8 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
         {t && editable ? <button className="btn btn-danger" onClick={() => { if (window.confirm(l("Supprimer cette tâche ?", "Delete this task?"))) void api(`/api/tasks/${taskId}`, { method: "DELETE" }).then(async () => { await refresh(); onClose(); }); }}><Trash2 size={15} />{l("Supprimer", "Delete")}</button> : <span />}
         <div className="flex gap-2"><button className="btn" onClick={onClose}>{l("Fermer", "Close")}</button>{editable && <button className="btn btn-primary" disabled={busy || !String(form.title ?? "").trim()} onClick={() => void save()}>{l("Enregistrer", "Save")}</button>}</div>
       </div>
-      {log && <LogTimeDialog seg={log} onClose={() => { setLog(null); void acts.refresh(); }} />}
+      {log && <LogTimeDialog seg={log} onClose={() => { setLog(null); void acts.refresh(); void detail.refetch(); }} />}
+      {editEntry && <EditTimeDialog entry={editEntry} onClose={() => { setEditEntry(null); void detail.refetch(); }} />}
       {closing && (
         <Modal title={l("Du temps n'est pas saisi", "Some time is not logged")} onClose={() => setClosing(false)}>
           <p className="mb-4 text-sm text-muted">{runHere ? l("Le chrono tourne encore sur cette tâche. ", "The timer is still running on this task. ") : ""}{pendingHere.length > 0 ? l(`Il reste ${minLabel(pendingHere.reduce((a, x) => a + x.minutes, 0))} à saisir.`, `${minLabel(pendingHere.reduce((a, x) => a + x.minutes, 0))} left to log.`) : ""}</p>

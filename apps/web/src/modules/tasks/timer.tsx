@@ -12,6 +12,59 @@ export interface Running { taskId: string; title: string; clientId: string | nul
 export interface TimerState { running: Running | null; pendingCount: number; pendingMinutes: number; now: string }
 export interface Stopped { segmentId: string; entryId?: string; taskId?: string; minutes: number; title: string; clientId: string | null; clientName: string | null }
 export interface Pending { id: string; taskId: string; startedAt: string; minutes: number; title: string; clientId: string | null; clientName: string | null }
+/** A time entry as listed in a task: billable is null for other people's entries; editable = the owner can still change or delete it. */
+export interface TaskTimeEntry { id: string; workDate: string; minutes: number; description: string; userName: string; mine: boolean; billable: boolean | null; hasClient: boolean; editable: boolean }
+
+const TIME_ERRORS: Record<string, [string, string]> = {
+  timesheet_locked: ["Cette entrée n'est plus modifiable (semaine envoyée ou approuvée). Le temps reste dans votre feuille de temps.", "This entry can no longer be edited (week sent or approved). The time stays in your timesheet."],
+  timer_entry_locked: ["Cette entrée n'est plus modifiable (semaine envoyée ou approuvée).", "This entry can no longer be changed (week sent or approved)."],
+  entry_invoiced: ["Ce temps est déjà facturé : il ne peut plus être modifié.", "This time is already invoiced and can no longer be changed."],
+  day_total_exceeded: ["Le total de cette journée dépasserait 24 h.", "The total for this day would exceed 24 h."],
+  already_logged: ["Ce temps est déjà saisi.", "This time is already logged."],
+};
+
+/** Billable or not, as two clear buttons. Without a client there is nobody to bill: only "Non facturable". */
+function BillableChoice({ value, onChange, hasClient }: { value: boolean; onChange: (v: boolean) => void; hasClient: boolean }) {
+  const l = useL();
+  const opt = (v: boolean, label: string) => {
+    const on = (hasClient ? value : false) === v;
+    return <button type="button" aria-pressed={on} disabled={v && !hasClient} onClick={() => onChange(v)} className="btn flex-1 justify-center !py-1.5 text-sm disabled:opacity-40"
+      style={on ? { background: "linear-gradient(135deg, var(--brand), var(--brand-2))", color: "#fff", borderColor: "transparent" } : undefined}>{label}</button>;
+  };
+  return (
+    <div className="mb-3"><span className="label">{l("Facturation", "Billing")}</span>
+      <div className="flex gap-2" role="group" aria-label={l("Facturation", "Billing")}>{opt(true, l("Facturable", "Billable"))}{opt(false, l("Non facturable", "Not billable"))}</div>
+      {!hasClient && <p className="mt-1 text-xs text-muted">{l("Aucun client sur la tâche : ce temps ne peut pas être facturé.", "No client on the task: this time cannot be billed.")}</p>}
+    </div>
+  );
+}
+
+/** Pencil on a task's time entry: change what was done, the minutes and whether it is billed. */
+export function EditTimeDialog({ entry, onClose }: { entry: TaskTimeEntry; onClose: () => void }) {
+  const l = useL();
+  const [desc, setDesc] = useState(entry.description);
+  const [minutes, setMinutes] = useState(String(entry.minutes));
+  const [billable, setBillable] = useState(Boolean(entry.billable));
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const valid = desc.trim().length > 0 && Number.isInteger(Number(minutes)) && Number(minutes) >= 1 && Number(minutes) <= 1440;
+  const save = async () => {
+    setBusy(true); setError("");
+    try {
+      await api(`/api/time/entries/${entry.id}`, { method: "PATCH", body: { description: desc.trim(), minutes: Number(minutes), billable: entry.hasClient ? billable : false } });
+      onClose();
+    } catch (e) { const c = errMsg(e, "Error"); setError(TIME_ERRORS[c] ? l(...TIME_ERRORS[c]!) : c); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={l("Modifier le temps", "Edit time")} onClose={onClose}>
+      <label className="mb-3 block"><span className="label">{l("Qu'avez-vous fait ?", "What did you do?")}</span><textarea className="input min-h-[84px]" autoFocus value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={1000} /></label>
+      <label className="mb-3 block"><span className="label">{l("Minutes", "Minutes")}</span><input className="input" type="number" min={1} max={1440} value={minutes} onChange={(e) => setMinutes(e.target.value)} /></label>
+      <BillableChoice value={billable} onChange={setBillable} hasClient={entry.hasClient} />
+      {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
+      <div className="flex justify-end gap-2"><button className="btn" onClick={onClose}>{l("Annuler", "Cancel")}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={() => void save()}>{l("Enregistrer", "Save")}</button></div>
+    </Modal>
+  );
+}
 
 const AUTO_KEY = "hexa.timer.auto";
 export const autoStartPref = (): boolean => { try { return localStorage.getItem(AUTO_KEY) !== "0"; } catch { return true; } };
@@ -61,11 +114,7 @@ export function LogTimeDialog({ seg, onClose }: { seg: Stopped; onClose: () => v
   const [billable, setBillable] = useState(Boolean(seg.clientId));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const codes: Record<string, [string, string]> = {
-    timesheet_locked: ["Cette entrée n'est plus modifiable (semaine envoyée ou approuvée). Le temps reste dans votre feuille de temps.", "This entry can no longer be edited (week sent or approved). The time stays in your timesheet."],
-    day_total_exceeded: ["Le total de cette journée dépasserait 24 h.", "The total for this day would exceed 24 h."],
-    already_logged: ["Ce temps est déjà saisi.", "This time is already logged."],
-  };
+  const codes = TIME_ERRORS;
   const save = async () => {
     setBusy(true); setError("");
     try {
@@ -79,10 +128,8 @@ export function LogTimeDialog({ seg, onClose }: { seg: Stopped; onClose: () => v
       <p className="mb-3 text-sm text-muted">{seg.title}{seg.clientName ? ` · ${seg.clientName}` : ""} · <b className="text-[var(--fg)]">{minLabel(seg.minutes)}</b></p>
       <p className="mb-3 text-xs text-muted">{l("Ce temps est déjà dans votre feuille de temps (brouillon). Vous pouvez préciser la description, la durée et la facturation.", "This time is already in your timesheet (draft). You can refine the description, duration and billing.")}</p>
       <label className="mb-3 block"><span className="label">{l("Qu'avez-vous fait ?", "What did you do?")}</span><textarea className="input min-h-[84px]" autoFocus value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={l("Brève description du travail", "Short description of the work")} maxLength={1000} /></label>
-      <div className="mb-3 grid grid-cols-2 gap-3">
-        <label className="block"><span className="label">{l("Minutes", "Minutes")}</span><input className="input" type="number" min={1} max={1440} value={minutes} onChange={(e) => setMinutes(e.target.value)} /></label>
-        <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={billable && Boolean(seg.clientId)} disabled={!seg.clientId} onChange={(e) => setBillable(e.target.checked)} />{seg.clientId ? l("Facturable au client", "Billable to the client") : l("Aucun client sur la tâche", "No client on the task")}</label>
-      </div>
+      <label className="mb-3 block"><span className="label">{l("Minutes", "Minutes")}</span><input className="input" type="number" min={1} max={1440} value={minutes} onChange={(e) => setMinutes(e.target.value)} /></label>
+      <BillableChoice value={billable} onChange={setBillable} hasClient={Boolean(seg.clientId)} />
       {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
       <div className="flex flex-wrap justify-between gap-2">
         <span />

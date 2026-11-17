@@ -127,9 +127,14 @@ taskRoutes.get("/:id", requirePermission(...VIEW), async (c) => {
     // Deliberate rule, narrower than time.ts (which keeps timesheets private to their owner and approvers): any viewer of a task
     // sees who logged how much and when, but only for the viewer's own entries or submitted/approved ones; drafts/rejected entries
     // of others stay hidden. The free-text description is only returned for the viewer's own entries (or to approvers/managers).
-    // Billable flag and status are never returned.
+    // Billable flag only for the viewer's own entries; `editable` mirrors what PATCH/DELETE /api/time/entries/:id accept
+    // (owner, entry and week still draft/rejected, not invoiced) so the pencil and trash only show where they will work.
     pool.query(
-      `select e.id, e.work_date, e.minutes, case when $3 or e.user_id = $2 then e.description else '' end as description, u.name as user_name
+      `select e.id, e.work_date, e.minutes, case when $3 or e.user_id = $2 then e.description else '' end as description, u.name as user_name,
+              e.user_id = $2 as mine, case when e.user_id = $2 then e.billable end as billable, e.client_id is not null as has_client,
+              (e.user_id = $2 and e.status in ('draft','rejected')
+                and coalesce((select w.status from timesheet_weeks w where w.user_id = e.user_id and w.week_start = date_trunc('week', e.work_date)::date), 'draft') in ('draft','rejected')
+                and not exists (select 1 from billing_items b where b.source = 'time' and b.source_id = e.id and b.status = 'invoiced')) as editable
          from timesheet_entries e join users u on u.id = e.user_id
         where e.task_id = $1 and ($3 or e.user_id = $2 or e.status in ('submitted','approved'))
         order by e.work_date desc, e.created_at desc`,
