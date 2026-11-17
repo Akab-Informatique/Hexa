@@ -110,7 +110,7 @@ export default function AppShell() {
       <div className="canvas" />
       <div className="relative z-10 hidden p-3 lg:block">{sidebar}</div>
       {drawer && (
-        <div className="fixed inset-0 z-40 lg:hidden" onMouseDown={(e) => e.target === e.currentTarget && setDrawer(false)} style={{ background: "rgb(0 0 0 / .5)" }}>
+        <div className="drawer fixed inset-0 z-40 lg:hidden" onMouseDown={(e) => e.target === e.currentTarget && setDrawer(false)} style={{ background: "rgb(0 0 0 / .5)" }}>
           <div className="h-full p-3">{sidebar}</div>
         </div>
       )}

@@ -6,6 +6,8 @@ import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { applyAutoApprove } from "../lib/autoApprove.ts";
+import { voidInvoice } from "../lib/quickbooks.ts";
+import { ServiceError } from "../lib/services.ts";
 import { settings } from "./accounting.ts";
 import { auth, body, buildUpdate, camel, camelRows, isUuid } from "./util.ts";
 
@@ -87,14 +89,17 @@ invoicingRoutes.post("/billing-items/decision", requirePermission("accounting.ap
 // =============================== Invoices ===============================
 const LineInput = z.object({ description: z.string().min(1).max(500), quantity: z.number().min(0.01).max(100000), unitPrice: z.number().min(-1e7).max(1e7), taxable: z.boolean().default(true), billingItemId: z.string().uuid().nullable().optional() });
 
-async function writeInvoiceLines(invoiceId: string, lines: z.infer<typeof LineInput>[]) {
-  const s = await settings();
-  const calc = computeInvoice(lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, taxable: l.taxable })), s);
-  await pool.query("delete from invoice_lines where invoice_id = $1", [invoiceId]);
+/** Anything that runs queries: the pool, or one connection that holds a transaction. */
+type Db = { query: (sql: string, params?: unknown[]) => Promise<any> };
+type Settings = Awaited<ReturnType<typeof settings>>;
+
+async function writeInvoiceLines(invoiceId: string, lines: z.infer<typeof LineInput>[], db: Db = pool, s?: Settings) {
+  const calc = computeInvoice(lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, taxable: l.taxable })), s ?? await settings());
+  await db.query("delete from invoice_lines where invoice_id = $1", [invoiceId]);
   for (const [i, l] of calc.lines.entries()) {
-    await pool.query("insert into invoice_lines (invoice_id, position, description, quantity, unit_price, taxable, amount, billing_item_id) values ($1,$2,$3,$4,$5,$6,$7,$8)", [invoiceId, i, lines[i]!.description, l.quantity, l.unitPrice, l.taxable, l.amount, lines[i]!.billingItemId ?? null]);
+    await db.query("insert into invoice_lines (invoice_id, position, description, quantity, unit_price, taxable, amount, billing_item_id) values ($1,$2,$3,$4,$5,$6,$7,$8)", [invoiceId, i, lines[i]!.description, l.quantity, l.unitPrice, l.taxable, l.amount, lines[i]!.billingItemId ?? null]);
   }
-  await pool.query("update invoices set subtotal = $2, gst = $3, qst = $4, total = $5 where id = $1", [invoiceId, calc.subtotal, calc.gst, calc.qst, calc.total]);
+  await db.query("update invoices set subtotal = $2, gst = $3, qst = $4, total = $5 where id = $1", [invoiceId, calc.subtotal, calc.gst, calc.qst, calc.total]);
 }
 
 async function termsOf(clientId: string): Promise<number> {
@@ -103,16 +108,17 @@ async function termsOf(clientId: string): Promise<number> {
 }
 
 interface Dates { issueDate?: string; dueDate?: string; poNumber?: string }
-async function newInvoice(clientId: string, userId: string, lines: z.infer<typeof LineInput>[], o: Dates & { notes?: string } = {}): Promise<string> {
-  const s = await settings();
+/** `tx` runs it on one transaction connection; then `pre` (settings and the client's terms, read beforehand) keeps it off the pool. */
+async function newInvoice(clientId: string, userId: string, lines: z.infer<typeof LineInput>[], o: Dates & { notes?: string } = {}, tx: Db = pool, pre?: { s: Settings; terms: number }): Promise<string> {
+  const s = pre?.s ?? await settings();
   const today = todayISO();
   // The due day counts from the day it goes out (today), not from the issue date written on it. A due date typed by hand is kept.
-  const due = o.dueDate ?? dueAfterSent(today, await termsOf(clientId));
-  const seq = (await pool.query("select nextval('invoice_number_seq') as n")).rows[0].n;
-  const r = await pool.query(
+  const due = o.dueDate ?? dueAfterSent(today, pre?.terms ?? await termsOf(clientId));
+  const seq = (await tx.query("select nextval('invoice_number_seq') as n")).rows[0].n;
+  const r = await tx.query(
     "insert into invoices (number, client_id, issue_date, due_date, due_manual, po_number, notes, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id",
     [`${s.invoicePrefix}${seq}`, clientId, o.issueDate ?? today, due, Boolean(o.dueDate), o.poNumber ?? "", o.notes ?? "", userId]);
-  await writeInvoiceLines(r.rows[0].id, lines);
+  await writeInvoiceLines(r.rows[0].id, lines, tx, s);
   return r.rows[0].id as string;
 }
 
@@ -196,16 +202,37 @@ invoicingRoutes.post("/invoices/from-items", requirePermission("accounting.invoi
     const cl = (await pool.query("select name, po_required, invoice_notes from clients where id = $1", [clientId])).rows[0];
     const o = d.clients?.find((x) => x.clientId === clientId) ?? { clientId };
     if (cl.po_required && !o.poNumber?.trim()) { skipped.push({ clientId, name: cl.name, reason: "po_required" }); continue; }
-    const lines = rows.map((it) => ({
+    const toLines = (rs: typeof rows) => rs.map((it) => ({
       description: `${it.contract_name ? `${it.contract_name} · ` : ""}${it.description}${it.work_date ? ` (${String(it.work_date).slice(0, 10)})` : ""}`,
       quantity: Number(it.quantity), unitPrice: Number(it.unit_price), taxable: it.taxable !== false, billingItemId: it.id as string,
     }));
-    const calc = computeInvoice(lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, taxable: l.taxable })), s);
-    const due = o.dueDate ?? dueAfterSent(todayISO(), await termsOf(clientId));
-    if (d.preview) { preview.push({ clientId, name: cl.name, count: rows.length, subtotal: calc.subtotal, gst: calc.gst, qst: calc.qst, total: calc.total, dueDate: due, poRequired: cl.po_required, defaultNotes: cl.invoice_notes }); continue; }
-    const id = await newInvoice(clientId, auth(c).user.id, lines, { issueDate: o.issueDate, dueDate: o.dueDate, poNumber: o.poNumber, notes: o.notes ?? cl.invoice_notes });
-    await pool.query("update billing_items set status = 'invoiced', invoice_id = $2 where id = any($1::uuid[])", [rows.map((r) => r.id), id]);
-    created.push(id);
+    const terms = await termsOf(clientId);
+    if (d.preview) {
+      const calc = computeInvoice(toLines(rows).map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, taxable: l.taxable })), s);
+      preview.push({ clientId, name: cl.name, count: rows.length, subtotal: calc.subtotal, gst: calc.gst, qst: calc.qst, total: calc.total, dueDate: o.dueDate ?? dueAfterSent(todayISO(), terms), poRequired: cl.po_required, defaultNotes: cl.invoice_notes });
+      continue;
+    }
+    // Claim, invoice and mark in one transaction on one connection. The conditional update takes the row locks: a concurrent
+    // request waits, then finds the items no longer 'approved', claims nothing and skips. Any failure rolls everything back.
+    const db = await pool.connect();
+    try {
+      await db.query("begin");
+      const claimed = (await db.query("update billing_items set status = 'invoiced' where id = any($1::uuid[]) and status = 'approved' returning id", [rows.map((r) => r.id)])).rows.map((r: { id: string }) => r.id);
+      if (!claimed.length) { await db.query("rollback"); continue; }
+      // Build the invoice from what was actually claimed, read again under the lock.
+      const fresh = (await db.query(
+        `select b.*, k.name as contract_name from billing_items b left join client_contracts k on k.id = b.contract_id
+          where b.id = any($1::uuid[]) order by b.work_date nulls last, b.created_at`, [claimed])).rows;
+      const id = await newInvoice(clientId, auth(c).user.id, toLines(fresh), { issueDate: o.issueDate, dueDate: o.dueDate, poNumber: o.poNumber, notes: o.notes ?? cl.invoice_notes }, db, { s, terms });
+      await db.query("update billing_items set invoice_id = $2 where id = any($1::uuid[])", [claimed, id]);
+      await db.query("commit");
+      created.push(id);
+    } catch (e) {
+      await db.query("rollback").catch(() => {});
+      throw e;
+    } finally {
+      db.release();
+    }
   }
   return c.json(d.preview ? { clients: preview, skipped } : { created, skipped });
 });
@@ -229,7 +256,7 @@ async function paidCents(id: string) {
 invoicingRoutes.post("/invoices/:id/action", requirePermission("accounting.invoices.manage"), async (c) => {
   const { action } = await body(c, z.object({ action: z.enum(["send", "pay", "void"]) }));
   const id = c.req.param("id");
-  const inv = (await pool.query("select status, total, client_id, due_manual from invoices where id = $1", [id])).rows[0];
+  const inv = (await pool.query("select status, total, client_id, due_manual, quickbooks_id from invoices where id = $1", [id])).rows[0];
   if (!inv) return c.json({ error: "not found" }, 404);
   const allowed: Record<string, string[]> = { send: ["draft"], pay: ["sent"], void: ["draft", "sent"] };
   if (!allowed[action]!.includes(inv.status)) return c.json({ error: `cannot ${action} an invoice that is ${inv.status}` }, 409);
@@ -246,6 +273,15 @@ invoicingRoutes.post("/invoices/:id/action", requirePermission("accounting.invoi
   if (action === "void") {
     // Reference rule: an invoice with payments cannot be voided (record the refund instead).
     if ((await paidCents(id)) > 0) return c.json({ error: "invoice_has_payments" }, 409);
+    // Fail closed: an invoice that exists in QuickBooks is voided there first. If that does not work, nothing changes here,
+    // so the work stays locked to the live invoice and cannot be billed twice.
+    if (inv.quickbooks_id) {
+      try { await voidInvoice(String(inv.quickbooks_id)); }
+      catch (e) {
+        const code = e instanceof ServiceError ? e.code : "";
+        return c.json({ error: "quickbooks_void_failed", reason: code || "unknown" }, code === "quickbooks_not_connected" || code === "quickbooks_not_configured" || code === "qb_reauth" ? 409 : 502);
+      }
+    }
     await pool.query("update invoices set status = 'void' where id = $1", [id]);
     // Voiding releases the work so it can be billed again.
     await pool.query("update billing_items set status = 'approved', invoice_id = null where invoice_id = $1", [id]);

@@ -55,7 +55,7 @@ export default function ClientShell() {
     <div className="relative flex h-full">
       <div className="canvas" />
       <div className="relative z-10 hidden p-3 lg:block">{sidebar}</div>
-      {drawer && <div className="fixed inset-0 z-40 lg:hidden" onMouseDown={(e) => e.target === e.currentTarget && setDrawer(false)} style={{ background: "rgb(0 0 0 / .5)" }}><div className="h-full p-3">{sidebar}</div></div>}
+      {drawer && <div className="drawer fixed inset-0 z-40 lg:hidden" onMouseDown={(e) => e.target === e.currentTarget && setDrawer(false)} style={{ background: "rgb(0 0 0 / .5)" }}><div className="h-full p-3">{sidebar}</div></div>}
       <main className="relative z-10 min-w-0 flex-1 overflow-auto">
         <div className="sticky top-0 z-20 flex items-center gap-3 p-3 lg:hidden">
           <button className="btn !p-2" onClick={() => setDrawer((d) => !d)} aria-label="Menu">{drawer ? <X size={18} /> : <Menu size={18} />}</button>

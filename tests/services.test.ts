@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chargesFor, monthlyEquivalentCents, type ServiceLine } from "../packages/shared/src/contractCharges.ts";
-import { canAttach, centsToDecimal, chargeKeyText, checkSale, isValidDay, kindFor, lineTotalCents, MAX_LINE_CENTS, parseCents, periodOf, quantityHundredths, typeOf } from "../packages/shared/src/productSale.ts";
+import { canAttach, centsToDecimal, chargeKeyText, chargePeriodKeyText, checkSale, isValidDay, kindFor, lineTotalCents, MAX_LINE_CENTS, parseCents, periodOf, quantityHundredths, typeOf } from "../packages/shared/src/productSale.ts";
 import { uuidFromKey } from "../apps/instance/src/lib/billingKeys.ts";
 
 const contract = (o: Partial<{ billingPeriod: "monthly" | "yearly"; startsOn: string; endsOn: string | null }> = {}) => ({ billingPeriod: "monthly" as const, startsOn: "2026-01-01", endsOn: null, ...o });
@@ -157,6 +157,12 @@ describe("idempotent charge keys", () => {
     expect(k).not.toBe(uuidFromKey(chargeKeyText("k2", "l1", "2026-01-01")));
     expect(k).not.toBe(uuidFromKey(chargeKeyText("k1", "l2", "2026-01-01")));
     expect(k).not.toBe(uuidFromKey(chargeKeyText("k1", "l1", "2026-02-01")));
+  });
+  it("period keys ignore the line start day, and differ from the legacy key", () => {
+    const key = (addedOn: string) => { const c = chargesFor(contract(), [line({ addedOn })], "2026-01-31")[0]!; return chargePeriodKeyText("k1", c.lineId, c.periodStart); };
+    expect(key("2026-01-10")).toBe(key("2026-01-20"));
+    const c = chargesFor(contract(), [line({ addedOn: "2026-01-10" })], "2026-01-31")[0]!;
+    expect(chargePeriodKeyText("k1", c.lineId, c.periodStart)).not.toBe(chargeKeyText("k1", c.lineId, c.date));
   });
   it("sale keys: the same client and key is the same sale, another key is another sale", () => {
     expect(uuidFromKey("product:c1:abcdefgh")).toBe(uuidFromKey("product:c1:abcdefgh"));

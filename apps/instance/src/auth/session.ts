@@ -34,7 +34,9 @@ export async function destroySession(c: Context): Promise<void> {
   deleteCookie(c, COOKIE, { path: "/" });
 }
 
-export const clientIp = (c: Context) => (c.req.header("x-forwarded-for") ?? "").split(",")[0]?.trim() || "local";
+/** Behind our proxy: X-Real-IP is $remote_addr (unforgeable); else the LAST X-Forwarded-For entry (appended by the proxy). The leftmost is client-supplied. */
+export const clientIp = (c: Context) =>
+  c.req.header("x-real-ip")?.trim() || (c.req.header("x-forwarded-for") ?? "").split(",").at(-1)?.trim() || "local";
 
 function stageOf(user: AuthUser, mfaVerified: boolean): Stage {
   if (user.totpEnabled && !mfaVerified) return "mfa";

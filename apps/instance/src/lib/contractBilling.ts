@@ -1,6 +1,6 @@
 import { chargesFor, type ServiceLine } from "@hexa/shared/contractCharges";
 import { todayISO } from "@hexa/shared/billing";
-import { centsToDecimal, chargeKeyText } from "@hexa/shared/productSale";
+import { centsToDecimal, chargeKeyText, chargePeriodKeyText } from "@hexa/shared/productSale";
 import { pool } from "../db.ts";
 import { uuidFromKey } from "./billingKeys.ts";
 
@@ -15,8 +15,9 @@ export async function linesOf(contractId: string): Promise<BillingLine[]> {
 
 /**
  * Work to bill from contract services: one pending line per service and charge that has come due, once.
- * The line's source_id is a hash of contract + line + charge date, so the unique (source, source_id) index makes a second run a no-op
- * (idempotent: any number of runs, in any order, create each charge exactly once). Charges up to the contract's billed_through day are skipped.
+ * The line's source_id is a hash of contract + line + period start, so the unique (source, source_id) index makes a second run a no-op
+ * (idempotent: any number of runs, in any order, create each charge exactly once). Rows made before that carry a hash of contract + line + charge
+ * date (legacy key): a charge whose legacy key already exists is skipped too. Charges up to the contract's billed_through day are skipped.
  * Lines always arrive pending; the client's "auto-approve contract lines" setting is the only thing that approves them.
  * A contract line removed and added again is a new line, so it may bill a period again: remove with care.
  */
@@ -36,7 +37,7 @@ export async function refreshContractBilling(clientId?: string): Promise<number>
     const a = byContract.get(x.contract_id);
     if (a) a.push(l); else byContract.set(x.contract_id, [l]);
   }
-  const rows: { client: string; sourceId: string; contract: string; description: string; price: string; date: string; status: string; taxable: boolean }[] = [];
+  const rows: { client: string; sourceId: string; legacyId: string; contract: string; description: string; price: string; date: string; status: string; taxable: boolean }[] = [];
   for (const k of contracts) {
     const lines = byContract.get(k.id);
     if (!lines?.length) continue;
@@ -47,7 +48,7 @@ export async function refreshContractBilling(clientId?: string): Promise<number>
     const auto = (k.auto_approve_kinds as string[]).includes("contract");
     for (const ch of charges) {
       rows.push({
-        client: k.client_id, sourceId: uuidFromKey(chargeKeyText(k.id, ch.lineId, ch.date)), contract: k.id,
+        client: k.client_id, sourceId: uuidFromKey(chargePeriodKeyText(k.id, ch.lineId, ch.periodStart)), legacyId: uuidFromKey(chargeKeyText(k.id, ch.lineId, ch.date)), contract: k.id,
         description: `${k.name} · ${ch.description}${ch.prorated ? ` — prorata ${ch.days}/${ch.periodDays} j` : ""}`.slice(0, 500),
         price: centsToDecimal(ch.cents), date: ch.date, status: auto ? "approved" : "pending", taxable: taxable.get(ch.lineId) ?? true,
       });
@@ -59,9 +60,10 @@ export async function refreshContractBilling(clientId?: string): Promise<number>
     const r = await pool.query(
       `insert into billing_items (client_id, source, source_id, contract_id, description, quantity, unit_price, work_date, status, taxable)
        select i.client, 'contract', i.source_id, i.contract, i.description, 1, i.price, i.work_date, i.status, i.taxable
-         from unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::text[], $5::numeric[], $6::date[], $7::text[], $8::boolean[]) as i(client, source_id, contract, description, price, work_date, status, taxable)
+         from unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::text[], $5::numeric[], $6::date[], $7::text[], $8::boolean[], $9::uuid[]) as i(client, source_id, contract, description, price, work_date, status, taxable, legacy_id)
+        where not exists (select 1 from billing_items b where b.source = 'contract' and b.source_id = i.legacy_id)
        on conflict do nothing`,
-      [ch.map((x) => x.client), ch.map((x) => x.sourceId), ch.map((x) => x.contract), ch.map((x) => x.description), ch.map((x) => x.price), ch.map((x) => x.date), ch.map((x) => x.status), ch.map((x) => x.taxable)]);
+      [ch.map((x) => x.client), ch.map((x) => x.sourceId), ch.map((x) => x.contract), ch.map((x) => x.description), ch.map((x) => x.price), ch.map((x) => x.date), ch.map((x) => x.status), ch.map((x) => x.taxable), ch.map((x) => x.legacyId)]);
     created += r.rowCount ?? 0;
   }
   return created;

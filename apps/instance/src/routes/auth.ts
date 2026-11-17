@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import * as OTPAuth from "otpauth";
 import QRCode from "qrcode";
 import { z } from "zod";
@@ -6,7 +6,7 @@ import { config } from "../config.ts";
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { hashPassword, MIN_PASSWORD, seal, sha256, unseal, verifyPassword } from "../auth/crypto.ts";
-import { clientIp, createSession, destroySession, requireStage, type Env } from "../auth/session.ts";
+import { clientIp, createSession, destroySession, requireStage, type AuthCtx, type Env } from "../auth/session.ts";
 import * as license from "../license.ts";
 
 const MAX_FAILS = 5;
@@ -26,6 +26,38 @@ const totp = (secretB32: string, email: string) =>
   new OTPAuth.TOTP({ issuer: license.current().branding.appName, label: email, secret: OTPAuth.Secret.fromBase32(secretB32) });
 
 const toPublicUser = (a: { user: { id: string; email: string; name: string; kind: string; locale: string; isMaster: boolean; totpEnabled: boolean; clientId: string | null } }) => a.user;
+
+/**
+ * Verifies a TOTP code under the same limits as /login: per-IP throttle, per-account lockout
+ * (shared failed_logins / locked_until). Returns a Response to send when refused, null when the code is valid.
+ * When the lock triggers, the current session is deleted so guessing cannot continue on it.
+ */
+async function checkCode(c: Context<Env>, a: AuthCtx, code: string, setup: boolean): Promise<Response | null> {
+  const ip = clientIp(c);
+  if (throttled(ip)) return c.json({ error: "too many attempts" }, 429);
+  const r = await pool.query("select totp_secret_enc, failed_logins, locked_until from users where id = $1", [a.user.id]);
+  const u = r.rows[0];
+  if (!u) return c.json({ error: "invalid code" }, 401);
+  if (u.locked_until && new Date(u.locked_until) > new Date()) return c.json({ error: "too many attempts" }, 429);
+  if (!u.totp_secret_enc) return c.json({ error: setup ? "start setup first" : "invalid code" }, setup ? 409 : 401);
+  const secret = unseal(u.totp_secret_enc, config.appSecret);
+  if (totp(secret, a.user.email).validate({ token: code, window: 1 }) !== null) {
+    if (u.failed_logins || u.locked_until) await pool.query("update users set failed_logins = 0, locked_until = null where id = $1", [a.user.id]);
+    return null;
+  }
+  // Counted in the database, not from the value read above: parallel guesses must each add one.
+  const upd = await pool.query(
+    "update users set failed_logins = failed_logins + 1, locked_until = case when failed_logins + 1 >= $2 then $3::timestamptz else locked_until end where id = $1 returning failed_logins",
+    [a.user.id, MAX_FAILS, new Date(Date.now() + LOCK_MINUTES * 60_000)],
+  );
+  const lock = (upd.rows[0]?.failed_logins ?? MAX_FAILS) >= MAX_FAILS;
+  await audit("mfa.failed", { userId: a.user.id, ip });
+  if (lock) {
+    await pool.query("delete from sessions where id = $1", [a.sessionId]);
+    return c.json({ error: "too many attempts" }, 429);
+  }
+  return c.json({ error: "invalid code" }, 401);
+}
 
 export const authRoutes = new Hono<Env>();
 
@@ -71,12 +103,8 @@ authRoutes.post("/logout", async (c) => {
 authRoutes.post("/mfa/verify", requireStage("mfa"), async (c) => {
   const a = c.get("auth")!;
   const { code } = z.object({ code: z.string().regex(/^\d{6}$/) }).parse(await c.req.json().catch(() => ({})));
-  const r = await pool.query("select totp_secret_enc from users where id = $1", [a.user.id]);
-  const secret = unseal(r.rows[0].totp_secret_enc, config.appSecret);
-  if (totp(secret, a.user.email).validate({ token: code, window: 1 }) === null) {
-    await audit("mfa.failed", { userId: a.user.id, ip: clientIp(c) });
-    return c.json({ error: "invalid code" }, 401);
-  }
+  const denied = await checkCode(c, a, code, false);
+  if (denied) return denied;
   await pool.query("update sessions set mfa_verified = true where id = $1", [a.sessionId]);
   return c.json({ stage: a.user.mustChangePassword ? "password" : "ready" });
 });
@@ -93,10 +121,8 @@ authRoutes.post("/mfa/setup", requireStage("mfa-setup", "ready", "password"), as
 authRoutes.post("/mfa/enable", requireStage("mfa-setup", "ready", "password"), async (c) => {
   const a = c.get("auth")!;
   const { code } = z.object({ code: z.string().regex(/^\d{6}$/) }).parse(await c.req.json().catch(() => ({})));
-  const r = await pool.query("select totp_secret_enc from users where id = $1", [a.user.id]);
-  if (!r.rows[0]?.totp_secret_enc) return c.json({ error: "start setup first" }, 409);
-  const secret = unseal(r.rows[0].totp_secret_enc, config.appSecret);
-  if (totp(secret, a.user.email).validate({ token: code, window: 1 }) === null) return c.json({ error: "invalid code" }, 401);
+  const denied = await checkCode(c, a, code, true);
+  if (denied) return denied;
   await pool.query("update users set totp_enabled = true where id = $1", [a.user.id]);
   await pool.query("update sessions set mfa_verified = true where id = $1", [a.sessionId]);
   await audit("mfa.enabled", { userId: a.user.id });

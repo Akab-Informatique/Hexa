@@ -151,6 +151,19 @@ export async function pushInvoice(i: PushInvoice): Promise<{ id: string; total: 
   return { id: r.Invoice.Id, total: Number(r.Invoice.TotalAmt) };
 }
 
+/**
+ * Voids the invoice in QuickBooks: reads it for its SyncToken, then POST /invoice?operation=void { Id, SyncToken }.
+ * Already gone (404) or already voided (zero total with a "Voided" note) counts as done. Any other failure throws.
+ */
+export async function voidInvoice(id: string): Promise<{ alreadyVoid: boolean }> {
+  let cur: { SyncToken: string; TotalAmt?: number; PrivateNote?: string };
+  try { cur = (await qbo<{ Invoice: typeof cur }>("GET", `/invoice/${encodeURIComponent(id)}`)).Invoice; }
+  catch (e) { if (e instanceof ServiceError && e.code === "not_found") return { alreadyVoid: true }; throw e; }
+  if (Number(cur.TotalAmt) === 0 && /void/i.test(cur.PrivateNote ?? "")) return { alreadyVoid: true };
+  await qbo("POST", "/invoice?operation=void", { Id: id, SyncToken: cur.SyncToken });
+  return { alreadyVoid: false };
+}
+
 export async function invoiceBalance(id: string): Promise<{ balance: number; total: number } | null> {
   try { const r = (await qbo<{ Invoice: { Balance: number; TotalAmt: number } }>("GET", `/invoice/${encodeURIComponent(id)}`)).Invoice; return { balance: Number(r.Balance), total: Number(r.TotalAmt) }; }
   catch (e) { if (e instanceof ServiceError && e.code === "not_found") return null; throw e; }

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { strToU8, zipSync } from "fflate";
 import { randomToken } from "./crypto.ts";
+import { SAFE_EMAIL_RE, sanitizeName } from "./security.ts";
 
 export interface BundleClient {
   id: string;
@@ -46,11 +47,13 @@ const render = (tpl: string, vars: Record<string, string>) =>
 
 /** Build the zip a client unpacks on their server: compose file, .env, nginx site, install script, README. */
 export function buildBundle(client: BundleClient, opts: BundleOptions): Uint8Array {
+  // Rows predating the stricter input rule: never write an unsafe value into the sourced .env.
+  if (!SAFE_EMAIL_RE.test(client.adminEmail)) throw new Error("admin email contains unsafe characters; edit it in the console");
   const slug = client.id.replace(/[^a-z0-9]/g, "_");
   const names = [...new Set([client.domain, client.defaultDomain ?? client.domain])];
   const vars: Record<string, string> = {
     CLIENT_ID: client.id,
-    CLIENT_NAME: client.name,
+    CLIENT_NAME: sanitizeName(client.name),
     DOMAIN: client.domain,
     DEFAULT_DOMAIN: client.defaultDomain ?? client.domain,
     SERVER_NAMES: names.join(" "),

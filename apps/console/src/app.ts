@@ -14,17 +14,20 @@ import { config } from "./config.ts";
 import { decrypt, derive, encrypt, randomToken, safeEqual } from "./crypto.ts";
 import { buildBundle, newSecrets } from "./bundle.ts";
 import { OptionalHost, defaultDomainOf, domainConflict, primaryDomainOf, type DomainRow } from "./domains.ts";
+import { CONTROL_CHARS, SAFE_EMAIL_RE, csrfViolation } from "./security.ts";
 
+const ClientName = z.string().trim().min(1).max(120).refine((v) => !CONTROL_CHARS.test(v), "no control characters");
+const AdminEmail = z.string().max(254).regex(SAFE_EMAIL_RE, "invalid email");
 const Slug = z.string().regex(/^[a-z][a-z0-9-]{1,30}$/, "lowercase letters, digits, dashes");
 const Version = z.string().regex(VERSION_RE);
 const ClientInput = z.object({
   id: Slug,
-  name: z.string().min(1),
+  name: ClientName,
   /** Address the client was created with. Optional: defaults to <id>.<CLIENT_BASE_DOMAIN> when that is set. */
   domain: OptionalHost.optional(),
   /** Custom host name (client's own DNS CNAMEs to the default address). Empty or null clears it. */
   customDomain: OptionalHost.optional(),
-  adminEmail: z.string().email(),
+  adminEmail: AdminEmail,
   plan: z.string().default("standard"),
   maxUsers: z.number().int().positive().nullable().default(null),
   modules: z.array(Slug).default([]),
@@ -81,6 +84,13 @@ export function buildApp(pool: pg.Pool): Hono {
   const app = new Hono();
 
   // ---------- Public: called by client instances ----------
+  // CSRF: browsers attach cached Basic credentials cross-site, so refuse cross-origin writes.
+  app.use("/*", async (c, next) => {
+    if (c.req.path === "/api/license/check") return next();
+    const err = csrfViolation(c.req.method, (n) => c.req.header(n), config.publicUrl);
+    return err ? c.json({ error: err }, 403) : next();
+  });
+
   app.get("/api/ping", (c) => c.json({ ok: true }));
 
   app.post("/api/license/check", async (c) => {
@@ -255,7 +265,7 @@ export function buildApp(pool: pg.Pool): Hono {
       },
     );
     return new Response(Buffer.from(zip), {
-      headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="hexa-${r.id}.zip"` },
+      headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="hexa-${r.id}.zip"`, "cache-control": "no-store" },
     });
   });
 

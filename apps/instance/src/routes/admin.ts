@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { isKnownPermission, MODULES, permissionsFor, ungrantable } from "@hexa/shared/permissions";
+import { effectivePermissions, isKnownPermission, MODULES, permissionsFor, ungrantable, type Audience } from "@hexa/shared/permissions";
 import { getSetting, pool, setSetting } from "../db.ts";
 import { audit, rightsOf } from "../auth/access.ts";
 import { hashPassword, MIN_PASSWORD, randomToken, sha256, temporaryPassword } from "../auth/crypto.ts";
@@ -84,16 +84,30 @@ adminRoutes.patch("/users/:id", requirePermission("admin.users.manage"), async (
   const id = c.req.param("id");
   const body = UserPatch.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return c.json({ error: body.error.flatten() }, 400);
-  const target = (await pool.query("select id, is_master from users where id = $1", [id])).rows[0];
+  const target = (await pool.query("select id, kind, is_master from users where id = $1", [id])).rows[0];
   if (!target) return c.json({ error: "not found" }, 404);
   if (target.is_master && !a.user.isMaster) return c.json({ error: "only a master user can change a master user" }, 403);
   if (id === a.user.id && body.data.active === false) return c.json({ error: "you cannot deactivate yourself" }, 400);
 
   const d = body.data;
+  const sensitive = d.active !== undefined || d.groupIds !== undefined || d.overrides !== undefined;
+  if (!a.user.isMaster && sensitive) {
+    // Non-master actors never change their own groups or overrides.
+    if (id === a.user.id && (d.groupIds !== undefined || d.overrides !== undefined))
+      return c.json({ error: "you cannot change your own groups or rights" }, 403);
+    // Nor touch an account that holds rights they lack.
+    const above = await rightsAboveActor(a, target);
+    if (above.length) return c.json({ error: "cannot modify a user who holds rights you do not hold", rights: above }, 403);
+  }
   const escalation = [
     ...(d.groupIds ? await groupEscalation(a, d.groupIds) : []),
     ...ungrantable(a.rights, a.user.isMaster, (d.overrides ?? []).filter((o) => o.effect === "allow").map((o) => o.permission)),
   ];
+  // Any right the target would gain (new allow, new group, or a removed deny) must be one the actor holds.
+  if (!a.user.isMaster && (d.groupIds !== undefined || d.overrides !== undefined)) {
+    const [before, after] = [await rightsOf({ id, kind: target.kind, is_master: false }), await rightsAfter(id, target.kind, d)];
+    escalation.push(...ungrantable(a.rights, false, after.filter((k) => !before.includes(k))));
+  }
   if (escalation.length) return c.json({ error: "cannot grant rights you do not hold", rights: uniq(escalation) }, 403);
 
   if (d.name !== undefined) await pool.query("update users set name = $2 where id = $1", [id, d.name]);
@@ -121,9 +135,13 @@ adminRoutes.patch("/users/:id", requirePermission("admin.users.manage"), async (
 adminRoutes.post("/users/:id/reset-password", requirePermission("admin.users.manage"), async (c) => {
   const a = c.get("auth")!;
   const id = c.req.param("id");
-  const target = (await pool.query("select is_master from users where id = $1", [id])).rows[0];
+  const target = (await pool.query("select id, kind, is_master from users where id = $1", [id])).rows[0];
   if (!target) return c.json({ error: "not found" }, 404);
   if (target.is_master && !a.user.isMaster) return c.json({ error: "only a master user can reset a master user" }, 403);
+  if (!a.user.isMaster) {
+    const above = await rightsAboveActor(a, target);
+    if (above.length) return c.json({ error: "cannot modify a user who holds rights you do not hold", rights: above }, 403);
+  }
   const temp = temporaryPassword();
   await pool.query("update users set password_hash = $2, must_change_password = true, failed_logins = 0, locked_until = null where id = $1", [id, await hashPassword(temp)]);
   await pool.query("delete from sessions where user_id = $1", [id]);
@@ -175,6 +193,33 @@ async function groupEscalation(a: { rights: string[]; user: { isMaster: boolean 
   if (!groupIds.length || a.user.isMaster) return [];
   const r = await pool.query("select permissions from groups where id = any($1::uuid[])", [groupIds]);
   return uniq(ungrantable(a.rights, false, r.rows.flatMap((g) => g.permissions as string[])));
+}
+
+/** Rights the target currently holds that the (non-master) actor does not. */
+async function rightsAboveActor(a: { rights: string[] }, target: { id: string; kind: Audience; is_master: boolean }): Promise<string[]> {
+  return uniq(ungrantable(a.rights, false, await rightsOf(target)));
+}
+
+/** The target's effective rights if the requested groups/overrides were applied (unspecified parts stay as stored). */
+async function rightsAfter(
+  id: string,
+  kind: Audience,
+  d: { groupIds?: string[]; overrides?: { permission: string; effect: "allow" | "deny" }[] },
+): Promise<string[]> {
+  const [groups, stored] = await Promise.all([
+    d.groupIds
+      ? pool.query("select permissions from groups where id = any($1::uuid[])", [d.groupIds])
+      : pool.query("select g.permissions from groups g join user_groups ug on ug.group_id = g.id where ug.user_id = $1", [id]),
+    d.overrides ? Promise.resolve(null) : pool.query("select permission, effect from user_permissions where user_id = $1", [id]),
+  ]);
+  const ov = d.overrides ?? stored!.rows;
+  return effectivePermissions({
+    audience: kind,
+    master: false,
+    groupPermissions: groups.rows.map((r) => r.permissions as string[]),
+    allow: ov.filter((o) => o.effect === "allow").map((o) => o.permission),
+    deny: ov.filter((o) => o.effect === "deny").map((o) => o.permission),
+  });
 }
 
 // ------------------------------- Groups -------------------------------

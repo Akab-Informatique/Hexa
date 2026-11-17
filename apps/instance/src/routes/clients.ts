@@ -197,6 +197,9 @@ clientRoutes.patch("/contracts/:cid", requirePermission("clients.contracts.edit"
   // A date that would leave a service out of the term is refused.
   const out = await pool.query("select 1 from contract_services where contract_id = $1 and (($2::date is not null and added_on < $2) or ($3::date is not null and added_on > $3)) limit 1", [k.id, d.startsOn ?? null, d.endsOn ?? null]);
   if (out.rowCount) throw new Fail(409, "contract_dates_services");
+  // Start day or billing period decide every charge's period: once charges exist they are frozen (else past periods would bill again).
+  const shifts = (d.startsOn !== undefined && String(d.startsOn).slice(0, 10) !== String(k.starts_on).slice(0, 10)) || (d.billingPeriod !== undefined && d.billingPeriod !== k.billing_period);
+  if (shifts && (await pool.query("select 1 from billing_items where contract_id = $1 and source = 'contract' limit 1", [k.id])).rowCount) throw new Fail(409, "contract_billed");
   if (d.supportDefault) await pool.query("update client_contracts set support_default = false where client_id = $1 and id <> $2", [k.client_id, k.id]);
   const { sets, values } = buildUpdate(d, CCOLS, 2);
   if (!sets.length) return c.json({ error: "nothing to update" }, 400);
@@ -271,7 +274,12 @@ clientRoutes.patch("/contracts/:cid/services/:sid", requirePermission("clients.c
   if (!isUuid(sid)) throw new Fail(404, "not_found");
   const d = await body(c, LineInput.pick({ priceCents: true, quantity: true, addedOn: true, endsOn: true }));
   if (d.priceCents !== undefined && !can(c, "clients.billing.manage")) throw new Fail(403, "forbidden");
-  if (d.addedOn) await assertInTerm(k, d.addedOn);
+  if (d.addedOn) {
+    await assertInTerm(k, d.addedOn);
+    // The line's start is part of what was billed: once the contract has charges, a different start day is refused.
+    const moved = await pool.query("select 1 from contract_services where id = $2 and contract_id = $1 and added_on <> $3::date", [k.id, sid, d.addedOn]);
+    if (moved.rowCount && (await pool.query("select 1 from billing_items where contract_id = $1 and source = 'contract' limit 1", [k.id])).rowCount) throw new Fail(409, "contract_billed");
+  }
   const endsSet = d.endsOn !== undefined;
   if (d.endsOn && !isValidDay(d.endsOn)) throw new Fail(400, "service_dates");
   const r = await pool.query(

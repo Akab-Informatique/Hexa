@@ -58,8 +58,10 @@ export function checkSale(svc: { active: boolean; kind: ServiceKindDb }, unitCen
 /** Can a recurring service be newly attached? Inactive ones cannot; lines already attached keep billing (billing never looks at the catalogue). */
 export const canAttach = (svc: { active: boolean; kind: ServiceKindDb }) => svc.active && svc.kind !== "one_time";
 
-/** Stable text key of one contract charge: the same charge always has the same key, so billing it twice is impossible. */
-export const chargeKeyText = (contractId: string, lineId: string, date: string) => `${contractId}:${lineId}:${date}`;
+/** Stable text key of one contract charge: contract + line + the start of its billing period (not the line's own start day, which may be edited). */
+export const chargePeriodKeyText = (contractId: string, lineId: string, periodStart: string) => `period:${contractId}:${lineId}:${periodStart}`;
+/** LEGACY key (contract + line + charge date). Rows created before period keys carry it; billing still checks it so those charges are never billed again. */
+export const chargeKeyText =(contractId: string, lineId: string, date: string) => `${contractId}:${lineId}:${date}`;
 
 /** What a person typed ("150", "150.5", "1 234,50") as integer cents, or null when it is not a plain amount with at most 2 decimals. No float involved. */
 export function parseCents(text: string): number | null {
