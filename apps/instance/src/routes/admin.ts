@@ -32,7 +32,7 @@ adminRoutes.get("/users", requirePermission("admin.users.view"), async (c) => {
 
 adminRoutes.get("/users/:id", requirePermission("admin.users.view"), async (c) => {
   const id = c.req.param("id");
-  const u = (await pool.query("select id, email, name, kind, active, is_master, locale, totp_enabled from users where id = $1", [id])).rows[0];
+  const u = (await pool.query("select id, email, name, kind, active, is_master, locale, totp_enabled, phone from users where id = $1", [id])).rows[0];
   if (!u) return c.json({ error: "not found" }, 404);
   const [groups, overrides, rights] = await Promise.all([
     pool.query("select group_id from user_groups where user_id = $1", [id]),
@@ -93,6 +93,7 @@ const UserPatch = z.object({
   name: z.string().min(1).max(120).optional(),
   email: z.string().trim().toLowerCase().email().max(200).optional(),
   locale: z.enum(["fr", "en"]).optional(),
+  phone: z.string().trim().max(40).regex(/^[0-9 +()\-.xXtext]*$/, "invalid phone").optional(),
   active: z.boolean().optional(),
   groupIds: z.array(z.string().uuid()).optional(),
   overrides: z.array(z.object({ permission: Perm, effect: z.enum(["allow", "deny"]) })).optional(),
@@ -131,6 +132,7 @@ adminRoutes.patch("/users/:id", requirePermission("admin.users.manage"), async (
 
   if (d.name !== undefined) await pool.query("update users set name = $2 where id = $1", [id, d.name]);
   if (d.locale !== undefined) await pool.query("update users set locale = $2 where id = $1", [id, d.locale]);
+  if (d.phone !== undefined) await pool.query("update users set phone = $2 where id = $1", [id, d.phone]);
   if (d.email !== undefined) {
     try { await pool.query("update users set email = $2 where id = $1", [id, d.email]); }
     catch (err) { if ((err as { code?: string }).code === "23505") return c.json({ error: "email already used" }, 409); throw err; }

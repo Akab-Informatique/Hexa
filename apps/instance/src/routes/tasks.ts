@@ -6,6 +6,7 @@ import { requirePermission, type Env } from "../auth/session.ts";
 import { autoApproveClients, billTimeEntries, unbillTaskTime } from "../lib/timeBilling.ts";
 import { stopTimer } from "./taskTimer.ts";
 import { audit } from "../auth/access.ts";
+import { ASSIGNEES_JSON, MAX_ASSIGNEES, invalidAssignees, isAssigneeSql, normalizeAssignees, setAssignees } from "../lib/taskAssignees.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";
 
 export const taskRoutes = new Hono<Env>();
@@ -16,14 +17,14 @@ const EDIT = ["tasks.edit", "command.pipeline.edit", "tasks.manage", "command.pi
 const isManager = (c: Parameters<typeof can>[0]) => can(c, "tasks.manage", "command.pipeline.manage");
 
 /** Reference rule: private tasks are hidden even from managers; "selected" only to chosen viewers. */
-const VISIBLE = `(t.visibility = 'team' or t.created_by = $1 or t.assignee_id = $1
+const VISIBLE = `(t.visibility = 'team' or t.created_by = $1 or ${isAssigneeSql("$1")}
                   or (t.visibility = 'selected' and exists (select 1 from task_viewers v where v.task_id = t.id and v.user_id = $1)))`;
 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable();
 const TaskInput = z.object({
   title: z.string().min(1).max(300), description: z.string().max(20000).optional(),
   status: z.enum(["todo", "taken", "doing", "blocked", "done"]).optional(), priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
-  assigneeId: z.string().uuid().nullable().optional(), clientId: z.string().uuid().nullable().optional(),
+  assigneeId: z.string().uuid().nullable().optional(), assigneeIds: z.array(z.string().uuid()).max(MAX_ASSIGNEES).optional(), clientId: z.string().uuid().nullable().optional(),
   startDate: Day.optional(), dueDate: Day.optional(), estimateMinutes: z.number().int().min(0).max(100000).nullable().optional(),
   visibility: z.enum(["team", "private", "selected"]).optional(), parentId: z.string().uuid().nullable().optional(),
   waitsForId: z.string().uuid().nullable().optional(),
@@ -39,7 +40,7 @@ const COLS: Record<string, string> = {
   waitsForId: "waits_for_id", tags: "tags", kind: "kind", startTime: "start_time", dueTime: "due_time", remindEveryDays: "remind_every_days",
 };
 
-const SELECT = `select t.*, a.name as assignee_name, cl.name as client_name,
+const SELECT = `select t.*, a.name as assignee_name, ${ASSIGNEES_JSON}, cl.name as client_name,
                 (select count(*)::int from task_checklist k where k.task_id = t.id) as checklist_total,
                 (select count(*)::int from task_checklist k where k.task_id = t.id and k.done) as checklist_done,
                 (select count(*)::int from tasks s where s.parent_id = t.id) as subtask_total,
@@ -54,9 +55,9 @@ taskRoutes.get("/", requirePermission(...VIEW), async (c) => {
   const arg = (v: unknown) => { args.push(v); return `$${args.length}`; };
 
   const assignee = q.assignee;
-  if (assignee === "me") where.push(`t.assignee_id = ${arg(me)}`);
-  else if (assignee === "none") where.push("t.assignee_id is null");
-  else if (assignee && isUuid(assignee)) where.push(`t.assignee_id = ${arg(assignee)}`);
+  if (assignee === "me") where.push(isAssigneeSql(arg(me)));
+  else if (assignee === "none") where.push("not exists (select 1 from task_assignees x where x.task_id = t.id)");
+  else if (assignee && isUuid(assignee)) where.push(isAssigneeSql(arg(assignee)));
   if (q.status === "open") where.push("t.status <> 'done'");
   else if (q.status && ["todo", "taken", "doing", "blocked", "done"].includes(q.status)) where.push(`t.status = ${arg(q.status)}`);
   if (q.client && isUuid(q.client)) where.push(`t.client_id = ${arg(q.client)}`);
@@ -70,9 +71,16 @@ taskRoutes.get("/", requirePermission(...VIEW), async (c) => {
   else if (q.due === "week") where.push(`t.due_date between ${arg(mondayOf(today))} and ${arg(addDays(mondayOf(today), 6))}`);
   if (q.q?.trim()) where.push(`(t.title ilike '%' || ${arg(q.q.trim())} || '%' or t.description ilike '%' || ${arg(q.q.trim())} || '%')`);
 
+  // Time logged per task, one aggregated join (no N+1); same visibility rule as the task detail's time list:
+  // own entries in any status, others' only when submitted/approved, unless the viewer approves/manages timesheets.
+  args.push(can(c, "mytools.timesheet.approve", "mytools.timesheet.manage"));
+  const seeAll = `$${args.length}`;
   const r = await pool.query(
-    `${SELECT} where ${where.join(" and ")}
-      order by (t.status = 'done'), t.due_date nulls last, array_position(array['urgent','high','normal','low'], t.priority), t.created_at desc limit 500`,
+    `select x.*, coalesce(lt.minutes, 0)::int as logged_minutes from (${SELECT} where ${where.join(" and ")}) x
+       left join (select e.task_id, sum(e.minutes) as minutes from timesheet_entries e
+                   where e.task_id is not null and (${seeAll}::boolean or e.user_id = $1 or e.status in ('submitted','approved'))
+                   group by e.task_id) lt on lt.task_id = x.id
+      order by (x.status = 'done'), x.due_date nulls last, array_position(array['urgent','high','normal','low'], x.priority), x.created_at desc limit 500`,
     args,
   );
   return c.json(camelRows(r));
@@ -83,7 +91,7 @@ taskRoutes.get("/day", requirePermission(...VIEW), async (c) => {
   const me = auth(c).user.id;
   const today = todayISO();
   const r = await pool.query(
-    `${SELECT} where ${VISIBLE} and t.assignee_id = $1 and t.status <> 'done' and (t.due_date <= $2 or t.status = 'doing')
+    `${SELECT} where ${VISIBLE} and ${isAssigneeSql("$1")} and t.status <> 'done' and (t.due_date <= $2 or t.status = 'doing')
       order by t.due_date nulls last, array_position(array['urgent','high','normal','low'], t.priority)`,
     [me, today],
   );
@@ -99,13 +107,18 @@ taskRoutes.get("/day", requirePermission(...VIEW), async (c) => {
 taskRoutes.post("/", requirePermission(...EDIT), async (c) => {
   const d = await body(c, TaskInput);
   const me = auth(c).user.id;
+  const people = normalizeAssignees(d.assigneeIds, d.assigneeId) ?? [me];
+  const bad = await invalidAssignees(pool, people);
+  if (bad.length) return c.json({ error: "invalid assignee" }, 400);
   const r = await pool.query(
     `insert into tasks (title, description, status, priority, assignee_id, created_by, client_id, start_date, due_date, estimate_minutes, visibility, parent_id, waits_for_id, recurrence, tags)
      values ($1, coalesce($2,''), coalesce($3,'todo'), coalesce($4,'normal'), $5, $6, $7, $8, $9, $10, coalesce($11,'team'), $12, $13, $14::jsonb, coalesce($15::text[], '{}')) returning id`,
-    [d.title, d.description, d.status, d.priority, d.assigneeId === undefined ? me : d.assigneeId, me, d.clientId ?? null, d.startDate ?? null, d.dueDate ?? null,
+    [d.title, d.description, d.status, d.priority, people[0] ?? null, me, d.clientId ?? null, d.startDate ?? null, d.dueDate ?? null,
      d.estimateMinutes ?? null, d.visibility, d.parentId ?? null, d.waitsForId ?? null, d.recurrence ? JSON.stringify(d.recurrence) : null, d.tags],
   );
   const id = r.rows[0].id as string;
+  await setAssignees(pool, id, people);
+  if (people.length > 1) await audit("task.assignees", { userId: me, target: id, detail: { assigneeIds: people } });
   if (d.checklist?.length) await pool.query("insert into task_checklist (task_id, text, position) select $1, t, i - 1 from unnest($2::text[]) with ordinality as u(t, i)", [id, d.checklist]);
   if (d.viewerIds?.length) for (const v of d.viewerIds) await pool.query("insert into task_viewers values ($1, $2) on conflict do nothing", [id, v]);
   if (d.kind || d.startTime || d.dueTime || d.remindEveryDays) {
@@ -123,7 +136,7 @@ taskRoutes.get("/:id", requirePermission(...VIEW), async (c) => {
   const [checklist, notes, subtasks, viewers, time] = await Promise.all([
     pool.query("select * from task_checklist where task_id = $1 order by position, id", [id]),
     pool.query("select n.*, u.name as user_name from task_notes n left join users u on u.id = n.user_id where n.task_id = $1 order by n.created_at", [id]),
-    pool.query("select id, title, status, assignee_id, due_date from tasks s where s.parent_id = $2 and (s.visibility = 'team' or s.created_by = $1 or s.assignee_id = $1) order by s.created_at", [auth(c).user.id, id]),
+    pool.query("select id, title, status, assignee_id, due_date from tasks s where s.parent_id = $2 and (s.visibility = 'team' or s.created_by = $1 or exists (select 1 from task_assignees x where x.task_id = s.id and x.user_id = $1)) order by s.created_at", [auth(c).user.id, id]),
     pool.query("select u.id, u.name from task_viewers v join users u on u.id = v.user_id where v.task_id = $1", [id]),
     // Deliberate rule, narrower than time.ts (which keeps timesheets private to their owner and approvers): any viewer of a task
     // sees who logged how much and when, but only for the viewer's own entries or submitted/approved ones; drafts/rejected entries
@@ -145,12 +158,12 @@ taskRoutes.get("/:id", requirePermission(...VIEW), async (c) => {
 });
 
 async function loadForEdit(c: Parameters<typeof can>[0], id: string) {
-  const r = await pool.query("select * from tasks t where t.id = $2 and " + VISIBLE, [auth(c).user.id, id]);
+  const r = await pool.query("select t.*, " + isAssigneeSql("$1") + " as is_assignee from tasks t where t.id = $2 and " + VISIBLE, [auth(c).user.id, id]);
   const t = r.rows[0];
   if (!t) return null;
   const me = auth(c).user.id;
   // tasks.edit = my own tasks (created or assigned); tasks.manage = anyone's.
-  return isManager(c) || t.created_by === me || t.assignee_id === me ? t : "forbidden";
+  return isManager(c) || t.created_by === me || t.is_assignee ? t : "forbidden";
 }
 
 taskRoutes.patch("/:id", requirePermission(...EDIT), async (c) => {
@@ -159,6 +172,8 @@ taskRoutes.patch("/:id", requirePermission(...EDIT), async (c) => {
   if (!t) return c.json({ error: "not found" }, 404);
   if (t === "forbidden") return c.json({ error: "forbidden" }, 403);
   const d = await body(c, TaskInput.partial());
+  const people = normalizeAssignees(d.assigneeIds, d.assigneeId);
+  if (people && (await invalidAssignees(pool, people)).length) return c.json({ error: "invalid assignee" }, 400);
   if (d.parentId === id || d.waitsForId === id) return c.json({ error: "a task cannot depend on itself" }, 400);
 
   // Dependency loop check: following "waits for" from the new target must never come back to this task.
@@ -183,7 +198,7 @@ taskRoutes.patch("/:id", requirePermission(...EDIT), async (c) => {
     for (const r of (await pool.query("select user_id from task_timers where task_id = $1", [id])).rows) await stopTimer(r.user_id as string);
   }
 
-  const { sets, values } = buildUpdate(d, COLS, 2);
+  const { sets, values } = buildUpdate({ ...d, assigneeId: undefined }, COLS, 2);
   if (d.recurrence !== undefined) { values.push(d.recurrence ? JSON.stringify(d.recurrence) : null); sets.push(`recurrence = $${values.length + 1}::jsonb`); }
   if (d.status !== undefined) sets.push(d.status === "done" ? "completed_at = coalesce(completed_at, now())" : "completed_at = null");
   // Done = its billable time goes to the items waiting for approval, in the same transaction (never twice: unique source index).
@@ -199,6 +214,10 @@ taskRoutes.patch("/:id", requirePermission(...EDIT), async (c) => {
     if (reopening) unbilled = await unbillTaskTime(db, id);
     await db.query("commit");
   } catch (e) { await db.query("rollback").catch(() => undefined); throw e; } finally { db.release(); }
+  if (people) {
+    await setAssignees(pool, id, people);
+    await audit("task.assignees", { userId: auth(c).user.id, target: id, detail: { assigneeIds: people } });
+  }
   if (d.viewerIds) {
     await pool.query("delete from task_viewers where task_id = $1", [id]);
     for (const v of d.viewerIds) await pool.query("insert into task_viewers values ($1, $2) on conflict do nothing", [id, v]);
@@ -225,6 +244,7 @@ taskRoutes.patch("/:id", requirePermission(...EDIT), async (c) => {
         [id, nextStart, nextDue],
       );
       next = n.rows[0].id as string;
+      await pool.query("insert into task_assignees (task_id, user_id) select $2, user_id from task_assignees where task_id = $1 on conflict do nothing", [id, next]);
       await pool.query("insert into task_checklist (task_id, text, position) select $2, text, position from task_checklist where task_id = $1", [id, next]);
     }
   }

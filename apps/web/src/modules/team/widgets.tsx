@@ -33,7 +33,7 @@ function Clock() {
   return <Card title={l("Heure", "Clock")}><div className="text-4xl font-semibold tabular-nums">{now.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" })}</div><div className="mt-1 text-sm text-muted">{now.toLocaleDateString(loc, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div></Card>;
 }
 
-interface TRow { id: string; title: string; dueDate: string | null; assigneeId: string | null; assigneeName: string | null; clientName?: string | null; priority: string }
+interface TRow { id: string; title: string; dueDate: string | null; assigneeId: string | null; assigneeName: string | null; assignees?: { id: string; name: string }[]; clientName?: string | null; priority: string }
 const useOpenTasks = () => useQuery({ queryKey: ["w-open-tasks"], queryFn: () => api<TRow[]>("/api/tasks?status=open"), staleTime: 30_000 });
 
 function MyTasks() {
@@ -91,8 +91,10 @@ function UpcomingDeadlines() {
 function TasksByPerson() {
   const l = useL();
   const rows = useOpenTasks().data ?? [];
-  const names = [...new Set(rows.map((t) => t.assigneeName ?? ""))];
-  const counts = names.map((n) => ({ n: n || l("Non assignées", "Unassigned"), c: rows.filter((t) => (t.assigneeName ?? "") === n).length })).sort((a, b) => b.c - a.c);
+  // A task shared by several people counts once for each of them.
+  const who = (t: TRow) => (t.assignees?.length ? t.assignees.map((a) => a.name) : [t.assigneeName ?? ""]);
+  const names = [...new Set(rows.flatMap(who))];
+  const counts = names.map((n) => ({ n: n || l("Non assignées", "Unassigned"), c: rows.filter((t) => who(t).includes(n)).length })).sort((a, b) => b.c - a.c);
   const max = Math.max(1, ...counts.map((x) => x.c));
   return (
     <Card title={l("Tâches ouvertes par personne", "Open tasks by person")} to="/tasks">

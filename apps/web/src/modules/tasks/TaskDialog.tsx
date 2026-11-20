@@ -19,6 +19,10 @@ interface Full extends TaskRow {
 }
 interface TaskFile { id: string; name: string; size: number; byName: string | null }
 
+/** New task: the people given in `defaults` (assigneeIds or assigneeId), else the creator. */
+const defaultAssignees = (d: Record<string, unknown> | undefined, me?: string): string[] =>
+  Array.isArray(d?.assigneeIds) ? (d.assigneeIds as string[]) : typeof d?.assigneeId === "string" && d.assigneeId ? [d.assigneeId] : d && "assigneeId" in d ? [] : me ? [me] : [];
+
 /** Create or edit a task: details, recurrence, checklist, notes and sub-tasks in one place. */
 export default function TaskDialog({ taskId, defaults, onClose }: { taskId: string | null; defaults?: Record<string, unknown>; onClose: () => void }) {
   const l = useL();
@@ -36,6 +40,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
   const [newNote, setNewNote] = useState("");
   const [audience, setAudience] = useState<"internal" | "client">("internal");
   const [viewerIds, setViewerIds] = useState<string[] | null>(null);
+  const [assigneeIds, setAssigneeIds] = useState<string[] | null>(null);
 
   // The timer: starts by itself when a task is opened (unless switched off), keeps running when this window is closed.
   const timer = useTimerState();
@@ -55,7 +60,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
     if (tried.current || !taskId || !detail.data || !timer.loaded || !timer.enabled || !auto) return;
     tried.current = true;
     const x = detail.data;
-    const mine = can("tasks.manage", "command.pipeline.manage") || x.createdBy === me.user?.id || x.assigneeId === me.user?.id;
+    const mine = can("tasks.manage", "command.pipeline.manage") || x.createdBy === me.user?.id || Boolean(x.assignees?.some((a) => a.id === me.user?.id)) || x.assigneeId === me.user?.id;
     if (!mine || x.status === "done" || timer.state?.running) return;
     void acts.start(taskId).catch(() => undefined);
   }, [detail.data, timer.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -65,8 +70,9 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
   const form = values ?? (t
     ? { ...t, assigneeId: t.assigneeId ?? "", clientId: t.clientId ?? "", dueDate: t.dueDate ?? "", startDate: t.startDate ?? "", startTime: t.startTime ?? "", dueTime: t.dueTime ?? "", remindEveryDays: t.remindEveryDays ?? "", estimateMinutes: t.estimateMinutes ?? "", waitsForId: t.waitsForId ?? "", tags: t.tags.join(", "), recEvery: t.recurrence?.every ?? "", recUnit: t.recurrence?.unit ?? "week", recUntil: t.recurrence?.until ?? "" }
     : { status: "todo", priority: "normal", kind: "normal", visibility: "team", assigneeId: me.user?.id, recUnit: "week", ...defaults });
-  const editable = !t || can("tasks.manage", "command.pipeline.manage") || t.createdBy === me.user?.id || t.assigneeId === me.user?.id;
+  const editable = !t || can("tasks.manage", "command.pipeline.manage") || t.createdBy === me.user?.id || Boolean(t.assignees?.some((a) => a.id === me.user?.id)) || t.assigneeId === me.user?.id;
   const selViewers = viewerIds ?? t?.viewers.map((v) => v.id) ?? [];
+  const selAssignees = assigneeIds ?? (t ? (t.assignees ?? []).map((a) => a.id) : defaultAssignees(defaults, me.user?.id));
   const refresh = async () => { await qc.invalidateQueries({ queryKey: ["task", taskId] }); await qc.invalidateQueries({ queryKey: ["tasks"] }); await qc.invalidateQueries({ queryKey: ["pipeline"] }); await qc.invalidateQueries({ queryKey: ["tasks-open-list"] }); };
 
   const fields: FieldDef[] = [
@@ -74,7 +80,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
     { name: "description", label: ["Description", "Description"], type: "textarea" },
     { name: "status", label: ["Statut", "Status"], type: "select", required: true, options: [{ value: "todo", label: ["Nouvelle", "New"] }, { value: "taken", label: ["Prise en charge", "Taken over"] }, { value: "doing", label: ["En cours", "In progress"] }, { value: "blocked", label: ["En attente du client", "Waiting for customer"] }, { value: "done", label: ["Terminée", "Completed"] }] },
     { name: "priority", label: ["Priorité", "Priority"], type: "select", required: true, options: [{ value: "low", label: ["Basse", "Low"] }, { value: "normal", label: ["Normale", "Normal"] }, { value: "high", label: ["Haute", "High"] }, { value: "urgent", label: ["Urgente", "Urgent"] }] },
-    { name: "assigneeId", label: ["Assignée à", "Assigned to"], type: "user" }, { name: "clientId", label: ["Client", "Client"], type: "client" },
+    { name: "clientId", label: ["Client", "Client"], type: "client" },
     { name: "kind", label: ["Type de tâche", "Kind of task"], type: "select", required: true, options: [{ value: "normal", label: ["Normale", "Normal"] }, { value: "continuous", label: ["Continue (rappel tous les n jours)", "Continuous (reminder every n days)"] }, { value: "daily", label: ["Quotidienne (recommence chaque jour)", "Daily (starts over each day)"] }] },
     ...(form.kind === "continuous" ? [{ name: "remindEveryDays", label: ["Rappel tous les (jours)", "Remind every (days)"] as [string, string], type: "number" as const }] : []),
     { name: "startDate", label: ["Début", "Start"], type: "date" }, { name: "startTime", label: ["Pas avant (heure)", "Not before (time)"], placeholder: "09:00", hint: ["Planifiée à partir de cette heure le jour du début", "Planned from that time on the start day"] },
@@ -105,7 +111,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
     const body = {
       title: v.title, description: v.description ?? "", status: v.status, priority: v.priority, visibility: v.visibility,
       kind: v.kind ?? "normal", startTime: v.startTime || null, dueTime: v.dueTime || null, remindEveryDays: v.kind === "continuous" && v.remindEveryDays ? Number(v.remindEveryDays) : null,
-      assigneeId: v.assigneeId || null, clientId: v.clientId || null, startDate: v.startDate || null, dueDate: v.dueDate || null,
+      assigneeIds: selAssignees, clientId: v.clientId || null, startDate: v.startDate || null, dueDate: v.dueDate || null,
       estimateMinutes: v.estimateMinutes === "" || v.estimateMinutes == null ? null : Number(v.estimateMinutes), waitsForId: v.waitsForId || null,
       tags: String(v.tags ?? "").split(",").map((s) => s.trim()).filter(Boolean),
       recurrence: v.recEvery ? { every: Number(v.recEvery), unit: v.recUnit, until: v.recUntil || null } : null,
@@ -181,6 +187,11 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
             </div>)}
         </div>
         <FormFields fields={fields.slice(2)} values={form} onChange={setValues} />
+        <div className="mb-4"><span className="label">{l("Assignée à", "Assigned to")}</span>
+          <div className="flex flex-wrap gap-2">{users.data?.map((u) => {
+            const on = selAssignees.includes(u.id);
+            return <button key={u.id} type="button" aria-pressed={on} disabled={!editable} className="chip cursor-pointer" onClick={() => setAssigneeIds(on ? selAssignees.filter((x) => x !== u.id) : [...selAssignees, u.id])} style={on ? { background: "linear-gradient(135deg, var(--brand), var(--brand-2))", color: "#fff", borderColor: "transparent" } : undefined}>{u.name}</button>;
+          })}</div></div>
         {form.visibility === "selected" && (
           <div className="mb-4"><span className="label">{l("Personnes qui peuvent voir cette tâche", "People who can see this task")}</span>
             <div className="flex flex-wrap gap-2">{users.data?.map((u) => {
@@ -233,7 +244,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
 
       {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
       <div className="flex justify-between gap-2">
-        {t && editable ? <button className="btn btn-danger" onClick={() => { if (window.confirm(l("Supprimer cette tâche ?", "Delete this task?"))) void api(`/api/tasks/${taskId}`, { method: "DELETE" }).then(async () => { await refresh(); onClose(); }); }}><Trash2 size={15} />{l("Supprimer", "Delete")}</button> : <span />}
+        {t && editable ? <button className="btn btn-danger" onClick={() => { if (window.confirm(l("Supprimer cette tâche ?", "Delete this task?"))) void api(`/api/tasks/${taskId}`, { method: "DELETE" }).then(async () => { await refresh(); onClose(); }).catch((e) => setError(errMsg(e, l("Erreur", "Error")))); }}><Trash2 size={15} />{l("Supprimer", "Delete")}</button> : <span />}
         <div className="flex gap-2"><button className="btn" onClick={onClose}>{l("Fermer", "Close")}</button>{editable && <button className="btn btn-primary" disabled={busy || !String(form.title ?? "").trim()} onClick={() => void save()}>{l("Enregistrer", "Save")}</button>}</div>
       </div>
       {log && <LogTimeDialog seg={log} onClose={() => { setLog(null); void acts.refresh(); void detail.refetch(); }} />}
@@ -274,7 +285,7 @@ function Files({ taskId, editable }: { taskId: string; editable: boolean }) {
       {!q.data?.length ? <p className="mb-2 text-xs text-muted">{l("Aucun fichier.", "No files.")}</p> : (
         <ul className="mb-2 space-y-1 text-sm">{q.data.map((f) => (
           <li key={f.id} className="flex items-center gap-2"><a href={`/api/pipeline/files/${f.id}`} className="truncate">{f.name}</a><span className="text-xs text-muted">{Math.max(1, Math.round(f.size / 1024))} KB · {f.byName}</span>
-            {editable && <button className="ml-auto text-muted hover:text-danger" aria-label="remove file" onClick={() => void api(`/api/pipeline/files/${f.id}`, { method: "DELETE" }).then(refresh)}><Trash2 size={13} /></button>}</li>))}</ul>)}
+            {editable && <button className="ml-auto text-muted hover:text-danger" aria-label="remove file" onClick={() => { setError(""); void api(`/api/pipeline/files/${f.id}`, { method: "DELETE" }).then(refresh).catch((e) => setError(errMsg(e, "Error"))); }}><Trash2 size={13} /></button>}</li>))}</ul>)}
       {editable && <input type="file" className="input" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} />}
       {error && <p role="alert" className="mt-1 text-sm text-danger">{error}</p>}
     </div>

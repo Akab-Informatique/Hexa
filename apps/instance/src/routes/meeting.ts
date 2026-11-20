@@ -6,6 +6,7 @@ import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { auth, body, camelRows, can, isUuid } from "./util.ts";
+import { isAssigneeSql } from "../lib/taskAssignees.ts";
 
 // The weekly meeting, modelled on the reference: a running list of points (notes, snooze, archive, drag order),
 // "La semaine" (a Monday-Sunday planner with events, absences and holidays), the week-ahead brief (rules), three
@@ -19,7 +20,7 @@ const manage = (c: Parameters<typeof can>[0]) => can(c, "team.meeting.manage");
 const needEdit = requirePermission("team.meeting.edit", "team.meeting.manage");
 const needManage = requirePermission("team.meeting.manage");
 /** Tasks a person may see (same visibility rule as the task list). */
-const VIS = "(t.visibility = 'team' or t.created_by = $1 or t.assignee_id = $1)";
+const VIS = `(t.visibility = 'team' or t.created_by = $1 or ${isAssigneeSql("$1")})`;
 
 // ------------------------------------------------------------------ Points
 const openSql = "p.archived_at is null and (p.snooze_until is null or p.snooze_until <= $1::date)";
@@ -105,7 +106,7 @@ meetingRoutes.get("/week", async (c) => {
   const [events, absences, tasks, projects] = await Promise.all([
     pool.query("select e.*, u.name as user_name from meeting_events e left join users u on u.id = e.user_id where e.event_date between $1 and $2 order by e.event_date, e.start_time nulls first", [from, to]),
     pool.query("select a.*, u.name as user_name from absences a join users u on u.id = a.user_id where a.starts_on <= $2 and a.ends_on >= $1 order by a.starts_on", [from, to]),
-    pool.query(`select t.id, t.title, t.due_date, t.priority, a.name as assignee_name, cl.name as client_name from tasks t left join users a on a.id = t.assignee_id left join clients cl on cl.id = t.client_id
+    pool.query(`select t.id, t.title, t.due_date, t.priority, (select string_agg(u.name, ', ' order by (u.id = t.assignee_id) desc, u.name) from task_assignees ta join users u on u.id = ta.user_id where ta.task_id = t.id) as assignee_name, cl.name as client_name from tasks t left join clients cl on cl.id = t.client_id
                  where ${VIS} and t.status <> 'done' and t.due_date between $2 and $3 order by t.due_date, t.priority`, [me, from, to]),
     pool.query("select id, name, due_date from meeting_projects where status = 'open' and due_date between $1 and $2 order by due_date", [from, to]),
   ]);
@@ -213,14 +214,16 @@ meetingRoutes.get("/gauges", async (c) => {
   const me = auth(c).user.id;
   const today = todayISO(), friday = fridayOf(today);
   const by = async (where: string, params: unknown[]) => {
-    const r = await pool.query(`select t.assignee_id as id, coalesce(a.name, '') as name, count(*)::int as count from tasks t left join users a on a.id = t.assignee_id where ${VIS} and t.status <> 'done' and ${where} group by t.assignee_id, a.name order by count desc`, [me, ...params]);
-    return { count: r.rows.reduce((s, x) => s + x.count, 0), byAssignee: r.rows.map((x) => ({ id: x.id, name: x.name, count: x.count })) };
+    const base = `from tasks t where ${VIS} and t.status <> 'done' and ${where}`;
+    const r = await pool.query(`select ta.user_id as id, coalesce(a.name, '') as name, count(*)::int as count from tasks t left join task_assignees ta on ta.task_id = t.id left join users a on a.id = ta.user_id where ${VIS} and t.status <> 'done' and ${where} group by ta.user_id, a.name order by count desc`, [me, ...params]);
+    const total = (await pool.query(`select count(*)::int as n ${base}`, [me, ...params])).rows[0].n as number; // a shared task counts once overall, once per person below
+    return { count: total, byAssignee: r.rows.map((x) => ({ id: x.id, name: x.name, count: x.count })) };
   };
   return c.json({
     today, friday, thresholds: THRESHOLDS,
     overdue: await by("t.due_date < $2", [today]),
     week: await by("t.due_date between $2 and $3", [today, friday]),
-    unassigned: await by("t.assignee_id is null", []),
+    unassigned: await by("not exists (select 1 from task_assignees x where x.task_id = t.id)", []),
   });
 });
 
@@ -235,10 +238,10 @@ meetingRoutes.get("/brief", async (c) => {
     pool.query("select u.name, a.kind, a.starts_on, a.ends_on from absences a join users u on u.id = a.user_id where a.starts_on <= $2 and a.ends_on >= $1", [from, to]),
     pool.query(`select count(*)::int as n from tasks t where ${VIS} and t.status <> 'done' and t.due_date < $2`, [me, today]),
     pool.query(`select count(*)::int as n from tasks t where ${VIS} and t.status <> 'done' and t.due_date between $2 and $3`, [me, from, to]),
-    pool.query(`select count(*)::int as n from tasks t where ${VIS} and t.status <> 'done' and t.assignee_id is null`, [me]),
-    pool.query(`select a.name, count(*)::int as n from tasks t join users a on a.id = t.assignee_id where ${VIS} and t.status <> 'done' and (t.due_date <= $2 or t.due_date is null) group by a.name order by n desc`, [me, to]),
+    pool.query(`select count(*)::int as n from tasks t where ${VIS} and t.status <> 'done' and not exists (select 1 from task_assignees ta where ta.task_id = t.id)`, [me]),
+    pool.query(`select a.name, count(*)::int as n from tasks t join task_assignees ta on ta.task_id = t.id join users a on a.id = ta.user_id where ${VIS} and t.status <> 'done' and (t.due_date <= $2 or t.due_date is null) group by a.name order by n desc`, [me, to]),
     pool.query("select name, due_date from meeting_projects where status = 'open' and due_date <= $1 order by due_date", [to]),
-    pool.query("select u.name from users u where u.kind = 'staff' and u.active and not exists (select 1 from tasks t where t.assignee_id = u.id and t.status <> 'done' and (t.due_date <= $1 or t.due_date is null)) order by u.name", [to]),
+    pool.query("select u.name from users u where u.kind = 'staff' and u.active and not exists (select 1 from tasks t join task_assignees ta on ta.task_id = t.id where ta.user_id = u.id and t.status <> 'done' and (t.due_date <= $1 or t.due_date is null)) order by u.name", [to]),
   ]);
   const years = new Set([Number(from.slice(0, 4)), Number(to.slice(0, 4))]);
   const hol = [...years].flatMap((y) => quebecHolidays(y)).filter((h) => h.date >= from && h.date <= to);

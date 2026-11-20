@@ -6,6 +6,7 @@ import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { splitByQuebecDay } from "../lib/timesheetPayroll.ts";
 import { entryBillingLock, resyncEntryBilling } from "../lib/timeBilling.ts";
+import { isAssigneeSql } from "../lib/taskAssignees.ts";
 import { quebecToday } from "../lib/quebecDate.ts";
 import { assertDayCap, Fail, recordEntry, snap } from "./time.ts";
 import { auth, body, camel, camelRows, isUuid } from "./util.ts";
@@ -26,7 +27,7 @@ taskTimerRoutes.onError((e, c) => {
 
 const USE = requirePermission("mytools.timesheet.use", "mytools.timesheet.manage");
 const VIEW = requirePermission("tasks.view", "command.pipeline.view");
-const VISIBLE = `(t.visibility = 'team' or t.created_by = $1 or t.assignee_id = $1
+const VISIBLE = `(t.visibility = 'team' or t.created_by = $1 or ${isAssigneeSql("$1")}
                   or (t.visibility = 'selected' and exists (select 1 from task_viewers v where v.task_id = t.id and v.user_id = $1)))`;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

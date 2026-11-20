@@ -11,7 +11,7 @@ import AccessGrid from "./AccessGrid";
 
 interface UserRow { id: string; email: string; name: string; active: boolean; is_master: boolean; totp_enabled: boolean; last_login_at: string | null; groupIds: string[] }
 interface GroupRow { id: string; name: string; permissions: string[]; locked: boolean }
-interface UserDetail extends UserRow { locale?: string; overrides: { permission: string; effect: "allow" | "deny" }[]; rights: string[] }
+interface UserDetail extends UserRow { locale?: string; phone?: string; overrides: { permission: string; effect: "allow" | "deny" }[]; rights: string[] }
 
 export default function UsersPage() {
   const { t } = useTranslation();
@@ -114,7 +114,7 @@ function EditUser({ id, groups, readOnly, onClose, onSecret }: { id: string; gro
   const detail = useQuery({ queryKey: ["admin-user", id], queryFn: () => api<UserDetail>(`/api/admin/users/${id}`) });
   const [groupIds, setGroupIds] = useState<string[] | null>(null);
   const [overrides, setOverrides] = useState<Record<string, "allow" | "deny"> | null>(null);
-  const [info, setInfo] = useState<{ name: string; email: string; locale: "fr" | "en" } | null>(null);
+  const [info, setInfo] = useState<{ name: string; email: string; locale: "fr" | "en"; phone: string } | null>(null);
   const [note, setNote] = useState("");
   const [link, setLink] = useState<string | null>(null);
   const [pwDialog, setPwDialog] = useState(false);
@@ -133,7 +133,7 @@ function EditUser({ id, groups, readOnly, onClose, onSecret }: { id: string; gro
   if (!d || !catalog.data) return null;
   const gIds = groupIds ?? d.groupIds;
   const ov = overrides ?? Object.fromEntries(d.overrides.map((o) => [o.permission, o.effect]));
-  const f = info ?? { name: d.name, email: d.email, locale: (d.locale === "en" ? "en" : "fr") as "fr" | "en" };
+  const f = info ?? { name: d.name, email: d.email, locale: (d.locale === "en" ? "en" : "fr") as "fr" | "en", phone: d.phone ?? "" };
   // Rights the groups give, computed from the groups currently ticked in the form.
   const inherited = [...new Set(groups.filter((g) => gIds.includes(g.id)).flatMap((g) => g.permissions))];
   const locked = readOnly;
@@ -145,6 +145,7 @@ function EditUser({ id, groups, readOnly, onClose, onSecret }: { id: string; gro
       <div className="mb-4 grid gap-x-4 sm:grid-cols-3">
         <label className="mb-3 block"><span className="label">{l("Nom", "Name")}</span><input className="input" value={f.name} disabled={locked} onChange={(e) => setInfo({ ...f, name: e.target.value })} /></label>
         <label className="mb-3 block"><span className="label">{l("Courriel (identifiant)", "Email (sign-in)")}</span><input className="input" type="email" value={f.email} disabled={locked} onChange={(e) => setInfo({ ...f, email: e.target.value })} /></label>
+        <label className="mb-3 block"><span className="label">{l("Téléphone", "Phone")}</span><input className="input" maxLength={40} value={f.phone} disabled={locked} onChange={(e) => setInfo({ ...f, phone: e.target.value })} /></label>
         <label className="mb-3 block"><span className="label">{l("Langue", "Language")}</span><select className="input" value={f.locale} disabled={locked} onChange={(e) => setInfo({ ...f, locale: e.target.value as "fr" | "en" })}><option value="fr">Français</option><option value="en">English</option></select></label>
       </div>
       {!locked && (
@@ -164,7 +165,7 @@ function EditUser({ id, groups, readOnly, onClose, onSecret }: { id: string; gro
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
           <button className="btn btn-danger" onClick={() => save.mutate({ active: !d.active })}>{d.active ? t("admin.deactivate") : t("admin.reactivate")}</button>
           <button className="btn btn-primary" disabled={save.isPending || !f.name.trim() || !f.email.trim()}
-            onClick={() => save.mutate({ name: f.name.trim(), email: f.email.trim(), locale: f.locale, groupIds: gIds, overrides: Object.entries(ov).map(([permission, effect]) => ({ permission, effect })) }, { onSuccess: onClose })}>{t("common.save")}</button>
+            onClick={() => save.mutate({ name: f.name.trim(), email: f.email.trim(), locale: f.locale, phone: f.phone.trim(), groupIds: gIds, overrides: Object.entries(ov).map(([permission, effect]) => ({ permission, effect })) }, { onSuccess: onClose })}>{t("common.save")}</button>
         </div>
       )}
       {pwDialog && <SetPassword id={id} name={d.name} onClose={() => setPwDialog(false)} onDone={() => { setPwDialog(false); setNote(l("Mot de passe défini.", "Password set.")); }} />}

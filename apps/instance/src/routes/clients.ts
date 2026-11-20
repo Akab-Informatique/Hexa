@@ -408,6 +408,11 @@ clientRoutes.get("/:id", requirePermission("clients.view"), async (c) => {
     pool.query("select id, name, status from clients where parent_id = $1 order by lower(name)", [id]),
   ]);
   const row = camel<Record<string, unknown>>(r.rows[0]);
+  // The resource person is the tax follow-up "Ressource" (client_tracking), the single source of truth. Staff only (this route is staff-only).
+  const rs = (await pool.query(
+    `select t.resource_id as id, u.name, u.email, u.phone, coalesce(t.resource_label,'') as label
+       from client_tracking t left join users u on u.id = t.resource_id and u.active where t.client_id = $1`, [id])).rows[0];
+  row.resource = rs ? { id: rs.id, name: rs.name ?? null, email: rs.email ?? null, phone: rs.phone ?? "", label: rs.label } : { id: null, name: null, email: null, phone: "", label: "" };
   // Billing settings are only for those who may edit them (terms, notes, auto-approval).
   if (!can(c, "clients.billing.manage", "accounting.invoices.view", "accounting.invoices.edit", "accounting.invoices.manage")) { delete row.termsDays; delete row.invoiceNotes; delete row.autoApproveKinds; delete row.poRequired; }
   return c.json({ ...row, contacts: camelRows(contacts), contracts: camelRows(contracts), children: camelRows(children) });

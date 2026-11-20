@@ -9,11 +9,20 @@ import { Chip, Empty, Toolbar, useClients, useUsers } from "../../components/kit
 import { PageHeader } from "../../components/ui";
 import TaskDialog from "./TaskDialog";
 import AutoTaskRules from "./AutoTaskRules";
+import { minLabel } from "./timer";
 
 export interface TaskRow {
   id: string; title: string; status: "todo" | "taken" | "doing" | "blocked" | "done"; priority: "low" | "normal" | "high" | "urgent"; assigneeId: string | null; assigneeName: string | null;
   clientId: string | null; clientName: string | null; dueDate: string | null; checklistTotal: number; checklistDone: number; subtaskTotal: number; isWaiting: boolean; visibility: string; recurrence: unknown;
+  loggedMinutes?: number; estimateMinutes?: number | null; assignees?: { id: string; name: string }[];
 }
+
+/** "Annick", "Annick, Emmy" or "Annick, Emmy +1" (first names, main assignee first). */
+export const assigneesLabel = (list: { name: string }[] | undefined, fallback: string | null) => {
+  if (!list?.length) return fallback ?? "—";
+  const n = list.map((a) => a.name.split(" ")[0]);
+  return n.length <= 2 ? n.join(", ") : `${n[0]}, ${n[1]} +${n.length - 2}`;
+};
 
 export const priorityTone = (p: string) => (p === "urgent" ? "danger" : p === "high" ? "warn" : "off") as "danger" | "warn" | "off";
 export const statusLabel = (l: ReturnType<typeof useL>, s: string) => ({ todo: l("Nouvelle", "New"), taken: l("Prise en charge", "Taken over"), doing: l("En cours", "In progress"), blocked: l("En attente du client", "Waiting for customer"), done: l("Terminée", "Completed") }[s] ?? s);
@@ -61,14 +70,17 @@ export default function TasksPage() {
       <div className="glass overflow-x-auto p-2">
         {list.data?.length === 0 ? <Empty>{l("Aucune tâche.", "No tasks.")}</Empty> : (
           <table className="grid">
-            <thead><tr><th style={{ width: 40 }} /><th>{l("Tâche", "Task")}</th><th>{l("Client", "Client")}</th><th>{l("Assignée à", "Assignee")}</th><th>{l("Échéance", "Due")}</th><th>{l("Priorité", "Priority")}</th><th>{l("Statut", "Status")}</th></tr></thead>
+            <thead><tr><th style={{ width: 40 }} /><th>{l("Tâche", "Task")}</th><th>{l("Client", "Client")}</th><th>{l("Assignée à", "Assignee")}</th><th>{l("Échéance", "Due")}</th><th className="text-right">{l("Temps", "Time")}</th><th>{l("Priorité", "Priority")}</th><th>{l("Statut", "Status")}</th></tr></thead>
             <tbody>{list.data?.map((t) => (
               <tr key={t.id} className="cursor-pointer" onClick={() => setDialog({ id: t.id })}>
                 <td onClick={(e) => { e.stopPropagation(); void toggle(t); }}><span className="grid h-5 w-5 place-items-center rounded-md border border-white/30" style={t.status === "done" ? { background: "var(--ok)", borderColor: "transparent" } : undefined}>{t.status === "done" && <Check size={13} color="#000" />}</span></td>
                 <td><div className={`font-medium ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}{t.isWaiting && " ⏳"}{t.recurrence ? " ↻" : ""}{t.visibility === "private" ? " 🔒" : ""}</div>
                   {(t.checklistTotal > 0 || t.subtaskTotal > 0) && <div className="text-xs text-muted">{t.checklistTotal > 0 && `☑ ${t.checklistDone}/${t.checklistTotal}`} {t.subtaskTotal > 0 && `· ${t.subtaskTotal} ${l("sous-tâches", "sub-tasks")}`}</div>}</td>
-                <td className="text-muted">{t.clientName ?? "—"}</td><td className="text-muted">{t.assigneeName ?? "—"}</td>
+                <td className="text-muted">{t.clientName ?? "—"}</td><td className="text-muted" title={t.assignees?.map((a) => a.name).join(", ")}>{assigneesLabel(t.assignees, t.assigneeName)}</td>
                 <td style={{ color: t.dueDate && t.dueDate < today && t.status !== "done" ? "var(--danger)" : undefined }}>{fmtDate(t.dueDate, loc)}</td>
+                <td className="whitespace-nowrap text-right" style={{ fontVariantNumeric: "tabular-nums", color: t.estimateMinutes && (t.loggedMinutes ?? 0) > t.estimateMinutes ? "var(--warn)" : undefined }}
+                  title={t.estimateMinutes ? l("Temps saisi / estimé", "Logged / estimate") : l("Temps saisi", "Logged")}>
+                  {(t.loggedMinutes ?? 0) > 0 ? minLabel(t.loggedMinutes!) : "—"}{t.estimateMinutes ? ` / ${minLabel(t.estimateMinutes)}` : ""}</td>
                 <td><Chip tone={priorityTone(t.priority)}>{priorityLabel(l, t.priority)}</Chip></td>
                 <td><Chip tone={t.status === "done" ? "ok" : t.status === "blocked" ? "danger" : t.status === "doing" ? "warn" : "off"}><CircleDot size={11} />{statusLabel(l, t.status)}</Chip></td>
               </tr>))}</tbody>

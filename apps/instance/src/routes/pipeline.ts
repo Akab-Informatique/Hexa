@@ -6,6 +6,7 @@ import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
 import { busyBlocks } from "../lib/microsoft.ts";
 import { auth, body, camelRows, can, isUuid } from "./util.ts";
+import { isAssigneeSql } from "../lib/taskAssignees.ts";
 
 // Pipeline "My day", modelled on the reference. What is on a person's plate (tasks due, late, urgent, in progress,
 // daily and continuous ones coming back) is laid out on their working day by the portal: never in lunch, never on an
@@ -22,7 +23,7 @@ const DEFAULTS: Settings = { workStart: "08:30", workEnd: "17:00", lunchStart: "
 const settings = async (): Promise<Settings> => ({ ...DEFAULTS, ...((await getSetting<Partial<Settings>>("pipeline")) ?? {}) });
 const mins = (s: string) => { const [h, m] = s.split(":"); return Number(h) * 60 + Number(m); };
 const clock = (n: number) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
-const VISIBLE = `(t.visibility = 'team' or t.created_by = $1 or t.assignee_id = $1 or (t.visibility = 'selected' and exists (select 1 from task_viewers v where v.task_id = t.id and v.user_id = $1)))`;
+const VISIBLE = `(t.visibility = 'team' or t.created_by = $1 or ${isAssigneeSql("$1")} or (t.visibility = 'selected' and exists (select 1 from task_viewers v where v.task_id = t.id and v.user_id = $1)))`;
 
 pipelineRoutes.get("/settings", async (c) => c.json(await settings()));
 pipelineRoutes.put("/settings", requirePermission("command.pipeline.manage"), async (c) => {
@@ -41,7 +42,7 @@ pipelineRoutes.get("/people", async (c) => {
 
 /** A daily task starts over each day: back to "to do", checklist unticked. */
 async function resetDaily(userId: string, date: string) {
-  const r = await pool.query("update tasks set status = 'todo', completed_at = null, last_reset_on = $2 where assignee_id = $1 and kind = 'daily' and (last_reset_on is null or last_reset_on < $2) returning id", [userId, date]);
+  const r = await pool.query("update tasks set status = 'todo', completed_at = null, last_reset_on = $2 where exists (select 1 from task_assignees ta where ta.task_id = tasks.id and ta.user_id = $1) and kind = 'daily' and (last_reset_on is null or last_reset_on < $2) returning id", [userId, date]);
   for (const t of r.rows) await pool.query("update task_checklist set done = false where task_id = $1", [t.id]);
 }
 
@@ -68,7 +69,7 @@ pipelineRoutes.get("/day", async (c) => {
             exists (select 1 from tasks s2 where s2.parent_id = t.id and s2.status <> 'done') as has_open_children,
             (select count(*)::int from task_checklist k where k.task_id = t.id) as checklist_total, (select count(*)::int from task_checklist k where k.task_id = t.id and k.done) as checklist_done
        from tasks t left join clients cl on cl.id = t.client_id left join tasks w on w.id = t.waits_for_id
-      where t.assignee_id = $2 and t.status <> 'done' and (t.start_date is null or t.start_date <= $3)`, [me, userId, date])).rows;
+      where ${isAssigneeSql("$2")} and t.status <> 'done' and (t.start_date is null or t.start_date <= $3)`, [me, userId, date])).rows;
 
   const mon = mondayOf(date), sun = addDays(mon, 6);
   const due = (r: { due_date: string | null }) => (r.due_date ? String(r.due_date).slice(0, 10) : null);
@@ -184,10 +185,10 @@ pipelineRoutes.delete("/tasks/:id/pin", async (c) => {
 // ------------------------------------------------------------------ Continuous tasks and files
 async function editable(c: Parameters<typeof can>[0], id: string) {
   if (!isUuid(id)) return null;
-  const t = (await pool.query("select created_by, assignee_id from tasks where id = $1", [id])).rows[0];
+  const t = (await pool.query("select created_by, assignee_id, exists (select 1 from task_assignees ta where ta.task_id = tasks.id and ta.user_id = $2) as is_assignee from tasks where id = $1", [id, auth(c).user.id])).rows[0];
   if (!t) return null;
   const me = auth(c).user.id;
-  return can(c, "tasks.manage", "command.pipeline.manage") || t.created_by === me || t.assignee_id === me ? t : "forbidden";
+  return can(c, "tasks.manage", "command.pipeline.manage") || t.created_by === me || t.is_assignee ? t : "forbidden";
 }
 
 /** "I checked it": a continuous task comes back after its reminder days. */

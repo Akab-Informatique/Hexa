@@ -94,7 +94,7 @@ export function useElapsed(startedAt: string | undefined, skew: number) {
 
 export function useTimerActions() {
   const qc = useQueryClient();
-  const refresh = async () => { await qc.invalidateQueries({ queryKey: ["task-timer"] }); await qc.invalidateQueries({ queryKey: ["task-segments"] }); await qc.invalidateQueries({ queryKey: ["task-pending"] }); };
+  const refresh = async () => { await qc.invalidateQueries({ queryKey: ["task-timer"] }); await qc.invalidateQueries({ queryKey: ["task-segments"] }); await qc.invalidateQueries({ queryKey: ["task-pending"] }); await qc.invalidateQueries({ queryKey: ["tasks"] }); };
   return {
     refresh,
     start: async (taskId: string): Promise<"ok" | "busy"> => {

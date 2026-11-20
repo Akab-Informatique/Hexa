@@ -6,7 +6,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, Pencil, Plus, Receipt, Star, Trash2 } fr
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fmtDate, money, useL, useLocale } from "../../lib/l";
-import { Chip, confirmDo, Empty, errMsg, FormDialog, Tabs, type FieldDef } from "../../components/kit";
+import { Chip, confirmDo, Empty, errMsg, FormDialog, Tabs, useUsers, type FieldDef } from "../../components/kit";
 import { Modal, PageHeader } from "../../components/ui";
 import { TrackingView } from "./TrackingPage";
 import { ClassChip, clientFields, freqLabel, statusTone, type ClientClass } from "./ClientsPage";
@@ -20,7 +20,7 @@ interface Contract { id: string; name: string; kind: string; amount: number; hou
 interface Detail {
   id: string; name: string; legalName: string; status: "active" | "inactive" | "prospect"; parentId: string | null; parentName: string | null; classKey: string | null; classLabelFr: string | null; classLabelEn: string | null; classColor: string | null;
   billingEmail: string; billingContactId: string | null; termsDays?: number | null; poRequired?: boolean; autoApproveKinds?: string[]; invoiceNotes?: string;
-  contacts: Contact[]; contracts: Contract[]; children: { id: string; name: string }[]; [k: string]: unknown;
+  resource?: { id: string | null; name: string | null; email: string | null; phone: string; label: string }; contacts: Contact[]; contracts: Contract[]; children: { id: string; name: string }[]; [k: string]: unknown;
 }
 interface InvoiceRow { id: string; number: string; status: string; view: string; total: number; balance: number; issueDate: string; dueDate: string }
 type Tab = "info" | "contacts" | "contracts" | "tasks" | "invoices" | "billing" | "tracking";
@@ -41,6 +41,7 @@ export default function ClientDetail() {
   const classes = useQuery({ queryKey: ["client-classes"], queryFn: () => api<ClientClass[]>("/api/clients/classes") });
   const invoiceRight = can("accounting.invoices.view", "accounting.invoices.edit", "accounting.invoices.manage");
   const billingRight = can("clients.billing.manage") || invoiceRight;
+  const users = useUsers();
   const c = q.data;
   const refresh = async () => { await qc.invalidateQueries({ queryKey: ["client", id] }); await qc.invalidateQueries({ queryKey: ["clients"] }); };
 
@@ -78,6 +79,22 @@ export default function ClientDetail() {
         <Tabs tabs={ordered.map((k) => ({ key: k, label: labels[k] }))} value={active} onChange={setTab} />
         {can("clients.layout.manage") && <button className="btn !py-1.5 text-xs" onClick={() => setDialog({ kind: "order" })}>{l("Ordre des onglets", "Tab order")}</button>}
       </div>
+      {c.resource && (() => {
+        const r = c.resource;
+        const edit = can("clients.tracking.edit");
+        const setRes = (body: object) => void run(() => api(`/api/tracking/${id}/settings`, { method: "PUT", body }).then(() => qc.invalidateQueries({ queryKey: ["tracking"] })));
+        return (
+          <section className="glass mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 p-4">
+            <div className="min-w-0"><div className="text-xs uppercase tracking-wide text-muted">{l("Personne ressource", "Resource person")}</div>
+              <div className="text-lg font-semibold">{r.name ?? (r.label || <span className="text-muted">{l("Non assignée", "Not assigned")}</span>)}</div>
+              {!r.id && r.label && <div className="text-xs text-muted">{l("Nom importé, non lié à un employé", "Imported name, not linked to a staff member")}</div>}</div>
+            {r.id && <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+              <div>{r.phone ? <a href={`tel:${r.phone.replace(/[^0-9+]/g, "")}`}>{r.phone}</a> : <span className="text-muted">{l("Aucun téléphone", "No phone")}</span>}</div>
+              <div>{r.email && <a href={`mailto:${r.email}`}>{r.email}</a>}</div></div>}
+            {edit && <select className="input !w-auto !py-1 sm:ml-auto" aria-label={l("Personne ressource", "Resource person")} value={r.id ?? ""} onChange={(e) => setRes({ resourceId: e.target.value || null, ...(e.target.value ? { resourceLabel: "" } : {}) })}>
+              <option value="">{r.label ? l(`— Lier « ${r.label} » à un employé —`, `— Link "${r.label}" to a staff member —`) : "—"}</option>{users.data?.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>}
+          </section>);
+      })()}
       {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
 
       {active === "info" && (

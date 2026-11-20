@@ -95,7 +95,10 @@ export const sameOriginWrites: MiddlewareHandler = async (c, next) => {
     }
     // File uploads are raw bytes; the custom header cannot be sent cross-site without a CORS preflight, so it is as safe as JSON.
     const upload = c.req.header("x-hexa-upload") === "1" && (c.req.header("content-type") ?? "").startsWith("application/octet-stream");
-    if (!upload && c.req.header("content-length") !== "0" && c.req.raw.body && !(c.req.header("content-type") ?? "").includes("json")) {
+    // A request carries a body only with a positive Content-Length or a Transfer-Encoding (RFC 9112). A body-less DELETE
+    // behind a proxy often has neither header, and Node still hands us an empty stream: that must not be refused.
+    const hasBody = Number(c.req.header("content-length") ?? 0) > 0 || Boolean(c.req.header("transfer-encoding"));
+    if (!upload && hasBody && !(c.req.header("content-type") ?? "").includes("json")) {
       return c.json({ error: "json required" }, 415);
     }
   }
