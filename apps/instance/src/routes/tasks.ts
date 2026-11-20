@@ -6,7 +6,7 @@ import { requirePermission, type Env } from "../auth/session.ts";
 import { autoApproveClients, billTimeEntries, unbillTaskTime } from "../lib/timeBilling.ts";
 import { stopTimer } from "./taskTimer.ts";
 import { audit } from "../auth/access.ts";
-import { ASSIGNEES_JSON, MAX_ASSIGNEES, invalidAssignees, isAssigneeSql, normalizeAssignees, setAssignees } from "../lib/taskAssignees.ts";
+import { ASSIGNEES_JSON, MAX_ASSIGNEES, invalidAssignees, isAssigneeSql, normalizeAssignees, setAssignees, taskVisibleSql } from "../lib/taskAssignees.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";
 
 export const taskRoutes = new Hono<Env>();
@@ -17,8 +17,7 @@ const EDIT = ["tasks.edit", "command.pipeline.edit", "tasks.manage", "command.pi
 const isManager = (c: Parameters<typeof can>[0]) => can(c, "tasks.manage", "command.pipeline.manage");
 
 /** Reference rule: private tasks are hidden even from managers; "selected" only to chosen viewers. */
-const VISIBLE = `(t.visibility = 'team' or t.created_by = $1 or ${isAssigneeSql("$1")}
-                  or (t.visibility = 'selected' and exists (select 1 from task_viewers v where v.task_id = t.id and v.user_id = $1)))`;
+const VISIBLE = taskVisibleSql("$1");
 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable();
 const TaskInput = z.object({

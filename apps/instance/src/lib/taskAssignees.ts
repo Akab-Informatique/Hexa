@@ -6,6 +6,11 @@ export const MAX_ASSIGNEES = 20;
 export const isAssigneeSql = (param: string, alias = "t") =>
   `exists (select 1 from task_assignees ta where ta.task_id = ${alias}.id and ta.user_id = ${param})`;
 
+/** Reference rule: private tasks are hidden even from managers; "selected" only to chosen viewers. SQL: "user $n may see task alias t". */
+export const taskVisibleSql = (param: string, alias = "t") =>
+  `(${alias}.visibility = 'team' or ${alias}.created_by = ${param} or ${isAssigneeSql(param, alias)}
+     or (${alias}.visibility = 'selected' and exists (select 1 from task_viewers v where v.task_id = ${alias}.id and v.user_id = ${param})))`;
+
 /** SQL fragment: the assignees of task alias t as a json array [{id,name}], main assignee first. */
 export const ASSIGNEES_JSON = `coalesce((select json_agg(json_build_object('id', u.id, 'name', u.name) order by (u.id = t.assignee_id) desc, ta.created_at, u.name)
                  from task_assignees ta join users u on u.id = ta.user_id where ta.task_id = t.id), '[]'::json) as assignees`;

@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Pencil, Plus, RefreshCw, RotateCcw, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileText, Pencil, Plus, RefreshCw, RotateCcw, X } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { addDays, fmtDate, money, mondayOf, todayISO, useL, useLocale } from "../../lib/l";
 import { Chip, Empty, errMsg, FormDialog, Tabs, type FieldDef } from "../../components/kit";
 import { Modal, PageHeader } from "../../components/ui";
+import TaskDialog from "../tasks/TaskDialog";
 
-interface Item { id: string; clientId: string; clientName: string; contractId: string | null; contractName: string | null; source: string; description: string; quantity: number; unitPrice: number; status: string; excludedReason: string; workDate: string | null; createdByName: string | null }
+interface Item { id: string; clientId: string; clientName: string; contractId: string | null; contractName: string | null; source: string; description: string; quantity: number; unitPrice: number; status: string; excludedReason: string; workDate: string | null; createdByName: string | null; taskId?: string | null; taskTitle?: string | null }
 type Summary = Record<"pending" | "approved" | "excluded" | "invoiced", { count: number; total: number }>;
 type Period = "day" | "week" | "month" | "custom";
 const OPEN_KEY = "hexa.approvals.opened";
@@ -40,6 +41,7 @@ export default function ApprovalsPage() {
   const [opened, setOpened] = useState<string[]>(readOpen);
   const [adding, setAdding] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
+  const [task, setTask] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
   const { from, to } = f.range;
@@ -118,7 +120,7 @@ export default function ApprovalsPage() {
                           return (
                             <tr key={i.id}>{manage && f.tab !== "invoiced" && <td><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={sel.includes(i.id)} onChange={(e) => pick([i.id], e.target.checked)} aria-label="select" /></td>}
                               <td className="whitespace-nowrap text-muted">{fmtDate(i.workDate, loc)}</td>
-                              <td><EditCell value={i.description} editable={editable} onSave={(v) => patch(i.id, { description: v })} /> <Chip>{i.source}</Chip>{i.excludedReason && i.status === "excluded" && <> <Chip tone="warn">{i.excludedReason === "billed" ? l("Déjà facturé", "Already invoiced") : l("Mis de côté", "Set aside")}</Chip></>}</td>
+                              <td>{i.taskId && !editable ? <button className="text-left hover:underline" onClick={() => setTask(i.taskId!)}>{i.description}</button> : <EditCell value={i.description} editable={editable} onSave={(v) => patch(i.id, { description: v })} />} {i.taskId && <TaskLink id={i.taskId} title={i.taskTitle} onOpen={setTask} />} <Chip>{i.source}</Chip>{i.excludedReason && i.status === "excluded" && <> <Chip tone="warn">{i.excludedReason === "billed" ? l("Déjà facturé", "Already invoiced") : l("Mis de côté", "Set aside")}</Chip></>}</td>
                               <td><EditCell value={String(i.quantity)} number editable={editable} onSave={(v) => patch(i.id, { quantity: Number(v) })} /></td>
                               <td><EditCell value={String(i.unitPrice)} number format={(v) => money(Number(v), loc)} editable={editable} onSave={(v) => patch(i.id, { unitPrice: Number(v) })} /></td>
                               <td>{money(tot(i), loc)}</td>
@@ -133,9 +135,15 @@ export default function ApprovalsPage() {
         })}</div>)}
 
       {adding && <FormDialog title={l("Ligne à facturer", "Line to bill")} fields={fields} initial={{ quantity: 1, unitPrice: 0, workDate: from <= todayISO() && todayISO() <= to ? todayISO() : from }} onSubmit={async (v) => { await api("/api/accounting/billing-items", { body: { clientId: v.clientId, description: v.description, quantity: Number(v.quantity), unitPrice: Number(v.unitPrice), workDate: v.workDate || null } }); await refresh(); }} onClose={() => setAdding(false)} />}
+      {task && <TaskDialog taskId={task} onClose={() => { setTask(null); void refresh(); }} />}
       {invoicing && <ItemsToInvoice from={from} to={to} onClose={() => setInvoicing(false)} onDone={refresh} />}
     </>
   );
+}
+
+/** Small chip on a time line: opens the task this time belongs to. */
+export function TaskLink({ id, title, onOpen }: { id: string; title?: string | null; onOpen: (id: string) => void }) {
+  return <button type="button" className="inline-flex max-w-[260px] items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 align-middle text-xs text-[var(--brand)] hover:bg-white/10" title={title ?? ""} onClick={(e) => { e.stopPropagation(); onOpen(id); }}><ExternalLink size={11} className="shrink-0" /><span className="truncate">{title || "…"}</span></button>;
 }
 
 /** A value edited in place: nothing is applied until the check (or Enter); the cross (or Escape) puts it back. */

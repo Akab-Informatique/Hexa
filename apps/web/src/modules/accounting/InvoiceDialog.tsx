@@ -8,9 +8,11 @@ import { useBranding } from "../../lib/theme";
 import { fmtDate, money, todayISO, useL, useLocale } from "../../lib/l";
 import { Chip, errMsg, useClients } from "../../components/kit";
 import { Modal } from "../../components/ui";
+import TaskDialog from "../tasks/TaskDialog";
+import { TaskLink } from "./ApprovalsPage";
 import { codeText as igCode } from "../../admin/IntegrationPanels";
 
-interface Line { description: string; quantity: number; unitPrice: number; taxable: boolean; billingItemId?: string | null; contractName?: string | null; amount?: number }
+interface Line { description: string; quantity: number; unitPrice: number; taxable: boolean; billingItemId?: string | null; contractName?: string | null; amount?: number; taskId?: string | null; taskTitle?: string | null }
 interface Pay { id: string; paidOn: string; amountCents: number; method: string; reference: string; note: string; byName: string | null }
 interface Detail {
   id: string; number: string; clientId: string; clientName: string; status: "draft" | "sent" | "paid" | "void"; view: string; issueDate: string; dueDate: string; sentAt: string | null; total: number; subtotal: number; gst: number; qst: number;
@@ -45,6 +47,7 @@ export function InvoiceDialog({ id, onClose, onChanged, onStatement }: { id: str
   const [po, setPo] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
   const [sheet, setSheet] = useState(false);
+  const [task, setTask] = useState<string | null>(null);
   const [pay, setPay] = useState<null | { amount: string; method: string; reference: string; paidOn: string }>(null);
   const [error, setError] = useState("");
   const [send, setSend] = useState<null | "sent" | "reminder">(null);
@@ -91,7 +94,7 @@ export function InvoiceDialog({ id, onClose, onChanged, onStatement }: { id: str
             <div className="rounded-lg border border-neutral-300 p-3 text-xs"><div className="flex justify-between"><span className="text-neutral-500">{l("Paiement dû", "Payment due")}</span><b>{fmtDate(d.dueDate, loc)}</b></div>{d.poNumber && <div className="flex justify-between"><span className="text-neutral-500">{l("Bon de commande", "PO number")}</span><b>{d.poNumber}</b></div>}</div>
           </div>
           <table className="w-full border-collapse text-xs"><thead><tr className="border-b-2 border-neutral-800 text-left"><th className="py-1.5">{l("Description", "Description")}</th><th className="text-right">{l("Qté", "Qty")}</th><th className="text-right">{l("Taux", "Rate")}</th><th className="text-right">{l("Montant", "Amount")}</th></tr></thead>
-            <tbody>{d.lines.map((r, i) => <tr key={i} className="border-b border-neutral-200"><td className="py-1.5">{r.description}{r.contractName && <div className="text-neutral-500">{r.contractName}</div>}</td><td className="text-right">{r.quantity}</td><td className="text-right">{money(r.unitPrice, loc)}</td><td className="text-right">{money(r.amount, loc)}</td></tr>)}</tbody></table>
+            <tbody>{d.lines.map((r, i) => <tr key={i} className="border-b border-neutral-200"><td className="py-1.5">{r.description}{r.taskId && <div className="print:hidden"><TaskLink id={r.taskId} title={r.taskTitle} onOpen={setTask} /></div>}{r.contractName && <div className="text-neutral-500">{r.contractName}</div>}</td><td className="text-right">{r.quantity}</td><td className="text-right">{money(r.unitPrice, loc)}</td><td className="text-right">{money(r.amount, loc)}</td></tr>)}</tbody></table>
           <div className="ml-auto mt-3 w-64 space-y-1 text-xs">
             <div className="flex justify-between"><span>{l("Sous-total", "Subtotal")}</span><span>{money(d.subtotal, loc)}</span></div><div className="flex justify-between"><span>TPS/GST ({d.rates.gst}%)</span><span>{money(d.gst, loc)}</span></div><div className="flex justify-between"><span>TVQ/QST ({d.rates.qst}%)</span><span>{money(d.qst, loc)}</span></div>
             <div className="flex justify-between border-t border-neutral-800 pt-1 text-sm font-bold"><span>Total</span><span>{money(d.total, loc)}</span></div>
@@ -112,7 +115,7 @@ export function InvoiceDialog({ id, onClose, onChanged, onStatement }: { id: str
           <div className="overflow-x-auto"><table className="grid"><thead><tr><th>{l("Description", "Description")}</th><th style={{ width: 80 }}>{l("Qté", "Qty")}</th><th style={{ width: 110 }}>{l("Prix unitaire", "Unit price")}</th><th style={{ width: 60 }}>{l("Taxable", "Tax")}</th><th style={{ width: 100 }} className="text-right">{l("Montant", "Amount")}</th><th style={{ width: 36 }} /></tr></thead>
             <tbody>{rows.map((r, i) => (
               <tr key={i}>
-                <td><input className="input" value={r.description} onChange={(e) => setRow(i, { description: e.target.value })} /></td>
+                <td><input className="input" value={r.description} onChange={(e) => setRow(i, { description: e.target.value })} />{r.taskId && <div className="mt-1"><TaskLink id={r.taskId} title={r.taskTitle} onOpen={setTask} /></div>}</td>
                 <td><input className="input" type="number" step="0.01" value={r.quantity} onChange={(e) => setRow(i, { quantity: e.target.value as unknown as number })} /></td>
                 <td><input className="input" type="number" step="0.01" value={r.unitPrice} onChange={(e) => setRow(i, { unitPrice: e.target.value as unknown as number })} /></td>
                 <td className="text-center"><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={r.taxable} onChange={(e) => setRow(i, { taxable: e.target.checked })} /></td>
@@ -160,6 +163,7 @@ export function InvoiceDialog({ id, onClose, onChanged, onStatement }: { id: str
           {d && manage && d.status === "draft" && <button className="btn btn-primary" onClick={() => void action("send")}>{l("Envoyer (finaliser)", "Send (finalize)")}</button>}</div>
       </div>
       {d?.quickbooksError && <p className="mt-3 text-xs text-warn">QuickBooks : {d.quickbooksError}</p>}
+      {task && <TaskDialog taskId={task} onClose={() => { setTask(null); void detail.refetch(); }} />}
       {send && d && <SendDialog kind={send} invoiceId={d.id} number={d.number} defaultTo={d.billingEmail || d.clientEmail} onClose={() => setSend(null)} onSent={refreshAll} />}
     </Modal>
   );

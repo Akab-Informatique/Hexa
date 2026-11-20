@@ -5,6 +5,7 @@ import { aging, computeInvoice, dueAfterSent, roundCents, todayISO } from "@hexa
 import { pool } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
+import { taskVisibleSql } from "../lib/taskAssignees.ts";
 import { applyAutoApprove } from "../lib/autoApprove.ts";
 import { voidInvoice } from "../lib/quickbooks.ts";
 import { ServiceError } from "../lib/services.ts";
@@ -35,6 +36,10 @@ const ItemInput = z.object({
   unitPrice: z.number().min(0).max(1e7), workDate: Day.nullable().optional(),
 });
 
+/** For a time line: the task its entry belongs to, only when user $n may see that task (else null). */
+const TASK_JOIN = (user: string) => `left join timesheet_entries te on b.source = 'time' and te.id = b.source_id
+       left join tasks t on t.id = te.task_id and ${taskVisibleSql(user)}`;
+
 /** The time frame applies to the work date; a line with no date is always shown. */
 const FRAME = "($3::date is null or b.work_date is null or b.work_date >= $3) and ($4::date is null or b.work_date is null or b.work_date <= $4)";
 
@@ -42,11 +47,12 @@ invoicingRoutes.get("/billing-items", requirePermission("accounting.approvals.vi
   const status = c.req.query("status") ?? "pending";
   const client = c.req.query("client");
   const r = await pool.query(
-    `select b.*, cl.name as client_name, u.name as created_by_name, k.name as contract_name
+    `select b.*, cl.name as client_name, u.name as created_by_name, k.name as contract_name, t.id as task_id, t.title as task_title
        from billing_items b join clients cl on cl.id = b.client_id left join users u on u.id = b.created_by left join client_contracts k on k.id = b.contract_id
+       ${TASK_JOIN("$5")}
       where ($1 = 'all' or b.status = $1) and ($2::uuid is null or b.client_id = $2) and ${FRAME}
       order by cl.name, k.name nulls first, b.work_date nulls last, b.created_at limit 2000`,
-    [["pending", "approved", "excluded", "invoiced", "all"].includes(status) ? status : "pending", client && isUuid(client) ? client : null, dayOrNull(c.req.query("from")), dayOrNull(c.req.query("to"))]);
+    [["pending", "approved", "excluded", "invoiced", "all"].includes(status) ? status : "pending", client && isUuid(client) ? client : null, dayOrNull(c.req.query("from")), dayOrNull(c.req.query("to")), auth(c).user.id]);
   return c.json(camelRows(r));
 });
 
@@ -160,18 +166,22 @@ invoicingRoutes.get("/invoices", requirePermission(...INV_VIEW), async (c) => {
   return c.json({ rows, total: t.n, page, size, totals: { amount: roundCents(Number(t.total)), balance: dollars(Number(t.balance)) } });
 });
 
-export async function invoiceDetail(id: string) {
+/** viewerId (staff only) adds the task link of time lines; the client portal passes none. */
+export async function invoiceDetail(id: string, viewerId?: string) {
   if (!isUuid(id)) throw new Fail(404, "not_found");
   const r = (await pool.query(`${WITH_PAID} select v.*, cl.address, cl.city, cl.province, cl.postal_code, cl.billing_email, cl.email as client_email, cl.terms_days from v join clients cl on cl.id = v.client_id where v.id = $2`, [todayISO(), id])).rows[0];
   if (!r) throw new Fail(404, "not_found");
   const [lines, payments] = await Promise.all([
-    pool.query("select l.*, k.name as contract_name from invoice_lines l left join billing_items b on b.id = l.billing_item_id left join client_contracts k on k.id = b.contract_id where l.invoice_id = $1 order by l.position", [id]),
+    viewerId
+      ? pool.query(`select l.*, k.name as contract_name, t.id as task_id, t.title as task_title from invoice_lines l left join billing_items b on b.id = l.billing_item_id left join client_contracts k on k.id = b.contract_id
+          ${TASK_JOIN("$2")} where l.invoice_id = $1 order by l.position`, [id, viewerId])
+      : pool.query("select l.*, k.name as contract_name from invoice_lines l left join billing_items b on b.id = l.billing_item_id left join client_contracts k on k.id = b.contract_id where l.invoice_id = $1 order by l.position", [id]),
     pool.query("select p.id, p.paid_on, p.amount_cents, p.method, p.reference, p.note, u.name as by_name from invoice_payments p left join users u on u.id = p.created_by where p.invoice_id = $1 order by p.paid_on, p.created_at", [id]),
   ]);
   return { ...camel<Record<string, unknown>>(r), paid: dollars(Number(r.paid_cents)), balance: roundCents(Number(r.total) - dollars(Number(r.paid_cents))), lines: camelRows(lines), payments: camelRows(payments), rates: await settings() };
 }
 
-invoicingRoutes.get("/invoices/:id", requirePermission(...INV_VIEW), async (c) => c.json(await invoiceDetail(c.req.param("id"))));
+invoicingRoutes.get("/invoices/:id", requirePermission(...INV_VIEW), async (c) => c.json(await invoiceDetail(c.req.param("id"), auth(c).user.id)));
 
 invoicingRoutes.post("/invoices", requirePermission("accounting.invoices.edit", "accounting.invoices.manage"), async (c) => {
   const d = await body(c, z.object({ clientId: z.string().uuid(), lines: z.array(LineInput).min(1).max(200), issueDate: Day.optional(), dueDate: Day.optional(), poNumber: z.string().max(60).optional(), notes: z.string().max(2000).optional() }));
