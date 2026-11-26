@@ -7,6 +7,8 @@ import { autoApproveClients, billTimeEntries, unbillTaskTime } from "../lib/time
 import { stopTimer } from "./taskTimer.ts";
 import { audit } from "../auth/access.ts";
 import { ASSIGNEES_JSON, MAX_ASSIGNEES, invalidAssignees, isAssigneeSql, normalizeAssignees, setAssignees, taskVisibleSql } from "../lib/taskAssignees.ts";
+import { copyAttachments, mailForTask, MAIL_ID } from "../lib/mailTask.ts";
+import { ServiceError } from "../lib/services.ts";
 import { auth, body, buildUpdate, camel, camelRows, can, isUuid } from "./util.ts";
 
 export const taskRoutes = new Hono<Env>();
@@ -300,4 +302,27 @@ taskRoutes.post("/:id/notes", requirePermission(...VIEW), async (c) => {
   await pool.query("insert into task_notes (task_id, user_id, body, audience) values ($1, $2, $3, $4)", [id, auth(c).user.id, text, audience]);
   if (audience === "client") await audit("task.note_to_client", { userId: auth(c).user.id, target: id });
   return c.json({ ok: true }, 201);
+});
+
+/** After a task is made from an e-mail: copy the chosen attachments and add a first note with the link to the original. The person's own mailbox only. */
+taskRoutes.post("/:id/from-mail", requirePermission("mytools.mail.use"), requirePermission(...EDIT), async (c) => {
+  const id = c.req.param("id");
+  const me = auth(c).user.id;
+  if (!isUuid(id)) return c.json({ error: "not found" }, 404);
+  const t = (await pool.query(`select created_by, exists (select 1 from task_assignees ta where ta.task_id = tasks.id and ta.user_id = $1) as is_assignee from tasks where id = $2 and ${taskVisibleSql("$1", "tasks")}`, [me, id])).rows[0];
+  if (!t) return c.json({ error: "not found" }, 404);
+  if (!(isManager(c) || t.created_by === me || t.is_assignee)) return c.json({ error: "forbidden" }, 403);
+  const d = await body(c, z.object({ messageId: z.string().regex(MAIL_ID), attachmentIds: z.array(z.string().regex(MAIL_ID)).max(20).default([]) }));
+  try {
+    const m = await mailForTask(me, d.messageId);
+    const files = d.attachmentIds.length ? await copyAttachments(me, id, d.messageId, d.attachmentIds) : { stored: [], skipped: [] };
+    const when = m.receivedAt ? m.receivedAt.slice(0, 10) : "";
+    const note = `Créée à partir du courriel de ${m.from}${when ? ` du ${when}` : ""}${m.webLink ? `\nOuvrir le courriel dans Outlook : ${m.webLink}` : ""}${files.skipped.length ? `\nPièces jointes non copiées : ${files.skipped.length}` : ""}`;
+    await pool.query("insert into task_notes (task_id, user_id, body, audience) values ($1, $2, $3, 'internal')", [id, me, note.slice(0, 5000)]);
+    await audit("task.from_mail", { userId: me, target: id, detail: { files: files.stored.length, skipped: files.skipped.length } });
+    return c.json({ ok: true, files: files.stored.length, skipped: files.skipped.length, webLink: m.webLink });
+  } catch (e) {
+    if (e instanceof ServiceError) return c.json({ error: e.code, detail: e.detail }, e.status as 400);
+    throw e;
+  }
 });

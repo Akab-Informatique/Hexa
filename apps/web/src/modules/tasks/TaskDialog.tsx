@@ -24,7 +24,8 @@ const defaultAssignees = (d: Record<string, unknown> | undefined, me?: string): 
   Array.isArray(d?.assigneeIds) ? (d.assigneeIds as string[]) : typeof d?.assigneeId === "string" && d.assigneeId ? [d.assigneeId] : d && "assigneeId" in d ? [] : me ? [me] : [];
 
 /** Create or edit a task: details, recurrence, checklist, notes and sub-tasks in one place. */
-export default function TaskDialog({ taskId, defaults, onClose }: { taskId: string | null; defaults?: Record<string, unknown>; onClose: () => void }) {
+export interface MailSource { messageId: string; attachments: { id: string; name: string; size: number }[] }
+export default function TaskDialog({ taskId, defaults, mail, onClose }: { taskId: string | null; defaults?: Record<string, unknown>; mail?: MailSource; onClose: () => void }) {
   const l = useL();
   const loc = useLocale();
   const { me, can } = useAuth();
@@ -41,6 +42,7 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
   const [audience, setAudience] = useState<"internal" | "client">("internal");
   const [viewerIds, setViewerIds] = useState<string[] | null>(null);
   const [assigneeIds, setAssigneeIds] = useState<string[] | null>(null);
+  const [skipAtt, setSkipAtt] = useState<string[]>([]); // attachments of the source e-mail the person unticked
 
   // The timer: starts by itself when a task is opened (unless switched off), keeps running when this window is closed.
   const timer = useTimerState();
@@ -119,7 +121,14 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
       ...(taskId ? {} : { checklist: [...draftItems, ...(newItem.trim() ? [newItem.trim()] : [])] }),
     };
     try {
-      if (taskId) await api(`/api/tasks/${taskId}`, { method: "PATCH", body }); else await api("/api/tasks", { body });
+      if (taskId) await api(`/api/tasks/${taskId}`, { method: "PATCH", body });
+      else {
+        const made = await api<{ id: string }>("/api/tasks", { body });
+        if (mail) {
+          try { await api(`/api/tasks/${made.id}/from-mail`, { body: { messageId: mail.messageId, attachmentIds: mail.attachments.filter((a) => !skipAtt.includes(a.id)).map((a) => a.id) } }); }
+          catch (e) { await refresh(); setError(l("Tâche créée, mais le courriel n'a pas pu être joint : ", "Task created, but the e-mail could not be attached: ") + errMsg(e, "Error")); setBusy(false); return; }
+        }
+      }
       await refresh(); onClose();
     } catch (e) { setError(errMsg(e, l("Erreur", "Error"))); } finally { setBusy(false); }
   };
@@ -128,6 +137,10 @@ export default function TaskDialog({ taskId, defaults, onClose }: { taskId: stri
 
   return (
     <Modal title={taskId ? l("Tâche", "Task") : l("Nouvelle tâche", "New task")} onClose={onClose} wide>
+      {!taskId && mail && mail.attachments.length > 0 && (
+        <fieldset className="glass-flat mb-4 p-3 text-sm"><legend className="px-1 text-xs text-muted">{l("Joindre les pièces jointes du courriel", "Attach the e-mail's attachments")}</legend>
+          {mail.attachments.map((a) => <label key={a.id} className="flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={!skipAtt.includes(a.id)} onChange={(e) => setSkipAtt(e.target.checked ? skipAtt.filter((x) => x !== a.id) : [...skipAtt, a.id])} /><span className="truncate">{a.name}</span><span className="text-xs text-muted">{Math.max(1, Math.round(a.size / 1024))} KB{a.size > 5_000_000 ? ` · ${l("trop gros, ignoré", "too large, skipped")}` : ""}</span></label>)}
+        </fieldset>)}
       {t?.isWaiting && <p className="mb-3 text-sm text-warn">⏳ {l("En attente de", "Waiting for")}: {t.waitsForTitle}</p>}
       {taskId && timer.enabled && t && (
         <div className="glass-flat mb-4 flex flex-wrap items-center gap-3 p-3 text-sm">

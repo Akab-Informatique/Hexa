@@ -14,10 +14,10 @@ export const useIntegrations = () => useQuery({ queryKey: ["dir-integrations"], 
 export const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
 // ---------- Generic form ----------
-export type FieldType = "text" | "textarea" | "number" | "date" | "select" | "checkbox" | "email" | "url" | "client" | "user" | "section";
+export type FieldType = "text" | "textarea" | "number" | "date" | "select" | "checkbox" | "email" | "url" | "client" | "user" | "section" | "segmented";
 export interface FieldDef {
   name: string; label: [string, string]; type?: FieldType; required?: boolean; span?: 1 | 2; placeholder?: string; step?: string;
-  options?: { value: string; label: [string, string] | string }[]; rows?: number; hint?: [string, string];
+  options?: { value: string; label: [string, string] | string }[]; rows?: number; hint?: [string, string]; showIf?: (values: Record<string, unknown>) => boolean;
 }
 
 export function FormFields({ fields, values, onChange }: { fields: FieldDef[]; values: Record<string, unknown>; onChange: (v: Record<string, unknown>) => void }) {
@@ -28,11 +28,16 @@ export function FormFields({ fields, values, onChange }: { fields: FieldDef[]; v
   return (
     <div className="grid gap-x-4 sm:grid-cols-2">
       {fields.map((f) => {
+        if (f.showIf && !f.showIf(values)) return null;
         const v = values[f.name];
         const label = l(...f.label);
         if (f.type === "section") return <h3 key={f.name} className="mb-3 mt-2 border-b border-white/10 pb-1 text-xs font-semibold uppercase tracking-wide text-muted sm:col-span-2">{label}</h3>;
         let input: ReactNode;
         if (f.type === "textarea") input = <textarea className="input" rows={f.rows ?? 3} required={f.required} placeholder={f.placeholder} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />;
+        else if (f.type === "segmented") input = (
+          <div className="glass-flat inline-flex p-0.5 text-sm" role="radiogroup">{(f.options ?? []).map((o) => (
+            <button type="button" key={o.value} role="radio" aria-checked={v === o.value} onClick={() => set(f.name, o.value)} className="rounded-[9px] px-3.5 py-1.5 font-medium transition"
+              style={v === o.value ? { background: "linear-gradient(135deg, var(--brand), var(--brand-2))", color: "#fff" } : { color: "var(--muted)" }}>{typeof o.label === "string" ? o.label : l(...o.label)}</button>))}</div>);
         else if (f.type === "checkbox") input = <label className="flex items-center gap-2 py-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={Boolean(v)} onChange={(e) => set(f.name, e.target.checked)} />{label}</label>;
         else if (f.type === "select" || f.type === "client" || f.type === "user") {
           const opts = f.type === "client" ? (clients.data ?? []).map((c) => ({ value: c.id, label: c.name as string }))

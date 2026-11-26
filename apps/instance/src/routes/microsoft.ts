@@ -7,6 +7,7 @@ import { requirePermission, requireReady, type Env } from "../auth/session.ts";
 import { config } from "../config.ts";
 import { authorizeUrl, calendarEvents, completeSignIn, connectionOf, graphGet, MS_CALLBACK, msApp, readState } from "../lib/microsoft.ts";
 import { redirectUri, ServiceError } from "../lib/services.ts";
+import { mailForTask, MAIL_ID } from "../lib/mailTask.ts";
 import { auth } from "./util.ts";
 
 // Each person's own Microsoft 365 calendar and inbox (read only), through the firm's Entra app.
@@ -58,6 +59,13 @@ microsoftRoutes.get("/mail", requirePermission("mytools.mail.use"), async (c) =>
   const q = new URLSearchParams({ $top: String(top), $orderby: "receivedDateTime desc", $select: "id,subject,from,receivedDateTime,isRead,bodyPreview,hasAttachments,webLink", ...(c.req.query("unread") === "1" ? { $filter: "isRead eq false" } : {}) });
   const j = (await graphGet(auth(c).user.id, `/me/mailFolders/inbox/messages?${q}`)) as { value?: Record<string, any>[] };
   return c.json({ messages: (j.value ?? []).map((m) => ({ id: m.id, subject: m.subject ?? "", from: m.from?.emailAddress?.name || m.from?.emailAddress?.address || "", fromEmail: m.from?.emailAddress?.address ?? "", receivedAt: m.receivedDateTime, isRead: Boolean(m.isRead), preview: m.bodyPreview ?? "", hasAttachments: Boolean(m.hasAttachments), webLink: m.webLink ?? null })) });
+});
+
+/** Prefill for a task made from one of the person's own e-mails (their own Microsoft connection only). */
+microsoftRoutes.get("/mail/:id/for-task", requirePermission("mytools.mail.use"), requirePermission("tasks.edit", "command.pipeline.edit", "tasks.manage", "command.pipeline.manage"), async (c) => {
+  const id = c.req.param("id");
+  if (!MAIL_ID.test(id)) return c.json({ error: "not found" }, 404);
+  return c.json(await mailForTask(auth(c).user.id, id));
 });
 
 /** One message as plain text (Microsoft converts it): nothing from a stranger's HTML ever reaches the page. */

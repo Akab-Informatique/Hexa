@@ -1,12 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, Inbox, Link2, Paperclip, Plug, RefreshCw, Unplug } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, Inbox, Link2, Paperclip, ListPlus, Plug, RefreshCw, Unplug } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { addDays, fmtDate, mondayOf, todayISO, useL, useLocale } from "../../lib/l";
 import { Chip, Empty, errMsg } from "../../components/kit";
 import { Modal, PageHeader } from "../../components/ui";
+import TaskDialog, { type MailSource } from "../tasks/TaskDialog";
 
 interface Status { configured: boolean; connected: boolean; email: string | null; needsReauth: boolean; redirectUri: string | null }
 interface Ev { id: string; subject: string; start: string; end: string; allDay: boolean; location: string; showAs: string; isPrivate: boolean; webLink: string | null }
@@ -99,7 +100,9 @@ function InboxView() {
   const l = useL();
   const loc = useLocale();
   const [unread, setUnread] = useState(false);
+  const { can } = useAuth();
   const [open, setOpen] = useState<string | null>(null);
+  const [mk, setMk] = useState<string | null>(null); // message turned into a task
   const q = useQuery({ queryKey: ["ms-mail", unread], queryFn: () => api<{ messages: Msg[] }>(`/api/microsoft/mail?top=30${unread ? "&unread=1" : ""}`), retry: false });
   return (
     <>
@@ -111,18 +114,32 @@ function InboxView() {
       <div className="glass p-2">
         {!q.data?.messages.length ? <Empty>{l("Aucun message.", "No messages.")}</Empty> : (
           <ul>{q.data.messages.map((m) => (
-            <li key={m.id}><button className="flex w-full items-start gap-3 rounded-lg p-3 text-left hover:bg-white/5" onClick={() => setOpen(m.id)}>
+            <li key={m.id} className="flex items-start gap-1"><button className="flex min-w-0 flex-1 items-start gap-3 rounded-lg p-3 text-left hover:bg-white/5" onClick={() => setOpen(m.id)}>
               <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: m.isRead ? "transparent" : "var(--brand)" }} />
               <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className={`truncate ${m.isRead ? "" : "font-semibold"}`}>{m.from}</span>{m.hasAttachments && <Paperclip size={12} className="text-muted" />}<span className="ml-auto shrink-0 text-xs text-muted">{new Date(m.receivedAt).toLocaleString(loc, { dateStyle: "medium", timeStyle: "short" })}</span></span>
-                <span className={`block truncate text-sm ${m.isRead ? "text-muted" : ""}`}>{m.subject || l("(sans objet)", "(no subject)")}</span><span className="block truncate text-xs text-muted">{m.preview}</span></span></button></li>))}</ul>)}
+                <span className={`block truncate text-sm ${m.isRead ? "text-muted" : ""}`}>{m.subject || l("(sans objet)", "(no subject)")}</span><span className="block truncate text-xs text-muted">{m.preview}</span></span></button>
+              {can("tasks.edit", "command.pipeline.edit", "tasks.manage", "command.pipeline.manage") && <button className="btn mt-2 shrink-0 !p-2" title={l("Créer une tâche", "Create a task")} aria-label={l("Créer une tâche", "Create a task")} onClick={() => setMk(m.id)}><ListPlus size={15} /></button>}</li>))}</ul>)}
       </div>
-      {open && <MessageDialog id={open} onClose={() => setOpen(null)} />}
+      {open && <MessageDialog id={open} onClose={() => setOpen(null)} onTask={() => { setMk(open); setOpen(null); }} />}
+      {mk && <MailTask id={mk} onClose={() => setMk(null)} />}
     </>
   );
 }
 
-function MessageDialog({ id, onClose }: { id: string; onClose: () => void }) {
+interface Prefill { subject: string; description: string; attachments: { id: string; name: string; size: number }[]; suggestedClientId: string | null }
+/** Loads the prefill (plain text, built by the server) and opens the normal new-task window with it. */
+function MailTask({ id, onClose }: { id: string; onClose: () => void }) {
   const l = useL();
+  const q = useQuery({ queryKey: ["ms-for-task", id], queryFn: () => api<Prefill>(`/api/microsoft/mail/${encodeURIComponent(id)}/for-task`), retry: false, staleTime: 0, gcTime: 0 });
+  if (q.error) return <Modal title={l("Créer une tâche", "Create a task")} onClose={onClose}><p role="alert" className="text-sm text-danger">{errMsg(q.error, "Error")}</p><div className="mt-4 text-right"><button className="btn" onClick={onClose}>{l("Fermer", "Close")}</button></div></Modal>;
+  if (!q.data) return null;
+  const mail: MailSource = { messageId: id, attachments: q.data.attachments };
+  return <TaskDialog taskId={null} mail={mail} defaults={{ title: q.data.subject, description: q.data.description, ...(q.data.suggestedClientId ? { clientId: q.data.suggestedClientId } : {}) }} onClose={onClose} />;
+}
+
+function MessageDialog({ id, onClose, onTask }: { id: string; onClose: () => void; onTask: () => void }) {
+  const l = useL();
+  const { can } = useAuth();
   const loc = useLocale();
   const q = useQuery({ queryKey: ["ms-msg", id], queryFn: () => api<{ subject: string; from: string; fromEmail: string; to: string[]; receivedAt: string; body: string; webLink: string | null }>(`/api/microsoft/mail/${encodeURIComponent(id)}`) });
   const m = q.data;
@@ -133,7 +150,7 @@ function MessageDialog({ id, onClose }: { id: string; onClose: () => void }) {
           <div className="mb-3 text-sm"><b>{m.from}</b> <span className="text-muted">&lt;{m.fromEmail}&gt;</span><div className="text-xs text-muted">{l("À", "To")}: {m.to.join(", ")} · {new Date(m.receivedAt).toLocaleString(loc)}</div></div>
           {/* Plain text only: Microsoft converts the message, and React shows it as text. */}
           <pre className="glass-flat max-h-[50vh] overflow-auto whitespace-pre-wrap p-3 text-sm">{m.body}</pre>
-          <div className="mt-4 flex justify-between"><Chip>{l("Lecture seule", "Read only")}</Chip><div className="flex gap-2">{m.webLink && <a className="btn no-underline" href={m.webLink} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} />{l("Ouvrir dans Outlook", "Open in Outlook")}</a>}<button className="btn" onClick={onClose}>{l("Fermer", "Close")}</button></div></div>
+          <div className="mt-4 flex justify-between"><Chip>{l("Lecture seule", "Read only")}</Chip><div className="flex gap-2">{can("tasks.edit", "command.pipeline.edit", "tasks.manage", "command.pipeline.manage") && <button className="btn" onClick={onTask}><ListPlus size={14} />{l("Créer une tâche", "Create a task")}</button>}{m.webLink && <a className="btn no-underline" href={m.webLink} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} />{l("Ouvrir dans Outlook", "Open in Outlook")}</a>}<button className="btn" onClick={onClose}>{l("Fermer", "Close")}</button></div></div>
         </>)}
     </Modal>
   );

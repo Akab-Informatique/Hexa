@@ -613,6 +613,19 @@ ok("the inbox lists messages", inbox.length === 2 && inbox[0].isRead === false &
 const oneMail = (await call("GET", `/api/microsoft/mail/${inbox[0].id}`)).body;
 ok("one message comes as plain text", oneMail.body.includes("Voici les pièces") && oneMail.to[0] === "marie@acme.test");
 ok("a strange message id is refused", (await call("GET", "/api/microsoft/mail/..%2F..%2Fme")).status === 404);
+// The demo seed's "Construction Lavoie ltée" has the sender (luc@lavoie.example) as its contact: the only match, so it is guessed.
+const lav = (await call("GET", `/api/clients?q=${encodeURIComponent("Construction Lavoie")}`)).body;
+const pre = (await call("GET", `/api/microsoft/mail/${inbox[0].id}/for-task`)).body;
+ok("the e-mail comes as a task prefill: clean subject, text body, file attachments only, client guessed", pre.subject === "Pièces justificatives T2" && pre.description.includes("Luc Lavoie") && pre.description.includes("Voici les pièces") && pre.attachments.length === 1 && pre.attachments[0].name === "releve-t2.txt" && lav.length === 1 && pre.suggestedClientId === lav[0].id && pre.webLink === "https://outlook.example/m1", JSON.stringify(pre));
+const mdup = await call("POST", "/api/clients", { name: `SMOKE Mail Twin ${Date.now()}` });
+await call("POST", `/api/clients/${mdup.body.id}/contacts`, { name: "Luc Lavoie", email: "luc@lavoie.example" });
+ok("two clients with the sender's address: no guess", (await call("GET", `/api/microsoft/mail/${inbox[0].id}/for-task`)).body.suggestedClientId === null);
+ok("a strange id is refused for the prefill", (await call("GET", "/api/microsoft/mail/..%2Fx/for-task")).status === 404);
+const mt = await call("POST", "/api/tasks", { title: `SMOKE from mail ${Date.now()}`, description: pre.description, clientId: pre.suggestedClientId });
+const fm = await call("POST", `/api/tasks/${mt.body.id}/from-mail`, { messageId: inbox[0].id, attachmentIds: [pre.attachments[0].id] });
+const mfiles = (await call("GET", `/api/pipeline/tasks/${mt.body.id}/files`)).body;
+const mdet = (await call("GET", `/api/tasks/${mt.body.id}`)).body;
+ok("creating the task copies the attachment and adds the link note", fm.body.ok === true && mfiles.length === 1 && mfiles[0].name === "releve-t2.txt" && mdet.notes.some((n) => n.body.includes("Créée à partir du courriel de Luc Lavoie") && n.body.includes("https://outlook.example/m1")), JSON.stringify([fm.body, mfiles, mdet.notes]));
 await mockPost("/_mock/expire");
 ok("an expired access token is refreshed by itself", (await call("GET", `/api/microsoft/calendar?from=${D}&to=${D}`)).body.events.length === 3);
 const dayOut = (await dayOf(D)).body;

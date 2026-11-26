@@ -4,6 +4,7 @@ import { z } from "zod";
 import { chargesFor, monthlyEquivalentCents } from "@hexa/shared/contractCharges";
 import { canAttach, centsToDecimal, checkSale, isValidDay, MAX_PRICE_CENTS, type ServiceKindDb } from "@hexa/shared/productSale";
 import { todayISO } from "@hexa/shared/billing";
+import { hierarchyProblem, relationRow, relationView, RELATION_KINDS, type RelationKind } from "@hexa/shared/clientRelations";
 import { pool, getSetting, setSetting } from "../db.ts";
 import { audit } from "../auth/access.ts";
 import { requirePermission, type Env } from "../auth/session.ts";
@@ -27,7 +28,9 @@ const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const ClientInput = z.object({
   name: z.string().min(1).max(200),
   legalName: Str.optional(), parentId: z.string().uuid().nullable().optional(),
-  status: z.enum(["active", "inactive", "prospect"]).optional(),
+  status: z.enum(["active", "inactive", "prospect"]).optional(), clientType: z.enum(["business", "individual"]).optional(),
+  referralSource: z.enum(["", "word_of_mouth", "facebook", "website", "other"]).optional(), referralName: z.string().max(200).optional(),
+  referralClientId: z.string().uuid().nullable().optional(), referralDetail: z.string().max(500).optional(),
   businessNumber: Str.optional(), fiscalYearEnd: Str.optional(), phone: Str.optional(), email: Str.optional(), website: Str.optional(),
   address: Str.optional(), city: Str.optional(), province: Str.optional(), postalCode: Str.optional(), notes: z.string().max(5000).optional(),
   classKey: z.string().max(40).nullable().optional(),
@@ -42,7 +45,7 @@ const BillingInput = z.object({
   autoApproveKinds: z.array(z.enum(["time", "expense", "contract", "manual"])).max(4).optional(), invoiceNotes: z.string().max(2000).optional(),
 });
 const COLS: Record<string, string> = {
-  name: "name", legalName: "legal_name", parentId: "parent_id", status: "status", businessNumber: "business_number", fiscalYearEnd: "fiscal_year_end",
+  name: "name", legalName: "legal_name", parentId: "parent_id", clientType: "client_type", referralSource: "referral_source", referralName: "referral_name", referralClientId: "referral_client_id", referralDetail: "referral_detail", status: "status", businessNumber: "business_number", fiscalYearEnd: "fiscal_year_end",
   phone: "phone", email: "email", website: "website", address: "address", city: "city", province: "province", postalCode: "postal_code", notes: "notes", classKey: "class_key",
   identificationNumber: "identification_number", neq: "neq", ccq: "ccq", rbq: "rbq", taxFrequency: "tax_frequency", taxDate: "tax_date",
   dasFrequency: "das_frequency", dasDate: "das_date", software: "software",
@@ -70,14 +73,16 @@ clientRoutes.get("/", requirePermission("clients.view"), async (c) => {
   const q = (c.req.query("q") ?? "").trim();
   const status = c.req.query("status");
   const cls = c.req.query("class");
+  const type = c.req.query("type");
+  const ref = c.req.query("referral");
   const sort = c.req.query("sort") === "contracts" ? "contract_count" : c.req.query("sort") === "billing" ? "billing_email" : "lower(c.name)";
   const dir = c.req.query("dir") === "desc" ? "desc" : "asc";
   const paged = c.req.query("page") !== undefined;
   const size = Math.min(100, Math.max(5, Number(c.req.query("size")) || 25));
   const page = Math.max(1, Number(c.req.query("page")) || 1);
   const where = `($1 = '' or c.name ilike '%' || $1 || '%' or c.legal_name ilike '%' || $1 || '%' or c.email ilike '%' || $1 || '%')
-        and ($2::text is null or c.status = $2) and ($3::text is null or c.class_key = $3)`;
-  const params = [q, status && ["active", "inactive", "prospect"].includes(status) ? status : null, cls || null];
+        and ($2::text is null or c.status = $2) and ($3::text is null or c.class_key = $3) and ($4::text is null or c.client_type = $4) and ($5::text is null or c.referral_source = $5)`;
+  const params = [q, status && ["active", "inactive", "prospect"].includes(status) ? status : null, cls || null, type === "business" || type === "individual" ? type : null, ref && ["word_of_mouth", "facebook", "website", "other"].includes(ref) ? ref : null];
   const r = await pool.query(
     `select c.*, p.name as parent_name, k.label_fr as class_label_fr, k.label_en as class_label_en, k.color as class_color,
             (select count(*)::int from client_contacts k2 where k2.client_id = c.id) as contact_count,
@@ -92,14 +97,20 @@ clientRoutes.get("/", requirePermission("clients.view"), async (c) => {
 
 clientRoutes.post("/", requirePermission("clients.edit"), async (c) => {
   const d = await body(c, ClientInput);
+  if (d.referralClientId && !(await pool.query("select 1 from clients where id = $1", [d.referralClientId])).rowCount) return c.json({ error: "unknown_referrer" }, 400);
+  if (d.parentId) {
+    if (!(await pool.query("select 1 from clients where id = $1", [d.parentId])).rowCount) return c.json({ error: "unknown_parent" }, 400);
+    const bad = await parentProblem(null, d.parentId);
+    if (bad) return c.json({ error: bad }, 400);
+  }
   const r = await pool.query(
-    `insert into clients (name, legal_name, parent_id, status, business_number, fiscal_year_end, phone, email, website, address, city, province, postal_code, notes, class_key, created_by,
-       identification_number, neq, ccq, rbq, tax_frequency, tax_date, das_frequency, das_date, software)
-     values ($1, coalesce($2,''), $3, coalesce($4,'active'), coalesce($5,''), coalesce($6,''), coalesce($7,''), coalesce($8,''), coalesce($9,''), coalesce($10,''), coalesce($11,''), coalesce($12,''), coalesce($13,''), coalesce($14,''), $15, $16,
-       coalesce($17,''), coalesce($18,''), coalesce($19,''), coalesce($20,''), coalesce($21,''), coalesce($22,''), coalesce($23,''), coalesce($24,''), coalesce($25,''))
+    `insert into clients (name, legal_name, parent_id, client_type, status, business_number, fiscal_year_end, phone, email, website, address, city, province, postal_code, notes, class_key, created_by,
+       identification_number, neq, ccq, rbq, tax_frequency, tax_date, das_frequency, das_date, software, referral_source, referral_name, referral_client_id, referral_detail)
+     values ($1, coalesce($2,''), $3, coalesce($26,'business'), coalesce($4,'active'), coalesce($5,''), coalesce($6,''), coalesce($7,''), coalesce($8,''), coalesce($9,''), coalesce($10,''), coalesce($11,''), coalesce($12,''), coalesce($13,''), coalesce($14,''), $15, $16,
+       coalesce($17,''), coalesce($18,''), coalesce($19,''), coalesce($20,''), coalesce($21,''), coalesce($22,''), coalesce($23,''), coalesce($24,''), coalesce($25,''), coalesce($27,''), coalesce($28,''), $29, coalesce($30,''))
      returning id`,
     [d.name, d.legalName, d.parentId ?? null, d.status, d.businessNumber, d.fiscalYearEnd, d.phone, d.email, d.website, d.address, d.city, d.province, d.postalCode, d.notes, d.classKey ?? null, auth(c).user.id,
-      d.identificationNumber, d.neq, d.ccq, d.rbq, d.taxFrequency, d.taxDate, d.dasFrequency, d.dasDate, d.software],
+      d.identificationNumber, d.neq, d.ccq, d.rbq, d.taxFrequency, d.taxDate, d.dasFrequency, d.dasDate, d.software, d.clientType, d.referralSource, d.referralName, d.referralClientId ?? null, d.referralDetail],
   );
   if (d.contactName?.trim()) {
     await pool.query("insert into client_contacts (client_id, name, email, phone, is_primary) values ($1, $2, $3, $4, true)", [r.rows[0].id, d.contactName.trim(), d.email ?? "", d.phone ?? ""]);
@@ -398,14 +409,18 @@ clientRoutes.get("/:id", requirePermission("clients.view"), async (c) => {
   const id = c.req.param("id");
   if (!isUuid(id)) return c.json({ error: "not found" }, 404);
   const r = await pool.query(
-    `select c.*, p.name as parent_name, k.label_fr as class_label_fr, k.label_en as class_label_en, k.color as class_color
-       from clients c left join clients p on p.id = c.parent_id left join client_classes k on k.key = c.class_key where c.id = $1`, [id]);
+    `select c.*, p.name as parent_name, rf.name as referral_client_name, k.label_fr as class_label_fr, k.label_en as class_label_en, k.color as class_color
+       from clients c left join clients p on p.id = c.parent_id left join clients rf on rf.id = c.referral_client_id left join client_classes k on k.key = c.class_key where c.id = $1`, [id]);
   if (!r.rows[0]) return c.json({ error: "not found" }, 404);
-  const [contacts, contracts, children] = await Promise.all([
+  const [contacts, contracts, children, rels] = await Promise.all([
     can(c, "clients.contacts.view") ? pool.query("select * from client_contacts where client_id = $1 order by is_primary desc, lower(name)", [id]) : { rows: [] },
     can(c, "clients.contracts.view") ? pool.query(
       `select k.*, (select count(*)::int from contract_services s where s.contract_id = k.id) as service_count from client_contracts k where k.client_id = $1 order by (k.status = 'active') desc, k.created_at desc`, [id]) : { rows: [] },
-    pool.query("select id, name, status from clients where parent_id = $1 order by lower(name)", [id]),
+    pool.query("select id, name, status, client_type from clients where parent_id = $1 order by lower(name)", [id]),
+    pool.query(
+      `select r.id, r.client_a, r.client_b, r.kind, r.label, o.id as other_id, o.name as other_name, o.client_type as other_type
+         from client_relations r join clients o on o.id = case when r.client_a = $1 then r.client_b else r.client_a end
+        where r.client_a = $1 or r.client_b = $1 order by lower(o.name)`, [id]),
   ]);
   const row = camel<Record<string, unknown>>(r.rows[0]);
   // The resource person is the tax follow-up "Ressource" (client_tracking), the single source of truth. Staff only (this route is staff-only).
@@ -415,7 +430,12 @@ clientRoutes.get("/:id", requirePermission("clients.view"), async (c) => {
   row.resource = rs ? { id: rs.id, name: rs.name ?? null, email: rs.email ?? null, phone: rs.phone ?? "", label: rs.label } : { id: null, name: null, email: null, phone: "", label: "" };
   // Billing settings are only for those who may edit them (terms, notes, auto-approval).
   if (!can(c, "clients.billing.manage", "accounting.invoices.view", "accounting.invoices.edit", "accounting.invoices.manage")) { delete row.termsDays; delete row.invoiceNotes; delete row.autoApproveKinds; delete row.poRequired; }
-  return c.json({ ...row, contacts: camelRows(contacts), contracts: camelRows(contracts), children: camelRows(children) });
+  const relations = rels.rows.flatMap((x) => {
+    const v = relationView({ a: x.client_a, b: x.client_b, kind: x.kind as RelationKind }, id);
+    return v ? [{ id: x.id, clientId: x.other_id, name: x.other_name, kind: v.kind, label: x.label, clientType: x.other_type }] : [];
+  });
+  const parent = r.rows[0].parent_id ? { id: r.rows[0].parent_id, name: r.rows[0].parent_name } : null;
+  return c.json({ ...row, contacts: camelRows(contacts), contracts: camelRows(contracts), children: camelRows(children), parent, relations });
 });
 
 clientRoutes.patch("/:id", requirePermission("clients.edit"), async (c) => {
@@ -424,7 +444,14 @@ clientRoutes.patch("/:id", requirePermission("clients.edit"), async (c) => {
   // Deactivating or re-parenting is a "manage" action (reference rule: a client with history is never deleted).
   if ((d.status !== undefined || d.parentId !== undefined) && !can(c, "clients.manage")) return c.json({ error: "forbidden" }, 403);
   if (BILLING_FIELDS_CLIENT.some((f) => (d as Record<string, unknown>)[f] !== undefined) && !can(c, "clients.billing.manage")) return c.json({ error: "forbidden" }, 403);
+  if (d.referralClientId === id) return c.json({ error: "a client cannot refer itself" }, 400);
+  if (d.referralClientId && !(await pool.query("select 1 from clients where id = $1", [d.referralClientId])).rowCount) return c.json({ error: "unknown_referrer" }, 400);
   if (d.parentId === id) return c.json({ error: "a client cannot be its own parent" }, 400);
+  if (d.parentId) {
+    if (!(await pool.query("select 1 from clients where id = $1", [d.parentId])).rowCount) return c.json({ error: "unknown_parent" }, 400);
+    const bad = await parentProblem(id, d.parentId);
+    if (bad) return c.json({ error: bad }, 400);
+  }
   if (d.classKey && !(await pool.query("select 1 from client_classes where key = $1", [d.classKey])).rowCount) return c.json({ error: "unknown_class" }, 400);
   const { sets, values } = buildUpdate(d, { ...COLS, ...BCOLS }, 2);
   if (!sets.length) return c.json({ error: "nothing to update" }, 400);
@@ -437,6 +464,48 @@ clientRoutes.patch("/:id", requirePermission("clients.edit"), async (c) => {
   if (r.rowCount && (d.status !== undefined || d.taxFrequency !== undefined || d.classKey !== undefined)) autoTasksSoon(id);
   return r.rowCount ? c.json({ ok: true }) : c.json({ error: "not found" }, 404);
 });
+/** Cycle / depth check for a new parent. `clientId` is null for a client being created. */
+async function parentProblem(clientId: string | null, parentId: string) {
+  const chain = (await pool.query(
+    `with recursive up as (select id, parent_id, 1 as d from clients where id = $1
+       union all select c.id, c.parent_id, up.d + 1 from clients c join up on c.id = up.parent_id where up.d < 20) select id from up order by d`, [parentId])).rows.map((x) => x.id as string);
+  let height = 0;
+  if (clientId) height = Number((await pool.query(
+    `with recursive down as (select id, 1 as d from clients where parent_id = $1
+       union all select c.id, down.d + 1 from clients c join down on c.parent_id = down.id where down.d < 20) select coalesce(max(d), 0) as h from down`, [clientId])).rows[0].h);
+  return hierarchyProblem(clientId ?? "", parentId, chain, height);
+}
+
+const RelationInput = z.object({ otherClientId: z.string().uuid(), kind: z.enum(RELATION_KINDS), label: z.string().max(80).optional() });
+clientRoutes.post("/:id/relations", requirePermission("clients.edit"), async (c) => {
+  const id = c.req.param("id");
+  if (!isUuid(id)) return c.json({ error: "not found" }, 404);
+  const d = await body(c, RelationInput);
+  if (d.otherClientId === id) return c.json({ error: "cannot_link_self" }, 400);
+  const both = await pool.query("select id, name from clients where id = any($1::uuid[])", [[id, d.otherClientId]]);
+  if (both.rowCount !== 2) return c.json({ error: "not found" }, 404);
+  const label = d.kind === "other" ? (d.label ?? "").trim() : "";
+  if (d.kind === "other" && !label) return c.json({ error: "label_required" }, 400);
+  const row = relationRow(id, d.otherClientId, d.kind);
+  const r = await pool.query(
+    `insert into client_relations (client_a, client_b, kind, label, created_by) values ($1, $2, $3, $4, $5)
+     on conflict (least(client_a::text, client_b::text), greatest(client_a::text, client_b::text), kind) do nothing returning id`,
+    [row.a, row.b, row.kind, label, auth(c).user.id]);
+  if (!r.rowCount) return c.json({ error: "already_linked" }, 409);
+  await audit("client.relation_added", { userId: auth(c).user.id, target: both.rows.map((x) => x.name).join(" / "), detail: { clientId: id, otherClientId: d.otherClientId, kind: d.kind, label } });
+  return c.json({ id: r.rows[0].id }, 201);
+});
+
+clientRoutes.delete("/relations/:rid", requirePermission("clients.edit"), async (c) => {
+  const rid = c.req.param("rid");
+  if (!isUuid(rid)) return c.json({ error: "not found" }, 404);
+  const r = await pool.query(
+    `delete from client_relations r using clients a, clients b where r.id = $1 and a.id = r.client_a and b.id = r.client_b returning r.kind, r.label, a.name as a_name, b.name as b_name`, [rid]);
+  if (!r.rowCount) return c.json({ error: "not found" }, 404);
+  await audit("client.relation_removed", { userId: auth(c).user.id, target: `${r.rows[0].a_name} / ${r.rows[0].b_name}`, detail: { kind: r.rows[0].kind, label: r.rows[0].label } });
+  return c.json({ ok: true });
+});
+
 const BILLING_FIELDS_CLIENT = ["billingEmail", "termsDays", "poRequired", "autoApproveKinds", "invoiceNotes"];
 
 /** The contact whose address is used for invoices: their email becomes the client's billing email and follows later edits. */

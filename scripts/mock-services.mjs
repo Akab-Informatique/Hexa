@@ -87,10 +87,19 @@ const server = http.createServer(async (req, res) => {
       { id: "AAMkAGMock0000001", subject: "Pièces justificatives T2", from: { emailAddress: { name: "Luc Lavoie", address: "luc@lavoie.example" } }, receivedDateTime: "2026-11-04T14:00:00Z", isRead: false, bodyPreview: "Voici les pièces demandées…", hasAttachments: true, webLink: "https://outlook.example/m1" },
       { id: "AAMkAGMock0000002", subject: "Question sur la TPS", from: { emailAddress: { name: "Marie Dupont", address: "marie@dupont.example" } }, receivedDateTime: "2026-11-03T10:30:00Z", isRead: true, bodyPreview: "Bonjour, une question…", hasAttachments: false, webLink: "https://outlook.example/m2" },
     ] });
+    const att = /^\/me\/messages\/([^/]+)\/attachments(?:\/([^/]+))?$/.exec(path);
+    if (att) {
+      const files = [
+        { "@odata.type": "#microsoft.graph.fileAttachment", id: "AATTMock0000001", name: "releve-t2.txt", size: 18, contentType: "text/plain", isInline: false, contentBytes: Buffer.from("releve bancaire T2").toString("base64") },
+        { "@odata.type": "#microsoft.graph.fileAttachment", id: "AATTMock0000002", name: "logo.png", size: 4, contentType: "image/png", isInline: true, contentBytes: Buffer.from("png!").toString("base64") },
+      ];
+      if (att[2]) { const f = files.find((x) => x.id === att[2]); return f ? send(res, 200, f) : send(res, 404, { error: { code: "NotFound" } }); }
+      return send(res, 200, { value: files.map(({ contentBytes, ...rest }) => rest) });
+    }
     const msg = /^\/me\/messages\/(.+)$/.exec(path);
     if (msg) {
       if (!req.headers.prefer?.includes('body-content-type="text"')) return send(res, 400, { error: { code: "MissingPrefer" } });
-      return send(res, 200, { id: msg[1], subject: "Pièces justificatives T2", from: { emailAddress: { name: "Luc Lavoie", address: "luc@lavoie.example" } }, toRecipients: [{ emailAddress: { address: "marie@acme.test" } }], receivedDateTime: "2026-11-04T14:00:00Z", body: { contentType: "text", content: "Bonjour,\nVoici les pièces demandées.\n<script>alert(1)</script>" }, webLink: "https://outlook.example/m1" });
+      return send(res, 200, { id: msg[1], hasAttachments: true, subject: "TR: Pièces justificatives T2", from: { emailAddress: { name: "Luc Lavoie", address: "luc@lavoie.example" } }, toRecipients: [{ emailAddress: { address: "marie@acme.test" } }], receivedDateTime: "2026-11-04T14:00:00Z", body: { contentType: "text", content: "Bonjour,\nVoici les pièces demandées.\n<script>alert(1)</script>" }, webLink: "https://outlook.example/m1" });
     }
     return send(res, 404, { error: { code: "NotFound" } });
   }

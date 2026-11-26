@@ -9,7 +9,8 @@ import { fmtDate, money, useL, useLocale } from "../../lib/l";
 import { Chip, confirmDo, Empty, errMsg, FormDialog, Tabs, useUsers, type FieldDef } from "../../components/kit";
 import { Modal, PageHeader } from "../../components/ui";
 import { TrackingView } from "./TrackingPage";
-import { ClassChip, clientFields, freqLabel, statusTone, type ClientClass } from "./ClientsPage";
+import { ClassChip, cleanClientBody, clientFields, freqLabel, referralLabel, statusTone, TypeChip, type ClientClass } from "./ClientsPage";
+import { ClientLinks, type Relation } from "./ClientLinks";
 import { viewLabel, viewTone } from "../accounting/InvoiceDialog";
 import { ContractWindow, NewContractDialog, codeText } from "./ContractWindow";
 import { ClientProducts } from "./ClientProducts";
@@ -20,7 +21,9 @@ interface Contract { id: string; name: string; kind: string; amount: number; hou
 interface Detail {
   id: string; name: string; legalName: string; status: "active" | "inactive" | "prospect"; parentId: string | null; parentName: string | null; classKey: string | null; classLabelFr: string | null; classLabelEn: string | null; classColor: string | null;
   billingEmail: string; billingContactId: string | null; termsDays?: number | null; poRequired?: boolean; autoApproveKinds?: string[]; invoiceNotes?: string;
-  resource?: { id: string | null; name: string | null; email: string | null; phone: string; label: string }; contacts: Contact[]; contracts: Contract[]; children: { id: string; name: string }[]; [k: string]: unknown;
+  resource?: { id: string | null; name: string | null; email: string | null; phone: string; label: string }; contacts: Contact[]; contracts: Contract[]; children: { id: string; name: string }[];
+  clientType: string; parent: { id: string; name: string } | null; relations: Relation[];
+  referralSource: string; referralName: string; referralClientId: string | null; referralClientName: string | null; referralDetail: string; [k: string]: unknown;
 }
 interface InvoiceRow { id: string; number: string; status: string; view: string; total: number; balance: number; issueDate: string; dueDate: string }
 type Tab = "info" | "contacts" | "contracts" | "tasks" | "invoices" | "billing" | "tracking";
@@ -74,7 +77,7 @@ export default function ClientDetail() {
     <>
       <Link to="/clients" className="mb-3 inline-flex items-center gap-1 text-sm text-muted no-underline hover:text-white"><ArrowLeft size={14} />{l("Clients", "Clients")}</Link>
       <PageHeader title={c.name} subtitle={c.legalName || undefined}
-        actions={<div className="flex items-center gap-2"><ClassChip fr={c.classLabelFr} en={c.classLabelEn} color={c.classColor} /><Chip tone={statusTone(c.status)}>● {c.status}</Chip>{can("clients.edit") && <button className="btn" onClick={() => setDialog({ kind: "client" })}><Pencil size={15} />{l("Modifier", "Edit")}</button>}</div>} />
+        actions={<div className="flex items-center gap-2"><TypeChip t={c.clientType} /><ClassChip fr={c.classLabelFr} en={c.classLabelEn} color={c.classColor} /><Chip tone={statusTone(c.status)}>● {c.status}</Chip>{can("clients.edit") && <button className="btn" onClick={() => setDialog({ kind: "client" })}><Pencil size={15} />{l("Modifier", "Edit")}</button>}</div>} />
       <div className="flex flex-wrap items-start gap-2">
         <Tabs tabs={ordered.map((k) => ({ key: k, label: labels[k] }))} value={active} onChange={setTab} />
         {can("clients.layout.manage") && <button className="btn !py-1.5 text-xs" onClick={() => setDialog({ kind: "order" })}>{l("Ordre des onglets", "Tab order")}</button>}
@@ -113,14 +116,18 @@ export default function ClientDetail() {
               <div className="flex items-center justify-between gap-3"><dt className="text-muted">{l("Classification", "Classification")}</dt>
                 <dd>{can("clients.edit") ? <select className="input !w-auto !py-1" value={c.classKey ?? ""} onChange={(e) => void run(() => api(`/api/clients/${id}`, { method: "PATCH", body: { classKey: e.target.value || null } }))}><option value="">—</option>{classes.data?.map((k) => <option key={k.key} value={k.key}>{l(k.labelFr, k.labelEn)}</option>)}</select> : <ClassChip fr={c.classLabelFr} en={c.classLabelEn} color={c.classColor} />}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-muted">{l("Adresse", "Address")}</dt><dd className="text-right">{[c.address, c.city, c.province, c.postalCode].filter(Boolean).join(", ") || "—"}</dd></div>
-              {c.parentName && <div className="flex justify-between gap-3"><dt className="text-muted">{l("Société mère", "Parent company")}</dt><dd><Link to={`/clients/${c.parentId}`}>{c.parentName}</Link></dd></div>}
+              {c.referralSource && <div className="flex justify-between gap-3"><dt className="text-muted">{l("Référence", "Referral")}</dt><dd className="text-right">{l(...referralLabel(c.referralSource)!)}
+                {c.referralSource === "word_of_mouth" && (c.referralClientId ? <> · <Link to={`/clients/${c.referralClientId}`}>{c.referralClientName}</Link></> : null)}
+                {c.referralSource === "word_of_mouth" && c.referralName ? ` · ${c.referralName}` : ""}{c.referralSource === "other" && c.referralDetail ? ` · ${c.referralDetail}` : ""}</dd></div>}
             </dl>
           </section>
-          <section className="glass p-5">
-            <h2 className="mb-2 font-semibold">{l("Notes", "Notes")}</h2>
-            <p className="whitespace-pre-wrap text-sm text-muted">{String(c.notes ?? "") || "—"}</p>
-            {c.children.length > 0 && <><h2 className="mb-2 mt-5 font-semibold">{l("Sociétés liées", "Subsidiaries")}</h2><div className="flex flex-wrap gap-2">{c.children.map((k) => <Link key={k.id} to={`/clients/${k.id}`} className="chip no-underline">{k.name}</Link>)}</div></>}
-          </section>
+          <div>
+            <ClientLinks clientId={id} parent={c.parent} children={c.children} relations={c.relations} onChanged={refresh} />
+            <section className="glass p-5">
+              <h2 className="mb-2 font-semibold">{l("Notes", "Notes")}</h2>
+              <p className="whitespace-pre-wrap text-sm text-muted">{String(c.notes ?? "") || "—"}</p>
+            </section>
+          </div>
         </div>
       )}
 
@@ -185,7 +192,7 @@ export default function ClientDetail() {
 
       {dialog?.kind === "client" && (
         <FormDialog title={l("Modifier le client", "Edit client")} fields={clientFields().filter((f) => can("clients.manage") || f.name !== "status")} wide initial={c as Record<string, unknown>}
-          onSubmit={async (v) => { const keep = clientFields().filter((f) => f.type !== "section").map((f) => f.name); const body = Object.fromEntries(Object.entries(v).filter(([k]) => keep.includes(k) && (k !== "status" || can("clients.manage")))); await api(`/api/clients/${id}`, { method: "PATCH", body }); await refresh(); }}
+          onSubmit={async (v) => { const keep = clientFields().filter((f) => f.type !== "section").map((f) => f.name); const body = cleanClientBody(Object.fromEntries(Object.entries(v).filter(([k]) => keep.includes(k) && (k !== "status" || can("clients.manage"))))); await api(`/api/clients/${id}`, { method: "PATCH", body }); await refresh(); }}
           onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === "contact" && (
